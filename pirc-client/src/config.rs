@@ -3,7 +3,15 @@
 //! Defines [`ClientConfig`] and its nested sub-structs for the `pirc` client.
 //! All structs derive `Serialize`, `Deserialize`, `Debug`, and `Clone`, and
 //! provide sensible defaults via [`Default`].
+//!
+//! The [`ClientConfig::load`] method handles file-based loading with automatic
+//! path discovery, and [`ClientConfig::validate`] ensures all values are within
+//! acceptable ranges.
 
+use std::path::Path;
+
+use pirc_common::config::default_client_config_path;
+use pirc_common::{Nickname, PircError};
 use serde::{Deserialize, Serialize};
 
 /// Top-level client configuration.
@@ -15,6 +23,81 @@ pub struct ClientConfig {
     pub ui: UiConfig,
     pub scripting: ScriptingConfig,
     pub plugins: PluginsConfig,
+}
+
+impl ClientConfig {
+    /// Loads configuration from the given path, or auto-discovers from default paths.
+    ///
+    /// If an explicit path is provided and the file does not exist, returns an error.
+    /// If no path is provided, attempts to discover a config file from the default
+    /// location (`$XDG_CONFIG_HOME/pirc/pirc.toml` or `~/.pirc/pirc.toml`).
+    /// If no config file exists, returns the default configuration for zero-config startup.
+    pub fn load(path: Option<&Path>) -> pirc_common::Result<Self> {
+        let config_path = match path {
+            Some(p) => {
+                if !p.exists() {
+                    return Err(PircError::ConfigError {
+                        message: format!("config file not found: {}", p.display()),
+                    });
+                }
+                p.to_path_buf()
+            }
+            None => match default_client_config_path() {
+                Some(p) if p.exists() => p,
+                _ => return Ok(Self::default()),
+            },
+        };
+
+        let contents =
+            std::fs::read_to_string(&config_path).map_err(|e| PircError::ConfigError {
+                message: format!("failed to read {}: {e}", config_path.display()),
+            })?;
+
+        let config: Self =
+            toml::from_str(&contents).map_err(|e| PircError::ConfigError {
+                message: format!("failed to parse {}: {e}", config_path.display()),
+            })?;
+
+        Ok(config)
+    }
+
+    /// Validates the configuration values are within acceptable ranges.
+    ///
+    /// Returns `Ok(())` if all values are valid, or a `ConfigError` describing
+    /// the first invalid value encountered.
+    pub fn validate(&self) -> pirc_common::Result<()> {
+        if self.server.port == 0 {
+            return Err(PircError::ConfigError {
+                message: "port must be between 1 and 65535".into(),
+            });
+        }
+
+        if let Some(ref nick) = self.identity.nick {
+            Nickname::new(nick).map_err(|e| PircError::ConfigError {
+                message: format!("invalid nick '{}': {e}", nick),
+            })?;
+        }
+
+        for alt in &self.identity.alt_nicks {
+            Nickname::new(alt).map_err(|e| PircError::ConfigError {
+                message: format!("invalid alt nick '{}': {e}", alt),
+            })?;
+        }
+
+        if self.ui.scrollback_lines == 0 {
+            return Err(PircError::ConfigError {
+                message: "scrollback_lines must be greater than 0".into(),
+            });
+        }
+
+        if self.server.reconnect_delay_secs == 0 {
+            return Err(PircError::ConfigError {
+                message: "reconnect_delay_secs must be greater than 0".into(),
+            });
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for ClientConfig {
@@ -129,6 +212,138 @@ impl Default for PluginsConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    // ---- Load tests ----
+
+    #[test]
+    fn load_returns_defaults_when_no_config_exists() {
+        let config = ClientConfig::load(None).expect("load defaults");
+        assert_eq!(config.server.address, "localhost");
+        assert_eq!(config.server.port, 6667);
+        assert!(!config.server.tls);
+        assert!(config.identity.nick.is_none());
+    }
+
+    #[test]
+    fn load_from_explicit_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pirc.toml");
+        let mut f = std::fs::File::create(&path).expect("create file");
+        f.write_all(
+            br#"
+[server]
+address = "irc.example.com"
+port = 6697
+tls = true
+
+[identity]
+nick = "rustacean"
+alt_nicks = ["rustacean_", "rustacean__"]
+"#,
+        )
+        .expect("write");
+
+        let config = ClientConfig::load(Some(&path)).expect("load from file");
+        assert_eq!(config.server.address, "irc.example.com");
+        assert_eq!(config.server.port, 6697);
+        assert!(config.server.tls);
+        assert_eq!(config.identity.nick.as_deref(), Some("rustacean"));
+        assert_eq!(config.identity.alt_nicks.len(), 2);
+        // Defaults for unset fields
+        assert!(config.server.auto_reconnect);
+        assert_eq!(config.server.reconnect_delay_secs, 5);
+        assert_eq!(config.ui.scrollback_lines, 1000);
+    }
+
+    #[test]
+    fn load_from_nonexistent_path_returns_error() {
+        let result = ClientConfig::load(Some(Path::new("/tmp/nonexistent_pirc_client_config.toml")));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("config file not found"));
+    }
+
+    #[test]
+    fn load_from_invalid_toml_returns_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("bad.toml");
+        std::fs::write(&path, "this is not valid { toml }}}").expect("write");
+
+        let result = ClientConfig::load(Some(&path));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("failed to parse"));
+    }
+
+    // ---- Validate tests ----
+
+    #[test]
+    fn validate_defaults_pass() {
+        let config = ClientConfig::default();
+        config.validate().expect("defaults should be valid");
+    }
+
+    #[test]
+    fn validate_port_zero() {
+        let mut config = ClientConfig::default();
+        config.server.port = 0;
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("port must be between 1 and 65535"));
+    }
+
+    #[test]
+    fn validate_invalid_nick() {
+        let mut config = ClientConfig::default();
+        config.identity.nick = Some("123invalid".into());
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("invalid nick"));
+    }
+
+    #[test]
+    fn validate_valid_nick() {
+        let mut config = ClientConfig::default();
+        config.identity.nick = Some("validnick".into());
+        config.validate().expect("valid nick should pass");
+    }
+
+    #[test]
+    fn validate_invalid_alt_nick() {
+        let mut config = ClientConfig::default();
+        config.identity.alt_nicks = vec!["good".into(), "123bad".into()];
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("invalid alt nick"));
+    }
+
+    #[test]
+    fn validate_valid_alt_nicks() {
+        let mut config = ClientConfig::default();
+        config.identity.alt_nicks = vec!["nick1".into(), "nick2".into()];
+        config.validate().expect("valid alt nicks should pass");
+    }
+
+    #[test]
+    fn validate_scrollback_lines_zero() {
+        let mut config = ClientConfig::default();
+        config.ui.scrollback_lines = 0;
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("scrollback_lines must be greater than 0"));
+    }
+
+    #[test]
+    fn validate_reconnect_delay_zero() {
+        let mut config = ClientConfig::default();
+        config.server.reconnect_delay_secs = 0;
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("reconnect_delay_secs must be greater than 0"));
+    }
+
+    #[test]
+    fn validate_no_nick_passes() {
+        let config = ClientConfig::default();
+        assert!(config.identity.nick.is_none());
+        config.validate().expect("no nick should be valid");
+    }
 
     // ---- Default value tests ----
 

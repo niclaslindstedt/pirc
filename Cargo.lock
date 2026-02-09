@@ -152,6 +152,7 @@ dependencies = [
  "pirc-protocol",
  "pirc-scripting",
  "serde",
+ "tempfile",
  "toml",
 ]
 
