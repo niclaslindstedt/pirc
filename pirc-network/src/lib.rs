@@ -23,5 +23,6 @@ pub mod pool;
 pub mod shutdown;
 
 pub use connection::{AsyncTransport, Connection, ConnectionInfo};
+pub use connector::{Connector, ReconnectPolicy, ReconnectingConnector};
 pub use error::NetworkError;
 pub use listener::Listener;
