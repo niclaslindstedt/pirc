@@ -3,7 +3,16 @@
 //! Defines [`ServerConfig`] and its nested sub-structs for the `pircd` server.
 //! All structs derive `Serialize`, `Deserialize`, `Debug`, and `Clone`, and
 //! provide sensible defaults via [`Default`].
+//!
+//! The [`ServerConfig::load`] method handles file-based loading with automatic
+//! path discovery, and [`ServerConfig::validate`] ensures all values are within
+//! acceptable ranges.
 
+use std::net::IpAddr;
+use std::path::Path;
+
+use pirc_common::config::default_server_config_path;
+use pirc_common::PircError;
 use serde::{Deserialize, Serialize};
 
 /// Top-level server configuration.
@@ -15,6 +24,95 @@ pub struct ServerConfig {
     pub cluster: ClusterConfig,
     pub motd: MotdConfig,
     pub log_level: String,
+}
+
+impl ServerConfig {
+    /// Loads configuration from the given path, or auto-discovers from default paths.
+    ///
+    /// If an explicit path is provided and the file does not exist, returns an error.
+    /// If no path is provided, attempts to discover a config file from the default
+    /// locations (`$XDG_CONFIG_HOME/pirc/pircd.toml`, `~/.pirc/pircd.toml`,
+    /// `/etc/pirc/pircd.toml`). If no config file exists at any location, returns
+    /// the default configuration for zero-config startup.
+    pub fn load(path: Option<&Path>) -> pirc_common::Result<Self> {
+        let config_path = match path {
+            Some(p) => {
+                if !p.exists() {
+                    return Err(PircError::ConfigError {
+                        message: format!("config file not found: {}", p.display()),
+                    });
+                }
+                p.to_path_buf()
+            }
+            None => match default_server_config_path() {
+                Some(p) if p.exists() => p,
+                _ => return Ok(Self::default()),
+            },
+        };
+
+        let contents = std::fs::read_to_string(&config_path).map_err(|e| PircError::ConfigError {
+            message: format!("failed to read {}: {e}", config_path.display()),
+        })?;
+
+        let config: Self = toml::from_str(&contents).map_err(|e| PircError::ConfigError {
+            message: format!("failed to parse {}: {e}", config_path.display()),
+        })?;
+
+        Ok(config)
+    }
+
+    /// Validates the configuration values are within acceptable ranges.
+    ///
+    /// Returns `Ok(())` if all values are valid, or a `ConfigError` describing
+    /// the first invalid value encountered.
+    pub fn validate(&self) -> pirc_common::Result<()> {
+        if self.network.port == 0 {
+            return Err(PircError::ConfigError {
+                message: "port must be between 1 and 65535".into(),
+            });
+        }
+
+        if self.network.bind_address.parse::<IpAddr>().is_err() {
+            return Err(PircError::ConfigError {
+                message: format!(
+                    "bind_address '{}' is not a valid IP address",
+                    self.network.bind_address
+                ),
+            });
+        }
+
+        if self.network.max_connections == 0 {
+            return Err(PircError::ConfigError {
+                message: "max_connections must be greater than 0".into(),
+            });
+        }
+
+        if self.limits.max_nick_length == 0 || self.limits.max_nick_length > 30 {
+            return Err(PircError::ConfigError {
+                message: "max_nick_length must be between 1 and 30".into(),
+            });
+        }
+
+        if self.limits.max_channel_name_length < 2 || self.limits.max_channel_name_length > 50 {
+            return Err(PircError::ConfigError {
+                message: "max_channel_name_length must be between 2 and 50".into(),
+            });
+        }
+
+        if self.cluster.enabled && self.cluster.node_id.is_none() {
+            return Err(PircError::ConfigError {
+                message: "cluster.node_id must be set when cluster is enabled".into(),
+            });
+        }
+
+        if let Some(ref motd_path) = self.motd.path {
+            if !Path::new(motd_path).exists() {
+                eprintln!("warning: motd path does not exist: {motd_path}");
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for ServerConfig {
@@ -120,6 +218,159 @@ impl Default for MotdConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    // ---- Load tests ----
+
+    #[test]
+    fn load_returns_defaults_when_no_config_exists() {
+        let config = ServerConfig::load(None).expect("load defaults");
+        assert_eq!(config.network.port, 6667);
+        assert_eq!(config.network.bind_address, "0.0.0.0");
+        assert_eq!(config.log_level, "info");
+    }
+
+    #[test]
+    fn load_from_explicit_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pircd.toml");
+        let mut f = std::fs::File::create(&path).expect("create file");
+        f.write_all(
+            br#"
+log_level = "debug"
+
+[network]
+port = 6697
+bind_address = "127.0.0.1"
+"#,
+        )
+        .expect("write");
+
+        let config = ServerConfig::load(Some(&path)).expect("load from file");
+        assert_eq!(config.log_level, "debug");
+        assert_eq!(config.network.port, 6697);
+        assert_eq!(config.network.bind_address, "127.0.0.1");
+        // Defaults for unset fields
+        assert_eq!(config.network.max_connections, 1000);
+        assert_eq!(config.limits.max_nick_length, 30);
+    }
+
+    #[test]
+    fn load_from_nonexistent_path_returns_error() {
+        let result = ServerConfig::load(Some(Path::new("/tmp/nonexistent_pirc_config.toml")));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("config file not found"));
+    }
+
+    #[test]
+    fn load_from_invalid_toml_returns_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("bad.toml");
+        std::fs::write(&path, "this is not valid { toml }}}").expect("write");
+
+        let result = ServerConfig::load(Some(&path));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("failed to parse"));
+    }
+
+    // ---- Validate tests ----
+
+    #[test]
+    fn validate_defaults_pass() {
+        let config = ServerConfig::default();
+        config.validate().expect("defaults should be valid");
+    }
+
+    #[test]
+    fn validate_port_zero() {
+        let mut config = ServerConfig::default();
+        config.network.port = 0;
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("port must be between 1 and 65535"));
+    }
+
+    #[test]
+    fn validate_invalid_bind_address() {
+        let mut config = ServerConfig::default();
+        config.network.bind_address = "not-an-ip".into();
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("not a valid IP address"));
+    }
+
+    #[test]
+    fn validate_max_connections_zero() {
+        let mut config = ServerConfig::default();
+        config.network.max_connections = 0;
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("max_connections must be greater than 0"));
+    }
+
+    #[test]
+    fn validate_max_nick_length_zero() {
+        let mut config = ServerConfig::default();
+        config.limits.max_nick_length = 0;
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("max_nick_length must be between 1 and 30"));
+    }
+
+    #[test]
+    fn validate_max_nick_length_too_large() {
+        let mut config = ServerConfig::default();
+        config.limits.max_nick_length = 31;
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("max_nick_length must be between 1 and 30"));
+    }
+
+    #[test]
+    fn validate_max_channel_name_length_too_small() {
+        let mut config = ServerConfig::default();
+        config.limits.max_channel_name_length = 1;
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("max_channel_name_length must be between 2 and 50"));
+    }
+
+    #[test]
+    fn validate_max_channel_name_length_too_large() {
+        let mut config = ServerConfig::default();
+        config.limits.max_channel_name_length = 51;
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("max_channel_name_length must be between 2 and 50"));
+    }
+
+    #[test]
+    fn validate_cluster_enabled_without_node_id() {
+        let mut config = ServerConfig::default();
+        config.cluster.enabled = true;
+        config.cluster.node_id = None;
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("cluster.node_id must be set"));
+    }
+
+    #[test]
+    fn validate_cluster_enabled_with_node_id() {
+        let mut config = ServerConfig::default();
+        config.cluster.enabled = true;
+        config.cluster.node_id = Some("node-1".into());
+        config.validate().expect("cluster with node_id should be valid");
+    }
+
+    #[test]
+    fn validate_ipv6_bind_address() {
+        let mut config = ServerConfig::default();
+        config.network.bind_address = "::1".into();
+        config.validate().expect("IPv6 address should be valid");
+    }
+
+    #[test]
+    fn validate_motd_nonexistent_path_is_warning_not_error() {
+        let mut config = ServerConfig::default();
+        config.motd.path = Some("/tmp/nonexistent_pirc_motd.txt".into());
+        config.validate().expect("nonexistent motd path should warn but not error");
+    }
+
+    // ---- Existing default tests ----
 
     #[test]
     fn server_config_defaults() {
