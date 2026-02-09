@@ -11,10 +11,9 @@ fn parse_config_path() -> Option<PathBuf> {
         if args[i] == "--config" {
             if i + 1 < args.len() {
                 return Some(PathBuf::from(&args[i + 1]));
-            } else {
-                eprintln!("error: --config requires a path argument");
-                process::exit(1);
             }
+            eprintln!("error: --config requires a path argument");
+            process::exit(1);
         }
         i += 1;
     }
@@ -38,7 +37,10 @@ fn main() {
     }
 
     let cluster_status = if config.cluster.enabled {
-        format!("enabled (node: {})", config.cluster.node_id.as_deref().unwrap_or("unknown"))
+        format!(
+            "enabled (node: {})",
+            config.cluster.node_id.as_deref().unwrap_or("unknown")
+        )
     } else {
         "disabled".to_string()
     };

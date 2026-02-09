@@ -50,9 +50,10 @@ impl ServerConfig {
             },
         };
 
-        let contents = std::fs::read_to_string(&config_path).map_err(|e| PircError::ConfigError {
-            message: format!("failed to read {}: {e}", config_path.display()),
-        })?;
+        let contents =
+            std::fs::read_to_string(&config_path).map_err(|e| PircError::ConfigError {
+                message: format!("failed to read {}: {e}", config_path.display()),
+            })?;
 
         let config: Self = toml::from_str(&contents).map_err(|e| PircError::ConfigError {
             message: format!("failed to parse {}: {e}", config_path.display()),
@@ -159,6 +160,7 @@ pub struct TlsConfig {
 /// Resource limits for the server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[allow(clippy::struct_field_names)]
 pub struct LimitsConfig {
     pub max_channels_per_user: u32,
     pub max_nick_length: u32,
@@ -178,7 +180,7 @@ impl Default for LimitsConfig {
 }
 
 /// Cluster configuration for multi-node deployments.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClusterConfig {
     pub enabled: bool,
@@ -187,32 +189,12 @@ pub struct ClusterConfig {
     pub raft_port: Option<u16>,
 }
 
-impl Default for ClusterConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            node_id: None,
-            peers: Vec::new(),
-            raft_port: None,
-        }
-    }
-}
-
 /// Message of the Day configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MotdConfig {
     pub path: Option<String>,
     pub text: Option<String>,
-}
-
-impl Default for MotdConfig {
-    fn default() -> Self {
-        Self {
-            path: None,
-            text: None,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -304,7 +286,9 @@ bind_address = "127.0.0.1"
         let mut config = ServerConfig::default();
         config.network.max_connections = 0;
         let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("max_connections must be greater than 0"));
+        assert!(err
+            .to_string()
+            .contains("max_connections must be greater than 0"));
     }
 
     #[test]
@@ -312,7 +296,9 @@ bind_address = "127.0.0.1"
         let mut config = ServerConfig::default();
         config.limits.max_nick_length = 0;
         let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("max_nick_length must be between 1 and 30"));
+        assert!(err
+            .to_string()
+            .contains("max_nick_length must be between 1 and 30"));
     }
 
     #[test]
@@ -320,7 +306,9 @@ bind_address = "127.0.0.1"
         let mut config = ServerConfig::default();
         config.limits.max_nick_length = 31;
         let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("max_nick_length must be between 1 and 30"));
+        assert!(err
+            .to_string()
+            .contains("max_nick_length must be between 1 and 30"));
     }
 
     #[test]
@@ -328,7 +316,9 @@ bind_address = "127.0.0.1"
         let mut config = ServerConfig::default();
         config.limits.max_channel_name_length = 1;
         let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("max_channel_name_length must be between 2 and 50"));
+        assert!(err
+            .to_string()
+            .contains("max_channel_name_length must be between 2 and 50"));
     }
 
     #[test]
@@ -336,7 +326,9 @@ bind_address = "127.0.0.1"
         let mut config = ServerConfig::default();
         config.limits.max_channel_name_length = 51;
         let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("max_channel_name_length must be between 2 and 50"));
+        assert!(err
+            .to_string()
+            .contains("max_channel_name_length must be between 2 and 50"));
     }
 
     #[test]
@@ -353,7 +345,9 @@ bind_address = "127.0.0.1"
         let mut config = ServerConfig::default();
         config.cluster.enabled = true;
         config.cluster.node_id = Some("node-1".into());
-        config.validate().expect("cluster with node_id should be valid");
+        config
+            .validate()
+            .expect("cluster with node_id should be valid");
     }
 
     #[test]
@@ -367,7 +361,9 @@ bind_address = "127.0.0.1"
     fn validate_motd_nonexistent_path_is_warning_not_error() {
         let mut config = ServerConfig::default();
         config.motd.path = Some("/tmp/nonexistent_pirc_motd.txt".into());
-        config.validate().expect("nonexistent motd path should warn but not error");
+        config
+            .validate()
+            .expect("nonexistent motd path should warn but not error");
     }
 
     // ---- Existing default tests ----
@@ -416,8 +412,14 @@ bind_address = "127.0.0.1"
         assert_eq!(parsed.log_level, config.log_level);
         assert_eq!(parsed.network.bind_address, config.network.bind_address);
         assert_eq!(parsed.network.port, config.network.port);
-        assert_eq!(parsed.network.max_connections, config.network.max_connections);
-        assert_eq!(parsed.limits.max_channels_per_user, config.limits.max_channels_per_user);
+        assert_eq!(
+            parsed.network.max_connections,
+            config.network.max_connections
+        );
+        assert_eq!(
+            parsed.limits.max_channels_per_user,
+            config.limits.max_channels_per_user
+        );
         assert_eq!(parsed.limits.max_nick_length, config.limits.max_nick_length);
         assert_eq!(parsed.cluster.enabled, config.cluster.enabled);
         assert!(parsed.cluster.peers.is_empty());
@@ -445,10 +447,7 @@ bind_address = "127.0.0.1"
             cluster: ClusterConfig {
                 enabled: true,
                 node_id: Some(String::from("node-1")),
-                peers: vec![
-                    String::from("10.0.0.2:7000"),
-                    String::from("10.0.0.3:7000"),
-                ],
+                peers: vec![String::from("10.0.0.2:7000"), String::from("10.0.0.3:7000")],
                 raft_port: Some(7000),
             },
             motd: MotdConfig {

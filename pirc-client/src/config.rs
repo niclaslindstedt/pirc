@@ -15,7 +15,7 @@ use pirc_common::{Nickname, PircError};
 use serde::{Deserialize, Serialize};
 
 /// Top-level client configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClientConfig {
     pub server: ServerConnection,
@@ -53,10 +53,9 @@ impl ClientConfig {
                 message: format!("failed to read {}: {e}", config_path.display()),
             })?;
 
-        let config: Self =
-            toml::from_str(&contents).map_err(|e| PircError::ConfigError {
-                message: format!("failed to parse {}: {e}", config_path.display()),
-            })?;
+        let config: Self = toml::from_str(&contents).map_err(|e| PircError::ConfigError {
+            message: format!("failed to parse {}: {e}", config_path.display()),
+        })?;
 
         Ok(config)
     }
@@ -74,13 +73,13 @@ impl ClientConfig {
 
         if let Some(ref nick) = self.identity.nick {
             Nickname::new(nick).map_err(|e| PircError::ConfigError {
-                message: format!("invalid nick '{}': {e}", nick),
+                message: format!("invalid nick '{nick}': {e}"),
             })?;
         }
 
         for alt in &self.identity.alt_nicks {
             Nickname::new(alt).map_err(|e| PircError::ConfigError {
-                message: format!("invalid alt nick '{}': {e}", alt),
+                message: format!("invalid alt nick '{alt}': {e}"),
             })?;
         }
 
@@ -97,18 +96,6 @@ impl ClientConfig {
         }
 
         Ok(())
-    }
-}
-
-impl Default for ClientConfig {
-    fn default() -> Self {
-        Self {
-            server: ServerConnection::default(),
-            identity: IdentityConfig::default(),
-            ui: UiConfig::default(),
-            scripting: ScriptingConfig::default(),
-            plugins: PluginsConfig::default(),
-        }
     }
 }
 
@@ -136,22 +123,12 @@ impl Default for ServerConnection {
 }
 
 /// User identity settings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct IdentityConfig {
     pub nick: Option<String>,
     pub alt_nicks: Vec<String>,
     pub realname: Option<String>,
-}
-
-impl Default for IdentityConfig {
-    fn default() -> Self {
-        Self {
-            nick: None,
-            alt_nicks: Vec::new(),
-            realname: None,
-        }
-    }
 }
 
 /// UI display settings.
@@ -258,7 +235,8 @@ alt_nicks = ["rustacean_", "rustacean__"]
 
     #[test]
     fn load_from_nonexistent_path_returns_error() {
-        let result = ClientConfig::load(Some(Path::new("/tmp/nonexistent_pirc_client_config.toml")));
+        let result =
+            ClientConfig::load(Some(Path::new("/tmp/nonexistent_pirc_client_config.toml")));
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("config file not found"));
@@ -327,7 +305,9 @@ alt_nicks = ["rustacean_", "rustacean__"]
         let mut config = ClientConfig::default();
         config.ui.scrollback_lines = 0;
         let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("scrollback_lines must be greater than 0"));
+        assert!(err
+            .to_string()
+            .contains("scrollback_lines must be greater than 0"));
     }
 
     #[test]
@@ -335,7 +315,9 @@ alt_nicks = ["rustacean_", "rustacean__"]
         let mut config = ClientConfig::default();
         config.server.reconnect_delay_secs = 0;
         let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("reconnect_delay_secs must be greater than 0"));
+        assert!(err
+            .to_string()
+            .contains("reconnect_delay_secs must be greater than 0"));
     }
 
     #[test]
@@ -400,7 +382,10 @@ alt_nicks = ["rustacean_", "rustacean__"]
         assert_eq!(parsed.server.port, config.server.port);
         assert_eq!(parsed.server.tls, config.server.tls);
         assert_eq!(parsed.server.auto_reconnect, config.server.auto_reconnect);
-        assert_eq!(parsed.server.reconnect_delay_secs, config.server.reconnect_delay_secs);
+        assert_eq!(
+            parsed.server.reconnect_delay_secs,
+            config.server.reconnect_delay_secs
+        );
         assert_eq!(parsed.identity.nick, config.identity.nick);
         assert!(parsed.identity.alt_nicks.is_empty());
         assert_eq!(parsed.identity.realname, config.identity.realname);
@@ -463,9 +448,15 @@ alt_nicks = ["rustacean_", "rustacean__"]
         assert_eq!(parsed.ui.scrollback_lines, 5000);
         assert!(!parsed.ui.show_joins_parts);
         assert!(!parsed.scripting.enabled);
-        assert_eq!(parsed.scripting.scripts_dir.as_deref(), Some("/home/user/.pirc/scripts"));
+        assert_eq!(
+            parsed.scripting.scripts_dir.as_deref(),
+            Some("/home/user/.pirc/scripts")
+        );
         assert!(!parsed.plugins.enabled);
-        assert_eq!(parsed.plugins.plugins_dir.as_deref(), Some("/home/user/.pirc/plugins"));
+        assert_eq!(
+            parsed.plugins.plugins_dir.as_deref(),
+            Some("/home/user/.pirc/plugins")
+        );
     }
 
     #[test]

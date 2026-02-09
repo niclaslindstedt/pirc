@@ -186,6 +186,7 @@ name = "pirc-protocol"
 version = "0.1.0"
 dependencies = [
  "pirc-common",
+ "thiserror",
 ]
 
 [[package]]
