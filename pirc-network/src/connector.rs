@@ -86,7 +86,10 @@ impl ReconnectPolicy {
     /// Compute the delay for the given attempt number (0-indexed).
     fn delay_for_attempt(&self, attempt: u32) -> Duration {
         let base = self.initial_delay.as_secs_f64();
-        let delay_secs = base * self.backoff_factor.powi(i32::try_from(attempt).unwrap_or(i32::MAX));
+        let delay_secs = base
+            * self
+                .backoff_factor
+                .powi(i32::try_from(attempt).unwrap_or(i32::MAX));
         let delay = Duration::from_secs_f64(delay_secs);
         delay.min(self.max_delay)
     }
@@ -129,10 +132,7 @@ impl ReconnectingConnector {
     /// delay (up to `max_delay`) before retrying. The last error is returned
     /// when all retries are exhausted.
     #[instrument(skip(self), fields(%addr))]
-    pub async fn connect_with_retry(
-        &self,
-        addr: SocketAddr,
-    ) -> Result<Connection, NetworkError> {
+    pub async fn connect_with_retry(&self, addr: SocketAddr) -> Result<Connection, NetworkError> {
         let mut attempt: u32 = 0;
 
         loop {
@@ -144,10 +144,8 @@ impl ReconnectingConnector {
                     return Ok(conn);
                 }
                 Err(err) => {
-                    let retries_exhausted = self
-                        .policy
-                        .max_retries
-                        .is_some_and(|max| attempt >= max);
+                    let retries_exhausted =
+                        self.policy.max_retries.is_some_and(|max| attempt >= max);
 
                     if retries_exhausted {
                         warn!(attempt, %err, "all retries exhausted");
@@ -288,10 +286,7 @@ mod tests {
         let listener = loopback_listener().await;
         let addr = listener.local_addr().unwrap();
 
-        let rc = ReconnectingConnector::new(
-            Connector::new(),
-            ReconnectPolicy::default(),
-        );
+        let rc = ReconnectingConnector::new(Connector::new(), ReconnectPolicy::default());
 
         let conn = rc.connect_with_retry(addr).await.unwrap();
         assert_eq!(conn.info().peer_addr.port(), addr.port());
@@ -319,10 +314,8 @@ mod tests {
             backoff_factor: 1.5,
         };
 
-        let rc = ReconnectingConnector::new(
-            Connector::with_timeout(Duration::from_millis(200)),
-            policy,
-        );
+        let rc =
+            ReconnectingConnector::new(Connector::with_timeout(Duration::from_millis(200)), policy);
 
         let conn = rc.connect_with_retry(addr).await.unwrap();
         assert_eq!(conn.info().peer_addr.port(), addr.port());
@@ -345,10 +338,8 @@ mod tests {
             backoff_factor: 2.0,
         };
 
-        let rc = ReconnectingConnector::new(
-            Connector::with_timeout(Duration::from_millis(100)),
-            policy,
-        );
+        let rc =
+            ReconnectingConnector::new(Connector::with_timeout(Duration::from_millis(100)), policy);
 
         let result = rc.connect_with_retry(addr).await;
         assert!(result.is_err());
@@ -374,10 +365,8 @@ mod tests {
             backoff_factor: 1.5,
         };
 
-        let rc = ReconnectingConnector::new(
-            Connector::with_timeout(Duration::from_millis(100)),
-            policy,
-        );
+        let rc =
+            ReconnectingConnector::new(Connector::with_timeout(Duration::from_millis(100)), policy);
 
         let conn = rc.connect_with_retry(addr).await.unwrap();
         assert_eq!(conn.info().peer_addr.port(), addr.port());
@@ -387,10 +376,7 @@ mod tests {
 
     #[tokio::test]
     async fn reconnecting_connector_debug_impl() {
-        let rc = ReconnectingConnector::new(
-            Connector::new(),
-            ReconnectPolicy::default(),
-        );
+        let rc = ReconnectingConnector::new(Connector::new(), ReconnectPolicy::default());
         let debug_str = format!("{rc:?}");
         assert!(debug_str.contains("ReconnectingConnector"));
         assert!(debug_str.contains("Connector"));

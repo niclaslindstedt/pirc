@@ -159,11 +159,10 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
-        let (client_stream, server_stream) =
-            tokio::try_join!(TcpStream::connect(addr), async {
-                listener.accept().await.map(|(s, _)| s)
-            })
-            .unwrap();
+        let (client_stream, server_stream) = tokio::try_join!(TcpStream::connect(addr), async {
+            listener.accept().await.map(|(s, _)| s)
+        })
+        .unwrap();
 
         let client = Connection::new(client_stream).unwrap();
         let server = Connection::new(server_stream).unwrap();

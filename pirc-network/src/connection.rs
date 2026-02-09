@@ -83,9 +83,7 @@ pub trait AsyncTransport {
     ) -> impl std::future::Future<Output = Result<Option<Message>, NetworkError>> + Send;
 
     /// Gracefully shut down the transport (flush pending writes, then close).
-    fn shutdown(
-        &mut self,
-    ) -> impl std::future::Future<Output = Result<(), NetworkError>> + Send;
+    fn shutdown(&mut self) -> impl std::future::Future<Output = Result<(), NetworkError>> + Send;
 
     /// Returns the remote peer address.
     fn peer_addr(&self) -> Result<SocketAddr, NetworkError>;
@@ -186,11 +184,10 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
-        let (client_stream, server_stream) =
-            tokio::try_join!(TcpStream::connect(addr), async {
-                listener.accept().await.map(|(s, _)| s)
-            })
-            .unwrap();
+        let (client_stream, server_stream) = tokio::try_join!(TcpStream::connect(addr), async {
+            listener.accept().await.map(|(s, _)| s)
+        })
+        .unwrap();
 
         let client = Connection::new(client_stream).unwrap();
         let server = Connection::new(server_stream).unwrap();

@@ -26,6 +26,14 @@ pub enum NetworkError {
     /// The connection pool has no available connections.
     #[error("connection pool exhausted")]
     PoolExhausted,
+
+    /// A bounded channel is full and cannot accept more messages.
+    #[error("channel full")]
+    ChannelFull,
+
+    /// A bounded channel has been closed (receiver dropped).
+    #[error("channel closed")]
+    ChannelClosed,
 }
 
 impl From<NetworkError> for pirc_common::PircError {

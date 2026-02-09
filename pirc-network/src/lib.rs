@@ -14,6 +14,7 @@
 //! - [`shutdown`] — Graceful shutdown coordination
 //! - [`error`] — Error types for the networking layer
 
+pub mod backpressure;
 pub mod codec;
 pub mod connection;
 pub mod connector;
@@ -22,6 +23,10 @@ pub mod listener;
 pub mod pool;
 pub mod shutdown;
 
+pub use backpressure::{
+    BackpressureController, BoundedChannel, BoundedReceiver, BoundedSender, ReadLimiter,
+    WriteConfig, DEFAULT_READ_LIMIT,
+};
 pub use connection::{AsyncTransport, Connection, ConnectionInfo};
 pub use connector::{Connector, ReconnectPolicy, ReconnectingConnector};
 pub use error::NetworkError;
