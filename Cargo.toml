@@ -2,6 +2,7 @@
 members = [
     "pirc-common",
     "pirc-protocol",
+    "pirc-network",
     "pirc-crypto",
     "pirc-scripting",
     "pirc-plugin",
