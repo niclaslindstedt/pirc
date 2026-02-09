@@ -167,6 +167,7 @@ impl fmt::Display for Message {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::PircSubcommand;
     use crate::numeric;
     use pirc_common::Nickname;
 
@@ -878,5 +879,207 @@ mod tests {
     #[test]
     fn roundtrip_parse_pirc_cap_multiple() {
         assert_parse_roundtrip("PIRC CAP encryption clustering p2p\r\n");
+    }
+
+    // ---- PIRC extension: encryption display ----
+
+    #[test]
+    fn display_pirc_keyexchange() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::KeyExchange))
+            .param("alice")
+            .param("base64pubkey")
+            .build();
+        assert_eq!(msg.to_string(), "PIRC KEYEXCHANGE alice base64pubkey");
+    }
+
+    #[test]
+    fn display_pirc_keyexchange_ack() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::KeyExchangeAck))
+            .param("alice")
+            .param("base64pubkey")
+            .build();
+        assert_eq!(msg.to_string(), "PIRC KEYEXCHANGE-ACK alice base64pubkey");
+    }
+
+    #[test]
+    fn display_pirc_keyexchange_complete() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::KeyExchangeComplete))
+            .param("alice")
+            .build();
+        assert_eq!(msg.to_string(), "PIRC KEYEXCHANGE-COMPLETE alice");
+    }
+
+    #[test]
+    fn display_pirc_fingerprint() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::Fingerprint))
+            .param("alice")
+            .param("ABCD1234")
+            .build();
+        assert_eq!(msg.to_string(), "PIRC FINGERPRINT alice ABCD1234");
+    }
+
+    #[test]
+    fn display_pirc_encrypted() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::Encrypted))
+            .param("alice")
+            .trailing("encrypted payload data")
+            .build();
+        assert_eq!(
+            msg.to_string(),
+            "PIRC ENCRYPTED alice :encrypted payload data"
+        );
+    }
+
+    // ---- PIRC extension: cluster display ----
+
+    #[test]
+    fn display_pirc_cluster_join() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::ClusterJoin))
+            .param("invite-key")
+            .build();
+        assert_eq!(msg.to_string(), "PIRC CLUSTER JOIN invite-key");
+    }
+
+    #[test]
+    fn display_pirc_cluster_welcome() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::ClusterWelcome))
+            .param("server-1")
+            .trailing("config data")
+            .build();
+        assert_eq!(
+            msg.to_string(),
+            "PIRC CLUSTER WELCOME server-1 :config data"
+        );
+    }
+
+    #[test]
+    fn display_pirc_cluster_sync() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::ClusterSync))
+            .trailing("state data")
+            .build();
+        assert_eq!(msg.to_string(), "PIRC CLUSTER SYNC :state data");
+    }
+
+    #[test]
+    fn display_pirc_cluster_heartbeat() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::ClusterHeartbeat))
+            .param("server-1")
+            .build();
+        assert_eq!(msg.to_string(), "PIRC CLUSTER HEARTBEAT server-1");
+    }
+
+    #[test]
+    fn display_pirc_cluster_migrate() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::ClusterMigrate))
+            .param("user-1")
+            .param("server-2")
+            .build();
+        assert_eq!(msg.to_string(), "PIRC CLUSTER MIGRATE user-1 server-2");
+    }
+
+    #[test]
+    fn display_pirc_cluster_raft() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::ClusterRaft))
+            .trailing("raft payload")
+            .build();
+        assert_eq!(msg.to_string(), "PIRC CLUSTER RAFT :raft payload");
+    }
+
+    // ---- PIRC extension: P2P display ----
+
+    #[test]
+    fn display_pirc_p2p_offer() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::P2pOffer))
+            .param("bob")
+            .trailing("sdp offer data")
+            .build();
+        assert_eq!(msg.to_string(), "PIRC P2P OFFER bob :sdp offer data");
+    }
+
+    #[test]
+    fn display_pirc_p2p_answer() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::P2pAnswer))
+            .param("bob")
+            .trailing("sdp answer data")
+            .build();
+        assert_eq!(msg.to_string(), "PIRC P2P ANSWER bob :sdp answer data");
+    }
+
+    #[test]
+    fn display_pirc_p2p_ice() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::P2pIce))
+            .param("bob")
+            .trailing("candidate data")
+            .build();
+        assert_eq!(msg.to_string(), "PIRC P2P ICE bob :candidate data");
+    }
+
+    #[test]
+    fn display_pirc_p2p_established() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::P2pEstablished))
+            .param("bob")
+            .build();
+        assert_eq!(msg.to_string(), "PIRC P2P ESTABLISHED bob");
+    }
+
+    #[test]
+    fn display_pirc_p2p_failed() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::P2pFailed))
+            .param("bob")
+            .trailing("connection timed out")
+            .build();
+        assert_eq!(
+            msg.to_string(),
+            "PIRC P2P FAILED bob :connection timed out"
+        );
+    }
+
+    // ---- PIRC extension: builder round-trips ----
+
+    #[test]
+    fn roundtrip_builder_pirc_keyexchange() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::KeyExchange))
+            .prefix(Prefix::user("alice", "alice", "example.com"))
+            .param("bob")
+            .param("base64pubkey")
+            .build();
+        let wire = format!("{msg}\r\n");
+        let parsed = crate::parse(&wire).unwrap();
+        assert_eq!(parsed, msg);
+    }
+
+    #[test]
+    fn roundtrip_builder_pirc_cluster_join() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::ClusterJoin))
+            .prefix(Prefix::server("node1.cluster"))
+            .param("invite-key-xyz")
+            .build();
+        let wire = format!("{msg}\r\n");
+        let parsed = crate::parse(&wire).unwrap();
+        assert_eq!(parsed, msg);
+    }
+
+    #[test]
+    fn roundtrip_builder_pirc_p2p_offer() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::P2pOffer))
+            .prefix(Prefix::user("alice", "alice", "host"))
+            .param("bob")
+            .trailing("sdp offer data here")
+            .build();
+        let wire = format!("{msg}\r\n");
+        let parsed = crate::parse(&wire).unwrap();
+        assert_eq!(parsed, msg);
+    }
+
+    #[test]
+    fn roundtrip_builder_pirc_encrypted_with_prefix() {
+        let msg = Message::builder(Command::Pirc(PircSubcommand::Encrypted))
+            .prefix(Prefix::user("alice", "alice", "example.com"))
+            .param("bob")
+            .trailing("encrypted data payload")
+            .build();
+        let wire = format!("{msg}\r\n");
+        let parsed = crate::parse(&wire).unwrap();
+        assert_eq!(parsed, msg);
     }
 }
