@@ -3,6 +3,9 @@ name = "pirc-server"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "pircd"
 path = "src/main.rs"

@@ -9,3 +9,17 @@ members = [
     "pirc-server",
 ]
 resolver = "2"
+
+[workspace.lints.clippy]
+# Deny all warnings - treat clippy warnings as errors
+all = { level = "deny", priority = -1 }
+# Enable pedantic lints as warnings for stricter checking
+pedantic = { level = "warn", priority = -1 }
+# Allow specific pedantic lints that are too strict or noisy
+module-name-repetitions = "allow"
+must-use-candidate = "allow"
+missing-errors-doc = "allow"
+missing-panics-doc = "allow"
+
+[workspace.lints.rust]
+unsafe-code = "deny"
