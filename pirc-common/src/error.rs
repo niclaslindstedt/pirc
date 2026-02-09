@@ -47,6 +47,8 @@ pub enum PircError {
     UserError(#[from] UserError),
     #[error("crypto error: {message}")]
     CryptoError { message: String },
+    #[error("config error: {message}")]
+    ConfigError { message: String },
     #[error(transparent)]
     Io(#[from] io::Error),
 }
@@ -162,6 +164,14 @@ mod tests {
             message: "key exchange failed".into(),
         };
         assert_eq!(err.to_string(), "crypto error: key exchange failed");
+    }
+
+    #[test]
+    fn pirc_config_error() {
+        let err = PircError::ConfigError {
+            message: "invalid toml".into(),
+        };
+        assert_eq!(err.to_string(), "config error: invalid toml");
     }
 
     #[test]
