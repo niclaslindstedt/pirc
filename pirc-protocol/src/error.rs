@@ -28,6 +28,10 @@ pub enum ProtocolError {
     /// Too many parameters (exceeds the 15-parameter limit).
     #[error("too many parameters ({count}, max {max})")]
     TooManyParams { count: usize, max: usize },
+
+    /// An invalid protocol version string.
+    #[error("invalid version: {0}")]
+    InvalidVersion(String),
 }
 
 impl ProtocolError {
@@ -41,6 +45,7 @@ impl ProtocolError {
             Self::InvalidPrefix(_) => "invalid_prefix",
             Self::InvalidNickname(_) => "invalid_nickname",
             Self::TooManyParams { .. } => "too_many_params",
+            Self::InvalidVersion(_) => "invalid_version",
         }
     }
 }

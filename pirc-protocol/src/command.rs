@@ -1,5 +1,43 @@
 use std::fmt;
 
+/// Subcommands for the `PIRC` extension command namespace.
+///
+/// The PIRC namespace groups pirc-specific protocol extensions that go beyond
+/// standard IRC. Each subcommand has its own wire-format keyword that appears
+/// as the first parameter after `PIRC`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PircSubcommand {
+    /// Protocol version announcement: `PIRC VERSION <version>`.
+    Version,
+    /// Capability announcement (for future use): `PIRC CAP <capability> [...]`.
+    Cap,
+}
+
+impl PircSubcommand {
+    /// Returns the wire-format keyword for this subcommand.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Version => "VERSION",
+            Self::Cap => "CAP",
+        }
+    }
+
+    /// Parses a subcommand keyword string into a `PircSubcommand`.
+    pub fn from_keyword(s: &str) -> Option<Self> {
+        match s {
+            "VERSION" => Some(Self::Version),
+            "CAP" => Some(Self::Cap),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for PircSubcommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// IRC-style protocol commands supported by pirc.
 ///
 /// Each variant represents a distinct protocol action. The wire format uses
@@ -42,6 +80,8 @@ pub enum Command {
     Error,
     /// A numeric reply code (e.g., 001 for `RPL_WELCOME`).
     Numeric(u16),
+    /// Pirc extension command with a subcommand (e.g., `PIRC VERSION 1.0`).
+    Pirc(PircSubcommand),
 }
 
 impl Command {
@@ -69,6 +109,7 @@ impl Command {
             Self::Pong => "PONG".to_owned(),
             Self::Error => "ERROR".to_owned(),
             Self::Numeric(code) => format!("{code:03}"),
+            Self::Pirc(_) => "PIRC".to_owned(),
         }
     }
 }
@@ -138,6 +179,8 @@ mod tests {
         assert_eq!(Command::Ping.as_str(), "PING");
         assert_eq!(Command::Pong.as_str(), "PONG");
         assert_eq!(Command::Error.as_str(), "ERROR");
+        assert_eq!(Command::Pirc(PircSubcommand::Version).as_str(), "PIRC");
+        assert_eq!(Command::Pirc(PircSubcommand::Cap).as_str(), "PIRC");
     }
 
     #[test]
@@ -176,6 +219,43 @@ mod tests {
         let cmd = Command::Numeric(353);
         let cloned = cmd.clone();
         assert_eq!(cmd, cloned);
+    }
+
+    #[test]
+    fn pirc_subcommand_as_str() {
+        assert_eq!(PircSubcommand::Version.as_str(), "VERSION");
+        assert_eq!(PircSubcommand::Cap.as_str(), "CAP");
+    }
+
+    #[test]
+    fn pirc_subcommand_from_keyword() {
+        assert_eq!(
+            PircSubcommand::from_keyword("VERSION"),
+            Some(PircSubcommand::Version)
+        );
+        assert_eq!(
+            PircSubcommand::from_keyword("CAP"),
+            Some(PircSubcommand::Cap)
+        );
+        assert_eq!(PircSubcommand::from_keyword("UNKNOWN"), None);
+    }
+
+    #[test]
+    fn pirc_subcommand_display() {
+        assert_eq!(PircSubcommand::Version.to_string(), "VERSION");
+        assert_eq!(PircSubcommand::Cap.to_string(), "CAP");
+    }
+
+    #[test]
+    fn pirc_command_equality() {
+        assert_eq!(
+            Command::Pirc(PircSubcommand::Version),
+            Command::Pirc(PircSubcommand::Version)
+        );
+        assert_ne!(
+            Command::Pirc(PircSubcommand::Version),
+            Command::Pirc(PircSubcommand::Cap)
+        );
     }
 
     #[test]

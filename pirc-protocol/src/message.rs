@@ -140,6 +140,11 @@ impl fmt::Display for Message {
         }
         write!(f, "{}", self.command)?;
 
+        // For PIRC commands, inject the subcommand keyword before params.
+        if let Command::Pirc(sub) = &self.command {
+            write!(f, " {sub}")?;
+        }
+
         if !self.params.is_empty() {
             // All params except possibly the last are simple (no spaces).
             let (last, rest) = self.params.split_last().expect("non-empty params");
@@ -807,5 +812,71 @@ mod tests {
     #[test]
     fn roundtrip_parse_empty_trailing() {
         assert_parse_roundtrip("TOPIC #test :\r\n");
+    }
+
+    // ---- PIRC extension commands ----
+
+    #[test]
+    fn display_pirc_version() {
+        let msg = Message::builder(Command::Pirc(crate::command::PircSubcommand::Version))
+            .param("1.0")
+            .build();
+        assert_eq!(msg.to_string(), "PIRC VERSION 1.0");
+    }
+
+    #[test]
+    fn display_pirc_version_with_prefix() {
+        let msg = Message::builder(Command::Pirc(crate::command::PircSubcommand::Version))
+            .prefix(Prefix::server("irc.example.com"))
+            .param("1.0")
+            .build();
+        assert_eq!(msg.to_string(), ":irc.example.com PIRC VERSION 1.0");
+    }
+
+    #[test]
+    fn display_pirc_cap() {
+        let msg = Message::builder(Command::Pirc(crate::command::PircSubcommand::Cap))
+            .param("encryption")
+            .build();
+        assert_eq!(msg.to_string(), "PIRC CAP encryption");
+    }
+
+    #[test]
+    fn display_pirc_cap_no_params() {
+        let msg = Message::builder(Command::Pirc(crate::command::PircSubcommand::Cap)).build();
+        assert_eq!(msg.to_string(), "PIRC CAP");
+    }
+
+    #[test]
+    fn builder_pirc_version() {
+        let msg = Message::builder(Command::Pirc(crate::command::PircSubcommand::Version))
+            .prefix(Prefix::server("pirc.local"))
+            .param("1.0")
+            .build();
+        assert_eq!(
+            msg.command,
+            Command::Pirc(crate::command::PircSubcommand::Version)
+        );
+        assert_eq!(msg.params, vec!["1.0"]);
+    }
+
+    #[test]
+    fn roundtrip_parse_pirc_version() {
+        assert_parse_roundtrip("PIRC VERSION 1.0\r\n");
+    }
+
+    #[test]
+    fn roundtrip_parse_pirc_version_with_prefix() {
+        assert_parse_roundtrip(":irc.example.com PIRC VERSION 1.0\r\n");
+    }
+
+    #[test]
+    fn roundtrip_parse_pirc_cap() {
+        assert_parse_roundtrip("PIRC CAP encryption\r\n");
+    }
+
+    #[test]
+    fn roundtrip_parse_pirc_cap_multiple() {
+        assert_parse_roundtrip("PIRC CAP encryption clustering p2p\r\n");
     }
 }

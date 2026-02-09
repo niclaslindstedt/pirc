@@ -1,6 +1,6 @@
 use pirc_common::Nickname;
 
-use crate::command::Command;
+use crate::command::{Command, PircSubcommand};
 use crate::error::ProtocolError;
 use crate::message::{Message, MAX_PARAMS};
 use crate::prefix::Prefix;
@@ -68,11 +68,48 @@ pub fn parse(input: &str) -> Result<Message, ProtocolError> {
         None => (rest, ""),
     };
 
+    // Handle PIRC extension commands specially: the subcommand keyword
+    // is the first token after PIRC (e.g., "PIRC VERSION 1.0").
+    if cmd_str == "PIRC" {
+        return parse_pirc_command(prefix, remainder);
+    }
+
     let command = Command::from_keyword(cmd_str)
         .ok_or_else(|| ProtocolError::UnknownCommand(cmd_str.to_owned()))?;
 
     // Parse parameters
     let params = parse_params(remainder)?;
+
+    Ok(match prefix {
+        Some(p) => Message::with_prefix(p, command, params),
+        None => Message::new(command, params),
+    })
+}
+
+/// Parse a `PIRC` extension command.
+///
+/// The subcommand keyword (e.g., `VERSION`, `CAP`) is extracted from the first
+/// token of `remainder`. Everything after the subcommand keyword is parsed as
+/// normal parameters of the resulting message.
+fn parse_pirc_command(prefix: Option<Prefix>, remainder: &str) -> Result<Message, ProtocolError> {
+    let remainder = remainder.trim_start();
+
+    if remainder.is_empty() {
+        return Err(ProtocolError::UnknownCommand(
+            "PIRC (missing subcommand)".to_owned(),
+        ));
+    }
+
+    let (sub_str, params_str) = match remainder.find(' ') {
+        Some(pos) => (&remainder[..pos], &remainder[pos + 1..]),
+        None => (remainder, ""),
+    };
+
+    let subcommand = PircSubcommand::from_keyword(sub_str)
+        .ok_or_else(|| ProtocolError::UnknownCommand(format!("PIRC {sub_str}")))?;
+
+    let command = Command::Pirc(subcommand);
+    let params = parse_params(params_str)?;
 
     Ok(match prefix {
         Some(p) => Message::with_prefix(p, command, params),
@@ -554,5 +591,136 @@ mod tests {
     fn error_display() {
         let err = ProtocolError::UnknownCommand("FOOBAR".to_owned());
         assert_eq!(err.to_string(), "unknown command: FOOBAR");
+    }
+
+    // ---- PIRC extension commands ----
+
+    #[test]
+    fn parse_pirc_version() {
+        let msg = parse("PIRC VERSION 1.0\r\n").unwrap();
+        assert!(msg.prefix.is_none());
+        assert_eq!(msg.command, Command::Pirc(PircSubcommand::Version));
+        assert_eq!(msg.params, vec!["1.0"]);
+    }
+
+    #[test]
+    fn parse_pirc_version_with_prefix() {
+        let msg = parse(":irc.example.com PIRC VERSION 1.0\r\n").unwrap();
+        assert_eq!(
+            msg.prefix,
+            Some(Prefix::Server("irc.example.com".to_owned()))
+        );
+        assert_eq!(msg.command, Command::Pirc(PircSubcommand::Version));
+        assert_eq!(msg.params, vec!["1.0"]);
+    }
+
+    #[test]
+    fn parse_pirc_version_higher() {
+        let msg = parse("PIRC VERSION 2.3\r\n").unwrap();
+        assert_eq!(msg.command, Command::Pirc(PircSubcommand::Version));
+        assert_eq!(msg.params, vec!["2.3"]);
+    }
+
+    #[test]
+    fn parse_pirc_cap() {
+        let msg = parse("PIRC CAP encryption\r\n").unwrap();
+        assert_eq!(msg.command, Command::Pirc(PircSubcommand::Cap));
+        assert_eq!(msg.params, vec!["encryption"]);
+    }
+
+    #[test]
+    fn parse_pirc_cap_multiple() {
+        let msg = parse("PIRC CAP encryption clustering p2p\r\n").unwrap();
+        assert_eq!(msg.command, Command::Pirc(PircSubcommand::Cap));
+        assert_eq!(msg.params, vec!["encryption", "clustering", "p2p"]);
+    }
+
+    #[test]
+    fn parse_pirc_cap_no_params() {
+        let msg = parse("PIRC CAP\r\n").unwrap();
+        assert_eq!(msg.command, Command::Pirc(PircSubcommand::Cap));
+        assert!(msg.params.is_empty());
+    }
+
+    #[test]
+    fn parse_pirc_unknown_subcommand() {
+        let err = parse("PIRC FOOBAR arg\r\n").unwrap_err();
+        assert!(matches!(err, ProtocolError::UnknownCommand(_)));
+    }
+
+    #[test]
+    fn parse_pirc_missing_subcommand() {
+        let err = parse("PIRC\r\n").unwrap_err();
+        assert!(matches!(err, ProtocolError::UnknownCommand(_)));
+    }
+
+    #[test]
+    fn parse_pirc_missing_subcommand_with_spaces() {
+        let err = parse("PIRC   \r\n").unwrap_err();
+        assert!(matches!(err, ProtocolError::UnknownCommand(_)));
+    }
+
+    // ---- PIRC round-trips ----
+
+    #[test]
+    fn roundtrip_pirc_version() {
+        let original = Message::new(
+            Command::Pirc(PircSubcommand::Version),
+            vec!["1.0".to_owned()],
+        );
+        let wire = format!("{original}\r\n");
+        assert_eq!(wire, "PIRC VERSION 1.0\r\n");
+        let parsed = parse(&wire).unwrap();
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn roundtrip_pirc_version_with_prefix() {
+        let original = Message::with_prefix(
+            Prefix::Server("irc.example.com".to_owned()),
+            Command::Pirc(PircSubcommand::Version),
+            vec!["1.0".to_owned()],
+        );
+        let wire = format!("{original}\r\n");
+        assert_eq!(wire, ":irc.example.com PIRC VERSION 1.0\r\n");
+        let parsed = parse(&wire).unwrap();
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn roundtrip_pirc_cap() {
+        let original = Message::new(
+            Command::Pirc(PircSubcommand::Cap),
+            vec!["encryption".to_owned()],
+        );
+        let wire = format!("{original}\r\n");
+        assert_eq!(wire, "PIRC CAP encryption\r\n");
+        let parsed = parse(&wire).unwrap();
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn roundtrip_pirc_cap_multiple() {
+        let original = Message::new(
+            Command::Pirc(PircSubcommand::Cap),
+            vec![
+                "encryption".to_owned(),
+                "clustering".to_owned(),
+                "p2p".to_owned(),
+            ],
+        );
+        let wire = format!("{original}\r\n");
+        assert_eq!(wire, "PIRC CAP encryption clustering p2p\r\n");
+        let parsed = parse(&wire).unwrap();
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn roundtrip_pirc_cap_no_params() {
+        let original = Message::new(Command::Pirc(PircSubcommand::Cap), vec![]);
+        let wire = format!("{original}\r\n");
+        assert_eq!(wire, "PIRC CAP\r\n");
+        let parsed = parse(&wire).unwrap();
+        assert_eq!(parsed, original);
     }
 }

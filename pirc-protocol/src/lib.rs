@@ -27,9 +27,11 @@ pub mod message;
 pub mod numeric;
 pub mod parser;
 pub mod prefix;
+pub mod version;
 
-pub use command::Command;
+pub use command::{Command, PircSubcommand};
 pub use error::ProtocolError;
 pub use message::{Message, MessageBuilder};
 pub use parser::parse;
 pub use prefix::Prefix;
+pub use version::{ProtocolVersion, PROTOCOL_VERSION_CURRENT};
