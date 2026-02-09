@@ -1,0 +1,13 @@
+[package]
+name = "pirc-server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "pircd"
+path = "src/main.rs"
+
+[dependencies]
+pirc-common = { path = "../pirc-common" }
+pirc-protocol = { path = "../pirc-protocol" }
+pirc-crypto = { path = "../pirc-crypto" }

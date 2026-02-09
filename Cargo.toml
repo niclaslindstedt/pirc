@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "pirc-common",
+    "pirc-protocol",
+    "pirc-crypto",
+    "pirc-scripting",
+    "pirc-plugin",
+    "pirc-client",
+    "pirc-server",
+]
+resolver = "2"

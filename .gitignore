@@ -1,0 +1,11 @@
+# Cargo build output
+/target/
+
+# Rust backup files
+**/*.rs.bk
+
+# Windows debug symbols
+*.pdb
+
+# Environment files
+.env
