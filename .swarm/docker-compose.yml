@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: swarm-postgres-e63b3e3e
+    labels:
+      com.swarm.managed: "true"
+      com.swarm.project: "pirc"
+      com.swarm.instance_id: "e63b3e3e"
+      com.swarm.project_path: "/Users/niclas/Source/personal/pirc"
+    environment:
+      POSTGRES_DB: swarm
+      POSTGRES_USER: swarm
+      POSTGRES_PASSWORD: swarm
+    ports:
+      - "58000:5432"
+    volumes:
+      - swarm_postgres_data_e63b3e3e:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U swarm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  swarm_postgres_data_e63b3e3e:
+    name: swarm_postgres_data_e63b3e3e
+    labels:
+      com.swarm.managed: "true"
+      com.swarm.project: "pirc"
+      com.swarm.instance_id: "e63b3e3e"
+      com.swarm.project_path: "/Users/niclas/Source/personal/pirc"
+
+networks:
+  default:
+    labels:
+      com.swarm.managed: "true"
+      com.swarm.project: "pirc"
+      com.swarm.instance_id: "e63b3e3e"
+      com.swarm.project_path: "/Users/niclas/Source/personal/pirc"

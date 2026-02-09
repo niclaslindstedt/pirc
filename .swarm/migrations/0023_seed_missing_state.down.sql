@@ -1,0 +1,2 @@
+-- Down migration is a no-op
+-- We don't delete seeded state rows as they may contain data

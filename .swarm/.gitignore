@@ -1,0 +1,5 @@
+# Swarm worktrees directory (for parallel agent checkout)
+worktrees/
+
+# Action execution logs
+logs/
