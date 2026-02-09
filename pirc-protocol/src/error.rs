@@ -29,6 +29,13 @@ pub enum ProtocolError {
     #[error("too many parameters ({count}, max {max})")]
     TooManyParams { count: usize, max: usize },
 
+    /// A required parameter is missing for a command.
+    #[error("missing parameter for {command}: expected {expected}")]
+    MissingParameter {
+        command: String,
+        expected: &'static str,
+    },
+
     /// An invalid protocol version string.
     #[error("invalid version: {0}")]
     InvalidVersion(String),
@@ -45,6 +52,7 @@ impl ProtocolError {
             Self::InvalidPrefix(_) => "invalid_prefix",
             Self::InvalidNickname(_) => "invalid_nickname",
             Self::TooManyParams { .. } => "too_many_params",
+            Self::MissingParameter { .. } => "missing_parameter",
             Self::InvalidVersion(_) => "invalid_version",
         }
     }

@@ -1,6 +1,7 @@
 use std::fmt;
 
 use crate::command::Command;
+use crate::error::ProtocolError;
 use crate::prefix::Prefix;
 
 /// Maximum number of parameters in an IRC message (per RFC 2812).
@@ -59,6 +60,47 @@ impl Message {
     /// Returns the trailing (last) parameter, if any.
     pub fn trailing(&self) -> Option<&str> {
         self.params.last().map(String::as_str)
+    }
+
+    /// Validates the message for semantic correctness.
+    ///
+    /// Checks that the message has the minimum required parameters for its
+    /// command type. This is a higher-level check than parsing: a message can
+    /// be syntactically valid but semantically incorrect (e.g., `NICK` without
+    /// a nickname parameter).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::MissingParameter`] if a required parameter is
+    /// absent, or [`ProtocolError::TooManyParams`] if the parameter count
+    /// exceeds [`MAX_PARAMS`].
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.params.len() > MAX_PARAMS {
+            return Err(ProtocolError::TooManyParams {
+                count: self.params.len(),
+                max: MAX_PARAMS,
+            });
+        }
+
+        let (min_params, expected) = match &self.command {
+            Command::Nick | Command::Whois => (1, "nickname"),
+            Command::Join | Command::Part | Command::Topic => (1, "channel"),
+            Command::Mode => (1, "target"),
+            Command::Ping | Command::Pong => (1, "server"),
+            Command::Privmsg | Command::Notice => (2, "target and message"),
+            Command::Kick | Command::Ban => (2, "channel and target"),
+            Command::Invite => (2, "nickname and channel"),
+            _ => (0, ""),
+        };
+
+        if self.params.len() < min_params {
+            return Err(ProtocolError::MissingParameter {
+                command: self.command.as_str(),
+                expected,
+            });
+        }
+
+        Ok(())
     }
 
     /// Create a builder for constructing a message.
