@@ -159,6 +159,8 @@ dependencies = [
  "pirc-common",
  "pirc-crypto",
  "pirc-protocol",
+ "serde",
+ "toml",
 ]
 
 [[package]]
