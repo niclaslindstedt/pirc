@@ -19,3 +19,5 @@ pirc-protocol = { path = "../pirc-protocol" }
 pirc-crypto = { path = "../pirc-crypto" }
 pirc-scripting = { path = "../pirc-scripting" }
 pirc-plugin = { path = "../pirc-plugin" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

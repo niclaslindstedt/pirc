@@ -151,6 +151,8 @@ dependencies = [
  "pirc-plugin",
  "pirc-protocol",
  "pirc-scripting",
+ "serde",
+ "toml",
 ]
 
 [[package]]
