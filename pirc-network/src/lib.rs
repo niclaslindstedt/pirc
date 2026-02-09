@@ -24,3 +24,4 @@ pub mod shutdown;
 
 pub use connection::{AsyncTransport, Connection, ConnectionInfo};
 pub use error::NetworkError;
+pub use listener::Listener;
