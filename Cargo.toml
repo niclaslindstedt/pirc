@@ -10,6 +10,14 @@ members = [
 ]
 resolver = "2"
 
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+authors = []
+description = "A modern IRC client and server implementation in Rust"
+
 [workspace.lints.clippy]
 # Deny all warnings - treat clippy warnings as errors
 all = { level = "deny", priority = -1 }
