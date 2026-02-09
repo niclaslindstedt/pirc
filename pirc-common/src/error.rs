@@ -1,3 +1,9 @@
+//! Error types for the pirc system.
+//!
+//! Provides a three-level hierarchy: domain-specific errors ([`ChannelError`],
+//! [`UserError`]) that convert into the top-level [`PircError`] via `From` impls,
+//! plus a [`Result<T>`] alias for ergonomic `?` usage.
+
 use std::io;
 
 /// Errors related to IRC channel operations.

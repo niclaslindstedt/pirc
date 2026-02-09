@@ -1,3 +1,5 @@
+//! Validated IRC types: nicknames, channel names, identifiers, and modes.
+
 pub mod channel;
 pub mod identifiers;
 pub mod mode;
