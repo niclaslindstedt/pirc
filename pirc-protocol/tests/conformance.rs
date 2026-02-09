@@ -16,10 +16,7 @@ fn assert_roundtrip(input: &str) {
     let parsed = parse(input).expect("initial parse failed");
     let wire = format!("{parsed}\r\n");
     let reparsed = parse(&wire).expect("re-parse failed");
-    assert_eq!(
-        parsed, reparsed,
-        "round-trip mismatch for input: {input:?}"
-    );
+    assert_eq!(parsed, reparsed, "round-trip mismatch for input: {input:?}");
 }
 
 /// Build a message, serialize, parse, and assert equality.
@@ -91,10 +88,7 @@ fn length_only_whitespace() {
 
 #[test]
 fn length_whitespace_with_crlf() {
-    assert_eq!(
-        parse("   \r\n").unwrap_err(),
-        ProtocolError::EmptyMessage
-    );
+    assert_eq!(parse("   \r\n").unwrap_err(), ProtocolError::EmptyMessage);
 }
 
 #[test]
@@ -110,7 +104,11 @@ fn length_only_lf() {
 fn prefix_full_user_components() {
     let msg = parse(":alice!alice@irc.example.com PRIVMSG #general :hi\r\n").unwrap();
     match msg.prefix {
-        Some(Prefix::User { ref nick, ref user, ref host }) => {
+        Some(Prefix::User {
+            ref nick,
+            ref user,
+            ref host,
+        }) => {
             assert_eq!(nick.to_string(), "alice");
             assert_eq!(user, "alice");
             assert_eq!(host, "irc.example.com");
@@ -132,10 +130,7 @@ fn prefix_server_only() {
 fn prefix_server_simple_name() {
     // A server name without dots is still valid as a server prefix
     let msg = parse(":localhost NOTICE * :hello\r\n").unwrap();
-    assert_eq!(
-        msg.prefix,
-        Some(Prefix::Server("localhost".to_owned()))
-    );
+    assert_eq!(msg.prefix, Some(Prefix::Server("localhost".to_owned())));
 }
 
 #[test]
@@ -365,10 +360,7 @@ fn error_invalid_nickname_kind() {
 
 #[test]
 fn error_too_many_params_kind() {
-    let err = ProtocolError::TooManyParams {
-        count: 20,
-        max: 15,
-    };
+    let err = ProtocolError::TooManyParams { count: 20, max: 15 };
     assert_eq!(err.kind(), "too_many_params");
 }
 
@@ -410,10 +402,7 @@ fn error_message_too_long_display() {
 
 #[test]
 fn error_too_many_params_display() {
-    let err = ProtocolError::TooManyParams {
-        count: 20,
-        max: 15,
-    };
+    let err = ProtocolError::TooManyParams { count: 20, max: 15 };
     assert_eq!(err.to_string(), "too many parameters (20, max 15)");
 }
 
@@ -699,19 +688,13 @@ fn wire_format_trailing_with_spaces() {
 
 #[test]
 fn wire_format_trailing_starts_with_colon() {
-    let msg = Message::new(
-        Command::Privmsg,
-        vec!["#test".to_owned(), ":)".to_owned()],
-    );
+    let msg = Message::new(Command::Privmsg, vec!["#test".to_owned(), ":)".to_owned()]);
     assert_eq!(msg.to_string(), "PRIVMSG #test ::)");
 }
 
 #[test]
 fn wire_format_empty_trailing() {
-    let msg = Message::new(
-        Command::Topic,
-        vec!["#test".to_owned(), String::new()],
-    );
+    let msg = Message::new(Command::Topic, vec!["#test".to_owned(), String::new()]);
     assert_eq!(msg.to_string(), "TOPIC #test :");
 }
 

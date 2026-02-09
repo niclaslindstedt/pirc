@@ -860,10 +860,7 @@ fn display_pirc_p2p_failed() {
         .param("bob")
         .trailing("connection timed out")
         .build();
-    assert_eq!(
-        msg.to_string(),
-        "PIRC P2P FAILED bob :connection timed out"
-    );
+    assert_eq!(msg.to_string(), "PIRC P2P FAILED bob :connection timed out");
 }
 
 // ---- PIRC extension: builder round-trips ----

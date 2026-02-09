@@ -560,8 +560,7 @@ fn parse_pirc_encrypted() {
 
 #[test]
 fn parse_pirc_keyexchange_with_prefix() {
-    let msg =
-        parse(":nick!user@host PIRC KEYEXCHANGE bob :base64pubkey\r\n").unwrap();
+    let msg = parse(":nick!user@host PIRC KEYEXCHANGE bob :base64pubkey\r\n").unwrap();
     assert_eq!(
         msg.prefix,
         Some(Prefix::User {
@@ -647,8 +646,7 @@ fn parse_pirc_cluster_join() {
 
 #[test]
 fn parse_pirc_cluster_welcome() {
-    let msg =
-        parse("PIRC CLUSTER WELCOME server-42 :cluster-config-json\r\n").unwrap();
+    let msg = parse("PIRC CLUSTER WELCOME server-42 :cluster-config-json\r\n").unwrap();
     assert_eq!(msg.command, Command::Pirc(PircSubcommand::ClusterWelcome));
     assert_eq!(msg.params, vec!["server-42", "cluster-config-json"]);
 }
@@ -683,9 +681,7 @@ fn parse_pirc_cluster_raft() {
 
 #[test]
 fn parse_pirc_cluster_with_prefix() {
-    let msg =
-        parse(":cluster.node1.example.com PIRC CLUSTER HEARTBEAT server-1\r\n")
-            .unwrap();
+    let msg = parse(":cluster.node1.example.com PIRC CLUSTER HEARTBEAT server-1\r\n").unwrap();
     assert_eq!(
         msg.prefix,
         Some(Prefix::Server("cluster.node1.example.com".to_owned()))
@@ -724,10 +720,7 @@ fn roundtrip_pirc_cluster_join() {
 fn roundtrip_pirc_cluster_welcome() {
     let original = Message::new(
         Command::Pirc(PircSubcommand::ClusterWelcome),
-        vec![
-            "server-42".to_owned(),
-            "cluster-config-json".to_owned(),
-        ],
+        vec!["server-42".to_owned(), "cluster-config-json".to_owned()],
     );
     let wire = format!("{original}\r\n");
     assert_eq!(
@@ -825,8 +818,7 @@ fn parse_pirc_p2p_failed() {
 
 #[test]
 fn parse_pirc_p2p_with_prefix() {
-    let msg =
-        parse(":nick!user@host PIRC P2P OFFER bob :sdp-offer-data\r\n").unwrap();
+    let msg = parse(":nick!user@host PIRC P2P OFFER bob :sdp-offer-data\r\n").unwrap();
     assert_eq!(
         msg.prefix,
         Some(Prefix::User {
@@ -999,21 +991,15 @@ fn roundtrip_parse_pirc_p2p_failed() {
 
 #[test]
 fn roundtrip_parse_pirc_encrypted_with_user_prefix() {
-    assert_parse_roundtrip(
-        ":alice!alice@example.com PIRC ENCRYPTED bob :encrypted data\r\n",
-    );
+    assert_parse_roundtrip(":alice!alice@example.com PIRC ENCRYPTED bob :encrypted data\r\n");
 }
 
 #[test]
 fn roundtrip_parse_pirc_cluster_with_server_prefix() {
-    assert_parse_roundtrip(
-        ":cluster.node1 PIRC CLUSTER HEARTBEAT server-1\r\n",
-    );
+    assert_parse_roundtrip(":cluster.node1 PIRC CLUSTER HEARTBEAT server-1\r\n");
 }
 
 #[test]
 fn roundtrip_parse_pirc_p2p_with_user_prefix() {
-    assert_parse_roundtrip(
-        ":alice!alice@host PIRC P2P OFFER bob :sdp data\r\n",
-    );
+    assert_parse_roundtrip(":alice!alice@host PIRC P2P OFFER bob :sdp data\r\n");
 }

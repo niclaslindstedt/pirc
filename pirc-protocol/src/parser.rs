@@ -120,10 +120,8 @@ fn parse_pirc_command(prefix: Option<Prefix>, remainder: &str) -> Result<Message
             None => (after_sub, ""),
         };
 
-        let subcommand =
-            PircSubcommand::from_namespace(sub_str, inner_str).ok_or_else(|| {
-                ProtocolError::UnknownCommand(format!("PIRC {sub_str} {inner_str}"))
-            })?;
+        let subcommand = PircSubcommand::from_namespace(sub_str, inner_str)
+            .ok_or_else(|| ProtocolError::UnknownCommand(format!("PIRC {sub_str} {inner_str}")))?;
 
         let command = Command::Pirc(subcommand);
         let params = parse_params(params_str)?;
