@@ -46,11 +46,22 @@ impl PreRegistrationState {
     }
 }
 
+/// Result of handling a message, indicating whether the connection should close.
+pub enum HandleResult {
+    /// Continue processing messages from this connection.
+    Continue,
+    /// The client sent QUIT; the connection should be closed.
+    Quit,
+}
+
 /// Handle a single parsed message from a client connection.
 ///
-/// For pre-registration clients, only NICK, USER, PING, and QUIT are processed.
+/// For pre-registration clients, only NICK, USER, PING, PONG, and QUIT are processed.
 /// Once both NICK and USER have been received, the client is registered in the
 /// `UserRegistry` and the welcome burst is sent.
+///
+/// Returns [`HandleResult::Quit`] when the client sends QUIT, signalling the
+/// connection loop to stop reading and clean up.
 pub fn handle_message(
     msg: &Message,
     connection_id: u64,
@@ -58,36 +69,52 @@ pub fn handle_message(
     sender: &mpsc::UnboundedSender<Message>,
     state: &mut PreRegistrationState,
     config: &ServerConfig,
-) {
+) -> HandleResult {
     if state.registered {
+        // Update idle tracking for non-PING/PONG commands.
+        if !matches!(msg.command, Command::Ping | Command::Pong) {
+            if let Some(session_arc) = registry.get_by_connection(connection_id) {
+                let mut session = session_arc.write().expect("session lock poisoned");
+                session.last_active = Instant::now();
+            }
+        }
+
         // Post-registration command dispatch.
         match &msg.command {
+            Command::Quit => {
+                handle_quit(msg, connection_id, registry, sender, state);
+                return HandleResult::Quit;
+            }
             Command::Nick => handle_nick_change(msg, connection_id, registry, sender),
             Command::User => handle_user(msg, sender, state),
             Command::Whois => handle_whois(msg, connection_id, registry, sender),
             Command::Away => handle_away(msg, connection_id, registry, sender),
             Command::Mode => handle_user_mode(msg, connection_id, registry, sender),
             Command::Ping => handle_ping(msg, sender),
+            // PONG and other commands are silently absorbed.
             _ => {}
         }
-        return;
+        return HandleResult::Continue;
     }
 
     // Pre-registration command dispatch.
     match &msg.command {
+        Command::Quit => return HandleResult::Quit,
         Command::Nick => handle_nick(msg, registry, sender, state),
         Command::User => handle_user(msg, sender, state),
         Command::Ping => {
             handle_ping(msg, sender);
-            return;
+            return HandleResult::Continue;
         }
-        _ => return,
+        // PONG and other unhandled commands are ignored pre-registration.
+        _ => return HandleResult::Continue,
     }
 
     // After processing NICK or USER, check if registration can complete.
     if state.is_ready() {
         complete_registration(connection_id, registry, sender, state, config);
     }
+    HandleResult::Continue
 }
 
 fn handle_nick(
@@ -643,6 +670,38 @@ fn handle_ping(msg: &Message, sender: &mpsc::UnboundedSender<Message>) {
     }
 }
 
+/// Handle the QUIT command from a registered user.
+///
+/// Removes the user from the registry and sends an ERROR closing link message.
+fn handle_quit(
+    msg: &Message,
+    connection_id: u64,
+    registry: &Arc<UserRegistry>,
+    sender: &mpsc::UnboundedSender<Message>,
+    state: &mut PreRegistrationState,
+) {
+    let quit_message = msg.params.first().map_or("Client Quit", |s| s.as_str());
+
+    let hostname = if let Some(session_arc) = registry.get_by_connection(connection_id) {
+        let session = session_arc.read().expect("session lock poisoned");
+        session.hostname.clone()
+    } else {
+        state.hostname.clone()
+    };
+
+    // Remove user from registry.
+    if state.registered {
+        registry.remove_by_connection(connection_id);
+        state.registered = false;
+    }
+
+    // Send ERROR closing link.
+    let error_msg = Message::builder(Command::Error)
+        .trailing(&format!("Closing Link: {hostname} (Quit: {quit_message})"))
+        .build();
+    let _ = sender.send(error_msg);
+}
+
 fn send_numeric(
     sender: &mpsc::UnboundedSender<Message>,
     code: u16,
@@ -660,3 +719,7 @@ fn send_numeric(
 #[cfg(test)]
 #[path = "handler_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "quit_ping_tests.rs"]
+mod quit_ping_tests;

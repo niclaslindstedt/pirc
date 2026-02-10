@@ -2,12 +2,13 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process;
 use std::sync::Arc;
+use std::time::Duration;
 
 use pirc_network::connection::AsyncTransport;
 use pirc_network::{Connection, Listener, ShutdownSignal};
-use pirc_protocol::Message;
+use pirc_protocol::{Command, Message};
 use pirc_server::config::ServerConfig;
-use pirc_server::handler::{self, PreRegistrationState};
+use pirc_server::handler::{self, HandleResult, PreRegistrationState};
 use pirc_server::registry::UserRegistry;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
@@ -111,6 +112,10 @@ async fn main() {
     info!("pircd shut down");
 }
 
+/// Keepalive intervals for PING/PONG.
+const PING_INTERVAL: Duration = Duration::from_secs(120);
+const PING_TIMEOUT: Duration = Duration::from_secs(60);
+
 async fn handle_connection(
     mut connection: Connection,
     peer_addr: SocketAddr,
@@ -124,25 +129,76 @@ async fn handle_connection(
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
     let mut state = PreRegistrationState::new(peer_addr.ip().to_string());
 
+    let mut ping_interval = tokio::time::interval(PING_INTERVAL);
+    ping_interval.tick().await; // Consume the immediate first tick
+    let mut ping_pending = false;
+    let ping_timeout = tokio::time::sleep(PING_TIMEOUT);
+    tokio::pin!(ping_timeout);
+
     loop {
-        match connection.recv_with_shutdown(&mut shutdown).await {
-            Ok(Some(msg)) => {
-                info!(conn_id, %peer_addr, %msg, "received message");
-                handler::handle_message(&msg, conn_id, &registry, &tx, &mut state, &config);
-                // Drain all queued outbound messages after handling
-                while let Ok(out_msg) = rx.try_recv() {
-                    if let Err(e) = connection.send(out_msg).await {
-                        warn!(conn_id, %peer_addr, "failed to send response: {e}");
-                        return;
+        tokio::select! {
+            result = connection.recv_with_shutdown(&mut shutdown) => {
+                match result {
+                    Ok(Some(msg)) => {
+                        info!(conn_id, %peer_addr, %msg, "received message");
+
+                        // Clear pending ping on any PONG response.
+                        if msg.command == Command::Pong {
+                            ping_pending = false;
+                        }
+
+                        let handle_result = handler::handle_message(
+                            &msg, conn_id, &registry, &tx, &mut state, &config,
+                        );
+
+                        // Drain all queued outbound messages after handling
+                        while let Ok(out_msg) = rx.try_recv() {
+                            if let Err(e) = connection.send(out_msg).await {
+                                warn!(conn_id, %peer_addr, "failed to send response: {e}");
+                                // Clean up on send failure
+                                if state.registered {
+                                    registry.remove_by_connection(conn_id);
+                                }
+                                return;
+                            }
+                        }
+
+                        if matches!(handle_result, HandleResult::Quit) {
+                            info!(conn_id, %peer_addr, "client quit");
+                            return;
+                        }
+                    }
+                    Ok(None) => {
+                        info!(conn_id, %peer_addr, "connection closed");
+                        break;
+                    }
+                    Err(e) => {
+                        warn!(conn_id, %peer_addr, "error reading from connection: {e}");
+                        break;
                     }
                 }
             }
-            Ok(None) => {
-                info!(conn_id, %peer_addr, "connection closed");
-                break;
+
+            _ = ping_interval.tick() => {
+                // Send a server PING for keepalive.
+                let ping = Message::builder(Command::Ping)
+                    .trailing("pircd")
+                    .build();
+                if let Err(e) = connection.send(ping).await {
+                    warn!(conn_id, %peer_addr, "failed to send PING: {e}");
+                    break;
+                }
+                ping_pending = true;
+                ping_timeout.as_mut().reset(tokio::time::Instant::now() + PING_TIMEOUT);
             }
-            Err(e) => {
-                warn!(conn_id, %peer_addr, "error reading from connection: {e}");
+
+            _ = &mut ping_timeout, if ping_pending => {
+                warn!(conn_id, %peer_addr, "ping timeout, closing connection");
+                // Send ERROR before closing.
+                let error_msg = Message::builder(Command::Error)
+                    .trailing(&format!("Closing Link: {} (Ping timeout)", peer_addr.ip()))
+                    .build();
+                let _ = connection.send(error_msg).await;
                 break;
             }
         }
