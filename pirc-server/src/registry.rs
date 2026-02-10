@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
+use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use pirc_common::{Nickname, UserError};
 
@@ -12,7 +13,7 @@ use crate::user::UserSession;
 /// contention. Nickname lookup is case-insensitive because [`Nickname`]'s
 /// `Eq` and `Hash` implementations use ASCII-lowercased comparison.
 pub struct UserRegistry {
-    /// Nickname -> UserSession (case-insensitive lookup via Nickname's Eq/Hash).
+    /// Nickname -> `UserSession` (case-insensitive lookup via Nickname's `Eq`/`Hash`).
     by_nick: DashMap<Nickname, Arc<RwLock<UserSession>>>,
     /// Connection ID -> Nickname (for reverse lookup on disconnect).
     by_connection: DashMap<u64, Nickname>,
@@ -45,7 +46,6 @@ impl UserRegistry {
         // Check-and-insert must be done without a race. DashMap's entry API
         // holds a shard lock, so no other thread can insert the same nick
         // between our check and our insert.
-        use dashmap::mapref::entry::Entry;
         match self.by_nick.entry(nick.clone()) {
             Entry::Occupied(_) => {
                 return Err(UserError::NickInUse {
@@ -109,9 +109,12 @@ impl UserRegistry {
         }
 
         // Remove old entry.
-        let (_, session) = self.by_nick.remove(old).ok_or_else(|| UserError::NotFound {
-            nick: old.to_string(),
-        })?;
+        let (_, session) = self
+            .by_nick
+            .remove(old)
+            .ok_or_else(|| UserError::NotFound {
+                nick: old.to_string(),
+            })?;
 
         // Update the nickname inside the session.
         {
@@ -136,9 +139,7 @@ impl UserRegistry {
     ///
     /// Useful for broadcast operations. The returned iterator holds shard
     /// locks briefly for each element.
-    pub fn iter_sessions(
-        &self,
-    ) -> impl Iterator<Item = Arc<RwLock<UserSession>>> + use<'_> {
+    pub fn iter_sessions(&self) -> impl Iterator<Item = Arc<RwLock<UserSession>>> + use<'_> {
         self.by_nick.iter().map(|r| Arc::clone(r.value()))
     }
 }

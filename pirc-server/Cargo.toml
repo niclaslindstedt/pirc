@@ -9,6 +9,10 @@ authors.workspace = true
 [lints]
 workspace = true
 
+[lib]
+name = "pirc_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "pircd"
 path = "src/main.rs"

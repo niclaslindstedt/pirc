@@ -61,6 +61,8 @@ pub const ERR_NONICKNAMEGIVEN: u16 = 431;
 pub const ERR_ERRONEUSNICKNAME: u16 = 432;
 /// Nickname is already in use.
 pub const ERR_NICKNAMEINUSE: u16 = 433;
+/// MOTD file is missing.
+pub const ERR_NOMOTD: u16 = 422;
 /// Not enough parameters.
 pub const ERR_NEEDMOREPARAMS: u16 = 461;
 /// You may not reregister.
@@ -102,6 +104,7 @@ pub fn reply_name(code: u16) -> Option<&'static str> {
         RPL_MOTDSTART => Some("RPL_MOTDSTART"),
         RPL_ENDOFMOTD => Some("RPL_ENDOFMOTD"),
         ERR_NOSUCHNICK => Some("ERR_NOSUCHNICK"),
+        ERR_NOMOTD => Some("ERR_NOMOTD"),
         ERR_NONICKNAMEGIVEN => Some("ERR_NONICKNAMEGIVEN"),
         ERR_ERRONEUSNICKNAME => Some("ERR_ERRONEUSNICKNAME"),
         ERR_NICKNAMEINUSE => Some("ERR_NICKNAMEINUSE"),
@@ -147,6 +150,7 @@ mod tests {
     #[test]
     fn error_reply_constants() {
         assert_eq!(ERR_NOSUCHNICK, 401);
+        assert_eq!(ERR_NOMOTD, 422);
         assert_eq!(ERR_NONICKNAMEGIVEN, 431);
         assert_eq!(ERR_ERRONEUSNICKNAME, 432);
         assert_eq!(ERR_NICKNAMEINUSE, 433);
@@ -177,6 +181,7 @@ mod tests {
         assert_eq!(reply_name(RPL_MOTDSTART), Some("RPL_MOTDSTART"));
         assert_eq!(reply_name(RPL_ENDOFMOTD), Some("RPL_ENDOFMOTD"));
         assert_eq!(reply_name(ERR_NOSUCHNICK), Some("ERR_NOSUCHNICK"));
+        assert_eq!(reply_name(ERR_NOMOTD), Some("ERR_NOMOTD"));
         assert_eq!(reply_name(ERR_NONICKNAMEGIVEN), Some("ERR_NONICKNAMEGIVEN"));
         assert_eq!(
             reply_name(ERR_ERRONEUSNICKNAME),
@@ -205,6 +210,7 @@ mod tests {
     #[test]
     fn is_error_for_error_codes() {
         assert!(is_error(ERR_NOSUCHNICK));
+        assert!(is_error(ERR_NOMOTD));
         assert!(is_error(ERR_NONICKNAMEGIVEN));
         assert!(is_error(ERR_ERRONEUSNICKNAME));
         assert!(is_error(ERR_NICKNAMEINUSE));

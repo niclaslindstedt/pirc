@@ -1,13 +1,15 @@
-mod config;
-pub mod registry;
-pub mod user;
-
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process;
+use std::sync::Arc;
 
 use pirc_network::connection::AsyncTransport;
 use pirc_network::{Connection, Listener, ShutdownSignal};
+use pirc_protocol::Message;
+use pirc_server::config::ServerConfig;
+use pirc_server::handler::{self, PreRegistrationState};
+use pirc_server::registry::UserRegistry;
+use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 fn parse_config_path() -> Option<PathBuf> {
@@ -30,7 +32,7 @@ fn parse_config_path() -> Option<PathBuf> {
 async fn main() {
     let config_path = parse_config_path();
 
-    let config = match config::ServerConfig::load(config_path.as_deref()) {
+    let config = match ServerConfig::load(config_path.as_deref()) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {e}");
@@ -75,13 +77,25 @@ async fn main() {
         shutdown_controller.shutdown();
     });
 
+    let registry = Arc::new(UserRegistry::new());
+    let config = Arc::new(config);
+
     // Accept loop
     loop {
         match listener.accept_with_shutdown(&mut shutdown_signal).await {
             Ok(Some((connection, peer_addr))) => {
                 let conn_shutdown = shutdown_signal.clone();
+                let conn_registry = Arc::clone(&registry);
+                let conn_config = Arc::clone(&config);
                 tokio::spawn(async move {
-                    handle_connection(connection, peer_addr, conn_shutdown).await;
+                    handle_connection(
+                        connection,
+                        peer_addr,
+                        conn_shutdown,
+                        conn_registry,
+                        conn_config,
+                    )
+                    .await;
                 });
             }
             Ok(None) => {
@@ -101,18 +115,26 @@ async fn handle_connection(
     mut connection: Connection,
     peer_addr: SocketAddr,
     mut shutdown: ShutdownSignal,
+    registry: Arc<UserRegistry>,
+    config: Arc<ServerConfig>,
 ) {
     let conn_id = connection.info().id;
     info!(conn_id, %peer_addr, "handling connection");
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    let mut state = PreRegistrationState::new(peer_addr.ip().to_string());
 
     loop {
         match connection.recv_with_shutdown(&mut shutdown).await {
             Ok(Some(msg)) => {
                 info!(conn_id, %peer_addr, %msg, "received message");
-                // Echo the message back (temporary behavior)
-                if let Err(e) = connection.send(msg).await {
-                    warn!(conn_id, %peer_addr, "failed to send response: {e}");
-                    break;
+                handler::handle_message(&msg, conn_id, &registry, &tx, &mut state, &config);
+                // Drain all queued outbound messages after handling
+                while let Ok(out_msg) = rx.try_recv() {
+                    if let Err(e) = connection.send(out_msg).await {
+                        warn!(conn_id, %peer_addr, "failed to send response: {e}");
+                        return;
+                    }
                 }
             }
             Ok(None) => {
@@ -124,5 +146,10 @@ async fn handle_connection(
                 break;
             }
         }
+    }
+
+    // Clean up: remove user from registry on disconnect.
+    if state.registered {
+        registry.remove_by_connection(conn_id);
     }
 }
