@@ -25,8 +25,10 @@ pub struct UserSession {
     pub modes: HashSet<UserMode>,
     /// Away message (`None` means not away).
     pub away_message: Option<String>,
-    /// When the user connected.
+    /// When the user connected (monotonic, for idle time calculation).
     pub connected_at: Instant,
+    /// When the user connected (wall-clock, for signon time in WHOIS).
+    pub signon_time: u64,
     /// Last time the user sent a message (for idle tracking).
     pub last_active: Instant,
     /// Whether registration is complete (NICK + USER both received).
