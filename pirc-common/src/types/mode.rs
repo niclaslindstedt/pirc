@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// Each variant corresponds to a standard IRC channel mode letter.
 /// Parameterless modes are simple flags, while `KeyRequired` and `UserLimit`
 /// carry associated data.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ChannelMode {
     /// Channel requires an invite to join (+i).
     InviteOnly,
