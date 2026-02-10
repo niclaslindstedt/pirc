@@ -1,7 +1,13 @@
-use pirc_common::ChannelName;
+use pirc_common::{ChannelMode, ChannelName};
+use pirc_protocol::numeric::{
+    ERR_BADCHANNELKEY, ERR_BANNEDCHANNEL, ERR_CHANNELISFULL, ERR_INVITEONLYCHAN,
+    ERR_NOSUCHCHANNEL, ERR_NOTONCHANNEL, RPL_ENDOFNAMES, RPL_NAMREPLY, RPL_NOTOPIC, RPL_TOPIC,
+    RPL_TOPICWHOTIME,
+};
 
 use super::*;
 use crate::channel::{BanEntry, MemberStatus};
+use crate::handler_channel::{glob_match, matches_ban_mask};
 
 fn make_config() -> ServerConfig {
     ServerConfig::default()
