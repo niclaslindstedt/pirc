@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pirc_network::connection::AsyncTransport;
-use pirc_network::{Connection, Listener, ShutdownSignal};
+use pirc_network::{Connection, Listener, ShutdownController, ShutdownSignal};
 use pirc_protocol::{Command, Message};
 use pirc_server::channel_registry::ChannelRegistry;
 use pirc_server::config::ServerConfig;
@@ -71,13 +71,17 @@ async fn main() {
     info!(%local_addr, "pircd starting");
 
     let (shutdown_controller, mut shutdown_signal) = ShutdownSignal::new();
+    let shutdown_controller = Arc::new(shutdown_controller);
 
     // Spawn Ctrl+C handler
-    tokio::spawn(async move {
-        tokio::signal::ctrl_c().await.ok();
-        info!("received Ctrl+C, initiating shutdown");
-        shutdown_controller.shutdown();
-    });
+    {
+        let ctrl_c_shutdown = Arc::clone(&shutdown_controller);
+        tokio::spawn(async move {
+            tokio::signal::ctrl_c().await.ok();
+            info!("received Ctrl+C, initiating shutdown");
+            ctrl_c_shutdown.shutdown();
+        });
+    }
 
     let registry = Arc::new(UserRegistry::new());
     let channels = Arc::new(ChannelRegistry::new());
@@ -91,6 +95,7 @@ async fn main() {
                 let conn_registry = Arc::clone(&registry);
                 let conn_channels = Arc::clone(&channels);
                 let conn_config = Arc::clone(&config);
+                let conn_shutdown_controller = Arc::clone(&shutdown_controller);
                 tokio::spawn(async move {
                     handle_connection(
                         connection,
@@ -99,6 +104,7 @@ async fn main() {
                         conn_registry,
                         conn_channels,
                         conn_config,
+                        conn_shutdown_controller,
                     )
                     .await;
                 });
@@ -127,6 +133,7 @@ async fn handle_connection(
     registry: Arc<UserRegistry>,
     channels: Arc<ChannelRegistry>,
     config: Arc<ServerConfig>,
+    shutdown_controller: Arc<ShutdownController>,
 ) {
     let conn_id = connection.info().id;
     info!(conn_id, %peer_addr, "handling connection");
@@ -168,9 +175,17 @@ async fn handle_connection(
                             }
                         }
 
-                        if matches!(handle_result, HandleResult::Quit) {
-                            info!(conn_id, %peer_addr, "client quit");
-                            return;
+                        match handle_result {
+                            HandleResult::Quit => {
+                                info!(conn_id, %peer_addr, "client quit");
+                                return;
+                            }
+                            HandleResult::Shutdown => {
+                                info!(conn_id, %peer_addr, "operator initiated server shutdown");
+                                shutdown_controller.shutdown();
+                                return;
+                            }
+                            HandleResult::Continue => {}
                         }
                     }
                     Ok(None) => {
