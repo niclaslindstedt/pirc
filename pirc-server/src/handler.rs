@@ -16,7 +16,7 @@ use tracing::warn;
 
 use crate::channel_registry::ChannelRegistry;
 use crate::config::ServerConfig;
-use crate::handler_channel::{handle_join, handle_part, handle_topic, remove_user_from_all_channels};
+use crate::handler_channel::{handle_join, handle_kick, handle_part, handle_topic, remove_user_from_all_channels};
 use crate::registry::UserRegistry;
 use crate::user::UserSession;
 
@@ -96,6 +96,7 @@ pub fn handle_message(
             Command::Join => handle_join(msg, connection_id, registry, channels, sender),
             Command::Part => handle_part(msg, connection_id, registry, channels, sender),
             Command::Topic => handle_topic(msg, connection_id, registry, channels, sender),
+            Command::Kick => handle_kick(msg, connection_id, registry, channels, sender),
             Command::Ping => handle_ping(msg, sender),
             // PONG and other commands are silently absorbed.
             _ => {}
@@ -749,3 +750,7 @@ mod join_part_tests;
 #[cfg(test)]
 #[path = "topic_tests.rs"]
 mod topic_tests;
+
+#[cfg(test)]
+#[path = "kick_tests.rs"]
+mod kick_tests;
