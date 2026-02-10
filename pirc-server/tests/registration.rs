@@ -11,6 +11,7 @@ use pirc_protocol::numeric::{
     ERR_NONICKNAMEGIVEN, RPL_CREATED, RPL_WELCOME, RPL_YOURHOST,
 };
 use pirc_protocol::{Command, Message};
+use pirc_server::channel_registry::ChannelRegistry;
 use pirc_server::config::ServerConfig;
 use pirc_server::handler::{self, PreRegistrationState};
 use pirc_server::registry::UserRegistry;
@@ -26,6 +27,7 @@ async fn start_registration_server() -> (SocketAddr, pirc_network::ShutdownContr
     let (shutdown_controller, mut shutdown_signal) = ShutdownSignal::new();
 
     let registry = Arc::new(UserRegistry::new());
+    let channels = Arc::new(ChannelRegistry::new());
     let config = Arc::new(ServerConfig::default());
 
     tokio::spawn(async move {
@@ -34,6 +36,7 @@ async fn start_registration_server() -> (SocketAddr, pirc_network::ShutdownContr
                 Ok(Some((connection, peer_addr))) => {
                     let conn_shutdown = shutdown_signal.clone();
                     let conn_registry = Arc::clone(&registry);
+                    let conn_channels = Arc::clone(&channels);
                     let conn_config = Arc::clone(&config);
                     tokio::spawn(async move {
                         handle_registration_connection(
@@ -41,6 +44,7 @@ async fn start_registration_server() -> (SocketAddr, pirc_network::ShutdownContr
                             peer_addr,
                             conn_shutdown,
                             conn_registry,
+                            conn_channels,
                             conn_config,
                         )
                         .await;
@@ -60,6 +64,7 @@ async fn handle_registration_connection(
     peer_addr: SocketAddr,
     mut shutdown: ShutdownSignal,
     registry: Arc<UserRegistry>,
+    channels: Arc<ChannelRegistry>,
     config: Arc<ServerConfig>,
 ) {
     let conn_id = connection.info().id;
@@ -69,7 +74,7 @@ async fn handle_registration_connection(
     loop {
         match connection.recv_with_shutdown(&mut shutdown).await {
             Ok(Some(msg)) => {
-                handler::handle_message(&msg, conn_id, &registry, &tx, &mut state, &config);
+                handler::handle_message(&msg, conn_id, &registry, &channels, &tx, &mut state, &config);
                 while let Ok(out_msg) = rx.try_recv() {
                     if connection.send(out_msg).await.is_err() {
                         return;

@@ -11,6 +11,10 @@ fn make_sender() -> (
     mpsc::unbounded_channel()
 }
 
+fn make_channels() -> Arc<ChannelRegistry> {
+    Arc::new(ChannelRegistry::new())
+}
+
 fn nick_msg(nick: &str) -> Message {
     Message::new(Command::Nick, vec![nick.to_owned()])
 }
@@ -30,11 +34,12 @@ fn user_msg(username: &str, realname: &str) -> Message {
 #[tokio::test]
 async fn nick_then_user_completes_registration() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let (tx, mut rx) = make_sender();
     let config = make_config();
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
-    handle_message(&nick_msg("Alice"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&nick_msg("Alice"), 1, &registry, &channels, &tx, &mut state, &config);
     assert!(state.nick.is_some());
     assert!(!state.registered);
 
@@ -42,6 +47,7 @@ async fn nick_then_user_completes_registration() {
         &user_msg("alice", "Alice Test"),
         1,
         &registry,
+        &channels,
         &tx,
         &mut state,
         &config,
@@ -70,6 +76,7 @@ async fn nick_then_user_completes_registration() {
 #[tokio::test]
 async fn user_then_nick_completes_registration() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let (tx, mut rx) = make_sender();
     let config = make_config();
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
@@ -78,13 +85,14 @@ async fn user_then_nick_completes_registration() {
         &user_msg("bob", "Bob Test"),
         1,
         &registry,
+        &channels,
         &tx,
         &mut state,
         &config,
     );
     assert!(!state.registered);
 
-    handle_message(&nick_msg("Bob"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&nick_msg("Bob"), 1, &registry, &channels, &tx, &mut state, &config);
     assert!(state.registered);
     assert_eq!(registry.connection_count(), 1);
 
@@ -95,12 +103,13 @@ async fn user_then_nick_completes_registration() {
 #[tokio::test]
 async fn nick_no_param_returns_err() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let (tx, mut rx) = make_sender();
     let config = make_config();
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
     let msg = Message::new(Command::Nick, vec![]);
-    handle_message(&msg, 1, &registry, &tx, &mut state, &config);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NONICKNAMEGIVEN));
@@ -109,6 +118,7 @@ async fn nick_no_param_returns_err() {
 #[tokio::test]
 async fn nick_invalid_returns_err() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let (tx, mut rx) = make_sender();
     let config = make_config();
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
@@ -117,6 +127,7 @@ async fn nick_invalid_returns_err() {
         &nick_msg("123invalid"),
         1,
         &registry,
+        &channels,
         &tx,
         &mut state,
         &config,
@@ -129,6 +140,7 @@ async fn nick_invalid_returns_err() {
 #[tokio::test]
 async fn nick_in_use_returns_err() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let (tx1, _rx1) = make_sender();
     let config = make_config();
 
@@ -153,7 +165,7 @@ async fn nick_in_use_returns_err() {
     let (tx2, mut rx2) = make_sender();
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
-    handle_message(&nick_msg("Alice"), 2, &registry, &tx2, &mut state, &config);
+    handle_message(&nick_msg("Alice"), 2, &registry, &channels, &tx2, &mut state, &config);
 
     let reply = rx2.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NICKNAMEINUSE));
@@ -163,12 +175,13 @@ async fn nick_in_use_returns_err() {
 #[tokio::test]
 async fn user_missing_params_returns_err() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let (tx, mut rx) = make_sender();
     let config = make_config();
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
     let msg = Message::new(Command::User, vec!["alice".to_owned()]);
-    handle_message(&msg, 1, &registry, &tx, &mut state, &config);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -177,16 +190,18 @@ async fn user_missing_params_returns_err() {
 #[tokio::test]
 async fn user_after_registration_returns_err() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let (tx, mut rx) = make_sender();
     let config = make_config();
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
     // Register first
-    handle_message(&nick_msg("Alice"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&nick_msg("Alice"), 1, &registry, &channels, &tx, &mut state, &config);
     handle_message(
         &user_msg("alice", "Alice"),
         1,
         &registry,
+        &channels,
         &tx,
         &mut state,
         &config,
@@ -201,6 +216,7 @@ async fn user_after_registration_returns_err() {
         &user_msg("alice2", "Alice2"),
         1,
         &registry,
+        &channels,
         &tx,
         &mut state,
         &config,
@@ -213,12 +229,13 @@ async fn user_after_registration_returns_err() {
 #[tokio::test]
 async fn ping_gets_pong_response() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let (tx, mut rx) = make_sender();
     let config = make_config();
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
     let msg = Message::new(Command::Ping, vec!["token123".to_owned()]);
-    handle_message(&msg, 1, &registry, &tx, &mut state, &config);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Pong);
@@ -228,6 +245,7 @@ async fn ping_gets_pong_response() {
 #[tokio::test]
 async fn welcome_message_contains_nick_and_host() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let (tx, mut rx) = make_sender();
     let config = make_config();
     let mut state = PreRegistrationState::new("10.0.0.1".to_owned());
@@ -236,6 +254,7 @@ async fn welcome_message_contains_nick_and_host() {
         &nick_msg("TestNick"),
         1,
         &registry,
+        &channels,
         &tx,
         &mut state,
         &config,
@@ -244,6 +263,7 @@ async fn welcome_message_contains_nick_and_host() {
         &user_msg("testuser", "Test User"),
         1,
         &registry,
+        &channels,
         &tx,
         &mut state,
         &config,
@@ -261,6 +281,7 @@ async fn registration_race_condition_handled() {
     // Two connections try to register with the same nick concurrently.
     // One should succeed, the other should get ERR_NICKNAMEINUSE.
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
 
     let (tx1, mut rx1) = make_sender();
@@ -269,6 +290,7 @@ async fn registration_race_condition_handled() {
         &nick_msg("SameNick"),
         1,
         &registry,
+        &channels,
         &tx1,
         &mut state1,
         &config,
@@ -277,6 +299,7 @@ async fn registration_race_condition_handled() {
         &user_msg("user1", "User One"),
         1,
         &registry,
+        &channels,
         &tx1,
         &mut state1,
         &config,
@@ -289,6 +312,7 @@ async fn registration_race_condition_handled() {
         &nick_msg("SameNick"),
         2,
         &registry,
+        &channels,
         &tx2,
         &mut state2,
         &config,
@@ -311,6 +335,7 @@ fn register_user(
     connection_id: u64,
     hostname: &str,
     registry: &Arc<UserRegistry>,
+    channels: &Arc<ChannelRegistry>,
     config: &ServerConfig,
 ) -> (
     mpsc::UnboundedSender<Message>,
@@ -319,11 +344,12 @@ fn register_user(
 ) {
     let (tx, mut rx) = make_sender();
     let mut state = PreRegistrationState::new(hostname.to_owned());
-    handle_message(&nick_msg(nick), connection_id, registry, &tx, &mut state, config);
+    handle_message(&nick_msg(nick), connection_id, registry, channels, &tx, &mut state, config);
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
         connection_id,
         registry,
+        channels,
         &tx,
         &mut state,
         config,
@@ -337,11 +363,12 @@ fn register_user(
 #[tokio::test]
 async fn nick_change_after_registration_succeeds() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
-    handle_message(&nick_msg("NewAlice"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&nick_msg("NewAlice"), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Nick);
@@ -361,14 +388,15 @@ async fn nick_change_after_registration_succeeds() {
 #[tokio::test]
 async fn nick_change_collision_returns_err() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
     let (_tx2, _rx2, _state2) =
-        register_user("Bob", "bob", 2, "127.0.0.2", &registry, &config);
+        register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Alice tries to change to Bob's nick
-    handle_message(&nick_msg("Bob"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&nick_msg("Bob"), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NICKNAMEINUSE));
@@ -381,11 +409,12 @@ async fn nick_change_collision_returns_err() {
 #[tokio::test]
 async fn nick_change_invalid_returns_err() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
-    handle_message(&nick_msg("123bad"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&nick_msg("123bad"), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_ERRONEUSNICKNAME));
@@ -398,11 +427,12 @@ async fn nick_change_invalid_returns_err() {
 #[tokio::test]
 async fn nick_change_case_only_succeeds() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
-    handle_message(&nick_msg("ALICE"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&nick_msg("ALICE"), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Nick);
@@ -422,12 +452,13 @@ async fn nick_change_case_only_succeeds() {
 #[tokio::test]
 async fn nick_change_no_param_returns_err() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
     let msg = Message::new(Command::Nick, vec![]);
-    handle_message(&msg, 1, &registry, &tx, &mut state, &config);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NONICKNAMEGIVEN));
@@ -436,11 +467,12 @@ async fn nick_change_no_param_returns_err() {
 #[tokio::test]
 async fn nick_change_prefix_has_correct_old_nick() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("OldNick", "theuser", 1, "10.0.0.5", &registry, &config);
+        register_user("OldNick", "theuser", 1, "10.0.0.5", &registry, &channels, &config);
 
-    handle_message(&nick_msg("NewNick"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&nick_msg("NewNick"), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Nick);
@@ -458,15 +490,16 @@ fn whois_msg(nick: &str) -> Message {
 #[tokio::test]
 async fn whois_existing_user_returns_reply_sequence() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
     // Register a target user
     let (_tx2, _rx2, _state2) =
-        register_user("Bob", "bob", 2, "10.0.0.2", &registry, &config);
+        register_user("Bob", "bob", 2, "10.0.0.2", &registry, &channels, &config);
 
-    handle_message(&whois_msg("Bob"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&whois_msg("Bob"), 1, &registry, &channels, &tx, &mut state, &config);
 
     // RPL_WHOISUSER (311)
     let reply = rx.recv().await.unwrap();
@@ -502,14 +535,16 @@ async fn whois_existing_user_returns_reply_sequence() {
 #[tokio::test]
 async fn whois_nonexistent_nick_returns_nosuchnick() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
     handle_message(
         &whois_msg("Ghost"),
         1,
         &registry,
+        &channels,
         &tx,
         &mut state,
         &config,
@@ -525,12 +560,13 @@ async fn whois_nonexistent_nick_returns_nosuchnick() {
 #[tokio::test]
 async fn whois_no_param_returns_nonicknamegiven() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
     let msg = Message::new(Command::Whois, vec![]);
-    handle_message(&msg, 1, &registry, &tx, &mut state, &config);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NONICKNAMEGIVEN));
@@ -539,13 +575,14 @@ async fn whois_no_param_returns_nonicknamegiven() {
 #[tokio::test]
 async fn whois_away_user_includes_rpl_away() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
     // Register Bob and set away
     let (_tx2, _rx2, _state2) =
-        register_user("Bob", "bob", 2, "10.0.0.2", &registry, &config);
+        register_user("Bob", "bob", 2, "10.0.0.2", &registry, &channels, &config);
     {
         let bob_nick = Nickname::new("Bob").unwrap();
         let session_arc = registry.get_by_nick(&bob_nick).unwrap();
@@ -553,7 +590,7 @@ async fn whois_away_user_includes_rpl_away() {
         session.away_message = Some("Gone fishing".to_owned());
     }
 
-    handle_message(&whois_msg("Bob"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&whois_msg("Bob"), 1, &registry, &channels, &tx, &mut state, &config);
 
     // RPL_WHOISUSER (311)
     let reply = rx.recv().await.unwrap();
@@ -580,13 +617,14 @@ async fn whois_away_user_includes_rpl_away() {
 #[tokio::test]
 async fn whois_operator_includes_rpl_whoisoperator() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
     // Register Bob and set operator mode
     let (_tx2, _rx2, _state2) =
-        register_user("Bob", "bob", 2, "10.0.0.2", &registry, &config);
+        register_user("Bob", "bob", 2, "10.0.0.2", &registry, &channels, &config);
     {
         let bob_nick = Nickname::new("Bob").unwrap();
         let session_arc = registry.get_by_nick(&bob_nick).unwrap();
@@ -594,7 +632,7 @@ async fn whois_operator_includes_rpl_whoisoperator() {
         session.modes.insert(pirc_common::UserMode::Operator);
     }
 
-    handle_message(&whois_msg("Bob"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&whois_msg("Bob"), 1, &registry, &channels, &tx, &mut state, &config);
 
     // RPL_WHOISUSER (311)
     let reply = rx.recv().await.unwrap();
@@ -621,15 +659,16 @@ async fn whois_operator_includes_rpl_whoisoperator() {
 #[tokio::test]
 async fn whois_idle_time_is_reasonable() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
     // Register Bob
     let (_tx2, _rx2, _state2) =
-        register_user("Bob", "bob", 2, "10.0.0.2", &registry, &config);
+        register_user("Bob", "bob", 2, "10.0.0.2", &registry, &channels, &config);
 
-    handle_message(&whois_msg("Bob"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&whois_msg("Bob"), 1, &registry, &channels, &tx, &mut state, &config);
 
     // Skip to RPL_WHOISIDLE
     let _ = rx.recv().await.unwrap(); // 311
@@ -645,6 +684,7 @@ async fn whois_idle_time_is_reasonable() {
 #[tokio::test]
 async fn motd_text_is_sent_when_configured() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let (tx, mut rx) = make_sender();
     let mut config = make_config();
     config.motd.text = Some("Welcome!\nEnjoy your stay.".to_owned());
@@ -654,6 +694,7 @@ async fn motd_text_is_sent_when_configured() {
         &nick_msg("MotdUser"),
         1,
         &registry,
+        &channels,
         &tx,
         &mut state,
         &config,
@@ -662,6 +703,7 @@ async fn motd_text_is_sent_when_configured() {
         &user_msg("motduser", "Motd User"),
         1,
         &registry,
+        &channels,
         &tx,
         &mut state,
         &config,
@@ -715,11 +757,12 @@ fn away_clear() -> Message {
 #[tokio::test]
 async fn away_set_returns_rpl_nowaway() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
-    handle_message(&away_msg("Gone fishing"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&away_msg("Gone fishing"), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_NOWAWAY));
@@ -735,16 +778,17 @@ async fn away_set_returns_rpl_nowaway() {
 #[tokio::test]
 async fn away_clear_returns_rpl_unaway() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
     // First set away
-    handle_message(&away_msg("BRB"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&away_msg("BRB"), 1, &registry, &channels, &tx, &mut state, &config);
     let _ = rx.recv().await.unwrap(); // drain RPL_NOWAWAY
 
     // Now clear away
-    handle_message(&away_clear(), 1, &registry, &tx, &mut state, &config);
+    handle_message(&away_clear(), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UNAWAY));
@@ -760,14 +804,15 @@ async fn away_clear_returns_rpl_unaway() {
 #[tokio::test]
 async fn away_set_then_update_message() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
-    handle_message(&away_msg("First"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&away_msg("First"), 1, &registry, &channels, &tx, &mut state, &config);
     let _ = rx.recv().await.unwrap();
 
-    handle_message(&away_msg("Second"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&away_msg("Second"), 1, &registry, &channels, &tx, &mut state, &config);
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_NOWAWAY));
 
@@ -794,11 +839,12 @@ fn mode_no_params() -> Message {
 #[tokio::test]
 async fn mode_query_own_returns_rpl_umodeis() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
-    handle_message(&mode_query("Alice"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&mode_query("Alice"), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
@@ -808,13 +854,14 @@ async fn mode_query_own_returns_rpl_umodeis() {
 #[tokio::test]
 async fn mode_query_other_returns_err_usersdontmatch() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
     let (_tx2, _rx2, _state2) =
-        register_user("Bob", "bob", 2, "127.0.0.2", &registry, &config);
+        register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
-    handle_message(&mode_query("Bob"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&mode_query("Bob"), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_USERSDONTMATCH));
@@ -823,11 +870,12 @@ async fn mode_query_other_returns_err_usersdontmatch() {
 #[tokio::test]
 async fn mode_no_params_returns_err_needmoreparams() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
-    handle_message(&mode_no_params(), 1, &registry, &tx, &mut state, &config);
+    handle_message(&mode_no_params(), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NEEDMOREPARAMS));
@@ -836,11 +884,12 @@ async fn mode_no_params_returns_err_needmoreparams() {
 #[tokio::test]
 async fn mode_set_voiced_on_self() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
-    handle_message(&mode_set("Alice", "+v"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&mode_set("Alice", "+v"), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
@@ -856,12 +905,13 @@ async fn mode_set_voiced_on_self() {
 #[tokio::test]
 async fn mode_set_operator_self_ignored() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
     // Trying +o should not self-promote
-    handle_message(&mode_set("Alice", "+o"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&mode_set("Alice", "+o"), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
@@ -876,9 +926,10 @@ async fn mode_set_operator_self_ignored() {
 #[tokio::test]
 async fn mode_remove_operator() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
     // Manually set operator
     {
@@ -888,7 +939,7 @@ async fn mode_remove_operator() {
         s.modes.insert(UserMode::Operator);
     }
 
-    handle_message(&mode_set("Alice", "-o"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&mode_set("Alice", "-o"), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
@@ -903,11 +954,12 @@ async fn mode_remove_operator() {
 #[tokio::test]
 async fn mode_unknown_flag_returns_err() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
-    handle_message(&mode_set("Alice", "+x"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&mode_set("Alice", "+x"), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_UMODEUNKNOWNFLAG));
@@ -920,13 +972,14 @@ async fn mode_unknown_flag_returns_err() {
 #[tokio::test]
 async fn mode_set_other_returns_err_usersdontmatch() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
     let (_tx2, _rx2, _state2) =
-        register_user("Bob", "bob", 2, "127.0.0.2", &registry, &config);
+        register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
-    handle_message(&mode_set("Bob", "+v"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&mode_set("Bob", "+v"), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_USERSDONTMATCH));
@@ -935,12 +988,13 @@ async fn mode_set_other_returns_err_usersdontmatch() {
 #[tokio::test]
 async fn mode_query_case_insensitive() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
     // Query with different casing
-    handle_message(&mode_query("alice"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&mode_query("alice"), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
@@ -949,12 +1003,13 @@ async fn mode_query_case_insensitive() {
 #[tokio::test]
 async fn mode_combined_modestring() {
     let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
     let config = make_config();
     let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
 
     // Set +v then -v in one string
-    handle_message(&mode_set("Alice", "+v-v"), 1, &registry, &tx, &mut state, &config);
+    handle_message(&mode_set("Alice", "+v-v"), 1, &registry, &channels, &tx, &mut state, &config);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));

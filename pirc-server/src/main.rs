@@ -7,6 +7,7 @@ use std::time::Duration;
 use pirc_network::connection::AsyncTransport;
 use pirc_network::{Connection, Listener, ShutdownSignal};
 use pirc_protocol::{Command, Message};
+use pirc_server::channel_registry::ChannelRegistry;
 use pirc_server::config::ServerConfig;
 use pirc_server::handler::{self, HandleResult, PreRegistrationState};
 use pirc_server::registry::UserRegistry;
@@ -79,6 +80,7 @@ async fn main() {
     });
 
     let registry = Arc::new(UserRegistry::new());
+    let channels = Arc::new(ChannelRegistry::new());
     let config = Arc::new(config);
 
     // Accept loop
@@ -87,6 +89,7 @@ async fn main() {
             Ok(Some((connection, peer_addr))) => {
                 let conn_shutdown = shutdown_signal.clone();
                 let conn_registry = Arc::clone(&registry);
+                let conn_channels = Arc::clone(&channels);
                 let conn_config = Arc::clone(&config);
                 tokio::spawn(async move {
                     handle_connection(
@@ -94,6 +97,7 @@ async fn main() {
                         peer_addr,
                         conn_shutdown,
                         conn_registry,
+                        conn_channels,
                         conn_config,
                     )
                     .await;
@@ -121,6 +125,7 @@ async fn handle_connection(
     peer_addr: SocketAddr,
     mut shutdown: ShutdownSignal,
     registry: Arc<UserRegistry>,
+    channels: Arc<ChannelRegistry>,
     config: Arc<ServerConfig>,
 ) {
     let conn_id = connection.info().id;
@@ -148,7 +153,7 @@ async fn handle_connection(
                         }
 
                         let handle_result = handler::handle_message(
-                            &msg, conn_id, &registry, &tx, &mut state, &config,
+                            &msg, conn_id, &registry, &channels, &tx, &mut state, &config,
                         );
 
                         // Drain all queued outbound messages after handling
