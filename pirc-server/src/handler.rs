@@ -831,6 +831,14 @@ mod topic_tests;
 mod kick_tests;
 
 #[cfg(test)]
+#[path = "channel_mode_query_tests.rs"]
+mod channel_mode_query_tests;
+
+#[cfg(test)]
+#[path = "channel_mode_set_tests.rs"]
+mod channel_mode_set_tests;
+
+#[cfg(test)]
 #[path = "channel_mode_tests.rs"]
 mod channel_mode_tests;
 
