@@ -32,3 +32,4 @@ pub use connector::{Connector, ReconnectPolicy, ReconnectingConnector};
 pub use error::NetworkError;
 pub use listener::Listener;
 pub use pool::{ConnectionPool, ConnectionRef};
+pub use shutdown::{ShutdownController, ShutdownSignal};

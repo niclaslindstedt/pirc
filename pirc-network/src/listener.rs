@@ -10,6 +10,7 @@ use tracing::{info, instrument, trace};
 
 use crate::connection::Connection;
 use crate::error::NetworkError;
+use crate::shutdown::ShutdownSignal;
 
 /// A TCP listener that accepts incoming connections and wraps them as
 /// [`Connection`] objects with typed IRC message I/O.
@@ -44,6 +45,31 @@ impl Listener {
         Ok((conn, peer_addr))
     }
 
+    /// Accept the next incoming connection, or return `None` if shutdown is
+    /// signaled before a connection arrives.
+    ///
+    /// This is the shutdown-aware version of [`Listener::accept`].
+    #[instrument(skip(self, shutdown), fields(local = %self.inner.local_addr().unwrap()))]
+    pub async fn accept_with_shutdown(
+        &self,
+        shutdown: &mut ShutdownSignal,
+    ) -> Result<Option<(Connection, SocketAddr)>, NetworkError> {
+        trace!("waiting for connection (shutdown-aware)");
+        tokio::select! {
+            result = self.inner.accept() => {
+                let (stream, peer_addr) = result?;
+                let conn = Connection::new(stream)?;
+                let id = conn.info().id;
+                info!(id, %peer_addr, "accepted connection");
+                Ok(Some((conn, peer_addr)))
+            }
+            () = shutdown.recv() => {
+                info!("listener shutting down, stopped accepting");
+                Ok(None)
+            }
+        }
+    }
+
     /// Returns the local address this listener is bound to.
     pub fn local_addr(&self) -> Result<SocketAddr, NetworkError> {
         Ok(self.inner.local_addr()?)
@@ -66,7 +92,9 @@ impl std::fmt::Debug for Listener {
 mod tests {
     use super::*;
     use crate::connection::AsyncTransport;
+    use crate::shutdown::ShutdownSignal;
     use pirc_protocol::{Command, Message};
+    use std::time::Duration;
     use tokio::net::TcpStream;
 
     /// Helper: bind a Listener on a random loopback port.
@@ -173,5 +201,62 @@ mod tests {
         let debug_str = format!("{listener:?}");
         assert!(debug_str.contains("Listener"));
         assert!(debug_str.contains("local_addr"));
+    }
+
+    #[tokio::test]
+    async fn accept_with_shutdown_returns_none_on_signal() {
+        let listener = loopback_listener().await;
+        let (controller, mut signal) = ShutdownSignal::new();
+
+        // Signal shutdown immediately
+        controller.shutdown();
+
+        let result = listener.accept_with_shutdown(&mut signal).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn accept_with_shutdown_returns_connection_before_signal() {
+        let listener = loopback_listener().await;
+        let addr = listener.local_addr().unwrap();
+        let (_controller, mut signal) = ShutdownSignal::new();
+
+        // Connect a client before triggering shutdown
+        let _client = TcpStream::connect(addr).await.unwrap();
+
+        let result = listener.accept_with_shutdown(&mut signal).await.unwrap();
+        assert!(result.is_some());
+        let (conn, peer_addr) = result.unwrap();
+        assert!(peer_addr.ip().is_loopback());
+        assert!(conn.info().peer_addr.ip().is_loopback());
+    }
+
+    #[tokio::test]
+    async fn accept_with_shutdown_stops_accept_loop() {
+        let listener = std::sync::Arc::new(loopback_listener().await);
+        let (controller, mut signal) = ShutdownSignal::new();
+
+        // Start an accept loop in a task
+        let listener_clone = listener.clone();
+        let handle = tokio::spawn(async move {
+            let mut count = 0u32;
+            loop {
+                match listener_clone.accept_with_shutdown(&mut signal).await {
+                    Ok(Some(_)) => count += 1,
+                    Ok(None) => break,
+                    Err(_) => break,
+                }
+            }
+            count
+        });
+
+        // Give the task time to start waiting
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Signal shutdown
+        controller.shutdown();
+
+        let count = handle.await.unwrap();
+        assert_eq!(count, 0);
     }
 }

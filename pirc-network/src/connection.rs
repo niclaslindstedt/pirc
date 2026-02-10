@@ -16,6 +16,7 @@ use tracing::{debug, trace};
 
 use crate::codec::PircCodec;
 use crate::error::NetworkError;
+use crate::shutdown::ShutdownSignal;
 
 // ---------------------------------------------------------------------------
 // Connection ID generator
@@ -117,6 +118,39 @@ impl Connection {
     pub fn info(&self) -> &ConnectionInfo {
         &self.info
     }
+
+    /// Receive the next message, or flush and close if shutdown is signaled.
+    ///
+    /// Returns `Ok(Some(msg))` for a normal message, `Ok(None)` if shutdown
+    /// was signaled (after flushing pending writes and closing the connection),
+    /// or `Err` on I/O errors.
+    pub async fn recv_with_shutdown(
+        &mut self,
+        shutdown: &mut ShutdownSignal,
+    ) -> Result<Option<Message>, NetworkError> {
+        tokio::select! {
+            result = self.framed.next() => {
+                match result {
+                    Some(Ok(msg)) => {
+                        trace!(id = self.info.id, ?msg, "received message");
+                        let wire_len = (msg.to_string().len() + 2) as u64;
+                        self.info.bytes_received += wire_len;
+                        Ok(Some(msg))
+                    }
+                    Some(Err(e)) => Err(e),
+                    None => {
+                        debug!(id = self.info.id, "connection EOF");
+                        Ok(None)
+                    }
+                }
+            }
+            () = shutdown.recv() => {
+                debug!(id = self.info.id, "shutdown signaled, flushing and closing");
+                self.framed.close().await?;
+                Ok(None)
+            }
+        }
+    }
 }
 
 impl AsyncTransport for Connection {
@@ -176,7 +210,9 @@ impl std::fmt::Debug for Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shutdown::ShutdownSignal;
     use pirc_protocol::{Command, Prefix};
+    use std::time::Duration;
     use tokio::net::TcpListener;
 
     /// Helper: create a loopback TCP pair and wrap both ends as Connections.
@@ -402,5 +438,80 @@ mod tests {
         assert_eq!(client.info().bytes_received, pong_bytes);
         assert_eq!(server.info().bytes_received, ping_bytes);
         assert_eq!(server.info().bytes_sent, pong_bytes);
+    }
+
+    #[tokio::test]
+    async fn recv_with_shutdown_returns_none_on_signal() {
+        let (mut client, mut server) = loopback_pair().await;
+        let (controller, mut signal) = ShutdownSignal::new();
+
+        // Signal shutdown immediately
+        controller.shutdown();
+
+        let result = server.recv_with_shutdown(&mut signal).await.unwrap();
+        assert!(result.is_none());
+
+        // The server connection should be closed — client sees EOF
+        let eof = client.recv().await.unwrap();
+        assert!(eof.is_none());
+    }
+
+    #[tokio::test]
+    async fn recv_with_shutdown_receives_messages_before_signal() {
+        let (mut client, mut server) = loopback_pair().await;
+        let (_controller, mut signal) = ShutdownSignal::new();
+
+        let msg = Message::new(Command::Ping, vec!["hello".to_owned()]);
+        client.send(msg.clone()).await.unwrap();
+
+        let result = server.recv_with_shutdown(&mut signal).await.unwrap();
+        assert_eq!(result, Some(msg));
+    }
+
+    #[tokio::test]
+    async fn recv_with_shutdown_flushes_before_close() {
+        let (mut client, mut server) = loopback_pair().await;
+        let (controller, mut signal) = ShutdownSignal::new();
+
+        // Server sends a message, then gets shutdown signaled
+        let msg = Message::new(Command::Quit, vec!["bye".to_owned()]);
+        server.send(msg.clone()).await.unwrap();
+
+        controller.shutdown();
+        let result = server.recv_with_shutdown(&mut signal).await.unwrap();
+        assert!(result.is_none());
+
+        // Client should still receive the message that was sent before shutdown
+        let received = client.recv().await.unwrap().unwrap();
+        assert_eq!(received, msg);
+    }
+
+    #[tokio::test]
+    async fn recv_with_shutdown_during_active_exchange() {
+        let (mut client, mut server) = loopback_pair().await;
+        let (controller, mut signal) = ShutdownSignal::new();
+
+        // Exchange a few messages first
+        let msg1 = Message::new(Command::Ping, vec!["1".to_owned()]);
+        let msg2 = Message::new(Command::Pong, vec!["2".to_owned()]);
+
+        client.send(msg1.clone()).await.unwrap();
+        let r1 = server.recv_with_shutdown(&mut signal).await.unwrap();
+        assert_eq!(r1, Some(msg1));
+
+        server.send(msg2.clone()).await.unwrap();
+        let r2 = client.recv().await.unwrap().unwrap();
+        assert_eq!(r2, msg2);
+
+        // Now signal shutdown
+        controller.shutdown();
+        let result = tokio::time::timeout(
+            Duration::from_millis(100),
+            server.recv_with_shutdown(&mut signal),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(result.is_none());
     }
 }

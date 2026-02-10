@@ -14,6 +14,7 @@ use tracing::{debug, warn};
 
 use crate::connection::{AsyncTransport, Connection};
 use crate::error::NetworkError;
+use crate::shutdown::ShutdownSignal;
 
 /// An RAII read guard wrapping a borrowed [`Connection`] from the pool.
 ///
@@ -146,12 +147,29 @@ impl ConnectionPool {
             None => Ok(()),
         }
     }
+
+    /// Wait for a shutdown signal, then gracefully shut down all pooled
+    /// connections.
+    ///
+    /// This is a convenience method that combines waiting for the shutdown
+    /// signal with the actual shutdown procedure. It flushes all connections
+    /// before closing them.
+    pub async fn shutdown_on_signal(
+        &self,
+        mut shutdown: ShutdownSignal,
+    ) -> Result<(), NetworkError> {
+        shutdown.recv().await;
+        debug!("shutdown signal received, shutting down pool");
+        self.shutdown_all().await
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shutdown::ShutdownSignal;
     use pirc_protocol::Command;
+    use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};
 
     /// Helper: create a loopback TCP pair and wrap both ends as Connections.
@@ -443,6 +461,47 @@ mod tests {
     async fn shutdown_all_on_empty_pool() {
         let pool = ConnectionPool::new(10);
         pool.shutdown_all().await.unwrap();
+        assert!(pool.is_empty().await);
+    }
+
+    #[tokio::test]
+    async fn shutdown_on_signal_closes_all() {
+        let pool = std::sync::Arc::new(ConnectionPool::new(10));
+
+        let (c1, mut p1) = loopback_pair().await;
+        let (c2, mut p2) = loopback_pair().await;
+
+        pool.add(ServerId::new(1), c1).await.unwrap();
+        pool.add(ServerId::new(2), c2).await.unwrap();
+
+        let (controller, signal) = ShutdownSignal::new();
+
+        let pool_clone = pool.clone();
+        let handle = tokio::spawn(async move { pool_clone.shutdown_on_signal(signal).await });
+
+        // Give the task time to start waiting
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Signal shutdown
+        controller.shutdown();
+
+        handle.await.unwrap().unwrap();
+
+        // Pool should be empty
+        assert!(pool.is_empty().await);
+
+        // Peers should see EOF
+        assert!(p1.recv().await.unwrap().is_none());
+        assert!(p2.recv().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn shutdown_on_signal_empty_pool() {
+        let pool = ConnectionPool::new(10);
+        let (controller, signal) = ShutdownSignal::new();
+
+        controller.shutdown();
+        pool.shutdown_on_signal(signal).await.unwrap();
         assert!(pool.is_empty().await);
     }
 }
