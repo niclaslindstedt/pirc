@@ -19,6 +19,7 @@ pirc-protocol = { path = "../pirc-protocol" }
 pirc-crypto = { path = "../pirc-crypto" }
 pirc-network = { path = "../pirc-network" }
 serde = { version = "1", features = ["derive"] }
+dashmap = "6"
 tokio = { version = "1", features = ["full"] }
 toml = "0.8"
 tracing = "0.1"

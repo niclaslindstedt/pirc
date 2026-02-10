@@ -1,4 +1,6 @@
 mod config;
+pub mod registry;
+pub mod user;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
