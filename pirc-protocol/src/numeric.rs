@@ -77,6 +77,16 @@ pub const RPL_TOPICWHOTIME: u16 = 333;
 /// Invitation sent: `<channel> <nick>`.
 pub const RPL_INVITING: u16 = 341;
 
+// ---- Kill replies ----
+
+/// Kill done (optional).
+pub const RPL_KILLDONE: u16 = 361;
+
+// ---- Operator replies ----
+
+/// You are now an IRC operator.
+pub const RPL_YOUREOPER: u16 = 381;
+
 // ---- Ban list replies ----
 
 /// Ban list entry: `<channel> <banmask>`.
@@ -112,6 +122,8 @@ pub const ERR_USERONCHANNEL: u16 = 443;
 pub const ERR_NEEDMOREPARAMS: u16 = 461;
 /// You may not reregister.
 pub const ERR_ALREADYREGISTERED: u16 = 462;
+/// Password incorrect (used by OPER).
+pub const ERR_PASSWDMISMATCH: u16 = 464;
 /// Cannot join channel (+l): channel is full.
 pub const ERR_CHANNELISFULL: u16 = 471;
 /// Unknown mode character.
@@ -124,8 +136,14 @@ pub const ERR_BANNEDCHANNEL: u16 = 474;
 pub const ERR_BADCHANNELKEY: u16 = 475;
 /// Bad channel mask.
 pub const ERR_BADCHANMASK: u16 = 476;
+/// Permission denied - You're not an IRC operator.
+pub const ERR_NOPRIVILEGES: u16 = 481;
 /// Channel operator privileges needed.
 pub const ERR_CHANOPRIVSNEEDED: u16 = 482;
+/// Cannot kill server.
+pub const ERR_CANTKILLSERVER: u16 = 483;
+/// No O-lines for your host.
+pub const ERR_NOOPERHOST: u16 = 491;
 /// Unknown MODE flag.
 pub const ERR_UMODEUNKNOWNFLAG: u16 = 501;
 /// Cannot change mode for other users.
@@ -169,8 +187,10 @@ pub fn reply_name(code: u16) -> Option<&'static str> {
         RPL_MOTD => Some("RPL_MOTD"),
         RPL_MOTDSTART => Some("RPL_MOTDSTART"),
         RPL_ENDOFMOTD => Some("RPL_ENDOFMOTD"),
+        RPL_KILLDONE => Some("RPL_KILLDONE"),
         RPL_BANLIST => Some("RPL_BANLIST"),
         RPL_ENDOFBANLIST => Some("RPL_ENDOFBANLIST"),
+        RPL_YOUREOPER => Some("RPL_YOUREOPER"),
         ERR_NOSUCHNICK => Some("ERR_NOSUCHNICK"),
         ERR_NOSUCHCHANNEL => Some("ERR_NOSUCHCHANNEL"),
         ERR_CANNOTSENDTOCHAN => Some("ERR_CANNOTSENDTOCHAN"),
@@ -184,13 +204,17 @@ pub fn reply_name(code: u16) -> Option<&'static str> {
         ERR_USERONCHANNEL => Some("ERR_USERONCHANNEL"),
         ERR_NEEDMOREPARAMS => Some("ERR_NEEDMOREPARAMS"),
         ERR_ALREADYREGISTERED => Some("ERR_ALREADYREGISTERED"),
+        ERR_PASSWDMISMATCH => Some("ERR_PASSWDMISMATCH"),
         ERR_CHANNELISFULL => Some("ERR_CHANNELISFULL"),
         ERR_UNKNOWNMODE => Some("ERR_UNKNOWNMODE"),
         ERR_INVITEONLYCHAN => Some("ERR_INVITEONLYCHAN"),
         ERR_BANNEDCHANNEL => Some("ERR_BANNEDCHANNEL"),
         ERR_BADCHANNELKEY => Some("ERR_BADCHANNELKEY"),
         ERR_BADCHANMASK => Some("ERR_BADCHANMASK"),
+        ERR_NOPRIVILEGES => Some("ERR_NOPRIVILEGES"),
         ERR_CHANOPRIVSNEEDED => Some("ERR_CHANOPRIVSNEEDED"),
+        ERR_CANTKILLSERVER => Some("ERR_CANTKILLSERVER"),
+        ERR_NOOPERHOST => Some("ERR_NOOPERHOST"),
         ERR_UMODEUNKNOWNFLAG => Some("ERR_UMODEUNKNOWNFLAG"),
         ERR_USERSDONTMATCH => Some("ERR_USERSDONTMATCH"),
         _ => None,
@@ -224,8 +248,11 @@ mod tests {
         assert_eq!(RPL_NAMREPLY, 353);
         assert_eq!(RPL_ENDOFNAMES, 366);
         assert_eq!(RPL_MOTD, 372);
+        assert_eq!(RPL_KILLDONE, 361);
+        assert_eq!(RPL_MOTD, 372);
         assert_eq!(RPL_MOTDSTART, 375);
         assert_eq!(RPL_ENDOFMOTD, 376);
+        assert_eq!(RPL_YOUREOPER, 381);
     }
 
     #[test]
@@ -256,13 +283,17 @@ mod tests {
         assert_eq!(ERR_USERONCHANNEL, 443);
         assert_eq!(ERR_NEEDMOREPARAMS, 461);
         assert_eq!(ERR_ALREADYREGISTERED, 462);
+        assert_eq!(ERR_PASSWDMISMATCH, 464);
         assert_eq!(ERR_CHANNELISFULL, 471);
         assert_eq!(ERR_UNKNOWNMODE, 472);
         assert_eq!(ERR_INVITEONLYCHAN, 473);
         assert_eq!(ERR_BANNEDCHANNEL, 474);
         assert_eq!(ERR_BADCHANNELKEY, 475);
         assert_eq!(ERR_BADCHANMASK, 476);
+        assert_eq!(ERR_NOPRIVILEGES, 481);
         assert_eq!(ERR_CHANOPRIVSNEEDED, 482);
+        assert_eq!(ERR_CANTKILLSERVER, 483);
+        assert_eq!(ERR_NOOPERHOST, 491);
         assert_eq!(ERR_UMODEUNKNOWNFLAG, 501);
         assert_eq!(ERR_USERSDONTMATCH, 502);
     }
@@ -285,8 +316,10 @@ mod tests {
         assert_eq!(reply_name(RPL_NAMREPLY), Some("RPL_NAMREPLY"));
         assert_eq!(reply_name(RPL_ENDOFNAMES), Some("RPL_ENDOFNAMES"));
         assert_eq!(reply_name(RPL_MOTD), Some("RPL_MOTD"));
+        assert_eq!(reply_name(RPL_KILLDONE), Some("RPL_KILLDONE"));
         assert_eq!(reply_name(RPL_MOTDSTART), Some("RPL_MOTDSTART"));
         assert_eq!(reply_name(RPL_ENDOFMOTD), Some("RPL_ENDOFMOTD"));
+        assert_eq!(reply_name(RPL_YOUREOPER), Some("RPL_YOUREOPER"));
         assert_eq!(reply_name(ERR_NOSUCHNICK), Some("ERR_NOSUCHNICK"));
         assert_eq!(reply_name(ERR_NOMOTD), Some("ERR_NOMOTD"));
         assert_eq!(reply_name(ERR_NONICKNAMEGIVEN), Some("ERR_NONICKNAMEGIVEN"));
@@ -299,6 +332,10 @@ mod tests {
         assert_eq!(
             reply_name(ERR_ALREADYREGISTERED),
             Some("ERR_ALREADYREGISTERED")
+        );
+        assert_eq!(
+            reply_name(ERR_PASSWDMISMATCH),
+            Some("ERR_PASSWDMISMATCH")
         );
         assert_eq!(
             reply_name(ERR_UMODEUNKNOWNFLAG),
@@ -336,10 +373,16 @@ mod tests {
         assert_eq!(reply_name(ERR_BANNEDCHANNEL), Some("ERR_BANNEDCHANNEL"));
         assert_eq!(reply_name(ERR_BADCHANNELKEY), Some("ERR_BADCHANNELKEY"));
         assert_eq!(reply_name(ERR_BADCHANMASK), Some("ERR_BADCHANMASK"));
+        assert_eq!(reply_name(ERR_NOPRIVILEGES), Some("ERR_NOPRIVILEGES"));
         assert_eq!(
             reply_name(ERR_CHANOPRIVSNEEDED),
             Some("ERR_CHANOPRIVSNEEDED")
         );
+        assert_eq!(
+            reply_name(ERR_CANTKILLSERVER),
+            Some("ERR_CANTKILLSERVER")
+        );
+        assert_eq!(reply_name(ERR_NOOPERHOST), Some("ERR_NOOPERHOST"));
     }
 
     #[test]
@@ -370,7 +413,11 @@ mod tests {
         assert!(is_error(ERR_BANNEDCHANNEL));
         assert!(is_error(ERR_BADCHANNELKEY));
         assert!(is_error(ERR_BADCHANMASK));
+        assert!(is_error(ERR_PASSWDMISMATCH));
+        assert!(is_error(ERR_NOPRIVILEGES));
         assert!(is_error(ERR_CHANOPRIVSNEEDED));
+        assert!(is_error(ERR_CANTKILLSERVER));
+        assert!(is_error(ERR_NOOPERHOST));
         assert!(is_error(ERR_UMODEUNKNOWNFLAG));
         assert!(is_error(ERR_USERSDONTMATCH));
         assert!(is_error(400));
@@ -389,8 +436,10 @@ mod tests {
         assert!(!is_error(RPL_AWAY));
         assert!(!is_error(RPL_WHOISUSER));
         assert!(!is_error(RPL_NAMREPLY));
+        assert!(!is_error(RPL_KILLDONE));
         assert!(!is_error(RPL_BANLIST));
         assert!(!is_error(RPL_MOTD));
+        assert!(!is_error(RPL_YOUREOPER));
         assert!(!is_error(0));
         assert!(!is_error(399));
         assert!(!is_error(600));

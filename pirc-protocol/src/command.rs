@@ -200,6 +200,18 @@ pub enum Command {
     Invite,
     /// Set away status.
     Away,
+    /// Authenticate as an IRC operator.
+    Oper,
+    /// Forcibly disconnect a user from the server.
+    Kill,
+    /// Shut down the server (operator only).
+    Die,
+    /// Restart the server (operator only).
+    Restart,
+    /// Send a message to all operators.
+    Wallops,
+    /// Request the message of the day.
+    Motd,
     /// Connection keepalive request.
     Ping,
     /// Connection keepalive response.
@@ -235,6 +247,12 @@ impl Command {
             Self::Names => "NAMES".to_owned(),
             Self::Invite => "INVITE".to_owned(),
             Self::Away => "AWAY".to_owned(),
+            Self::Oper => "OPER".to_owned(),
+            Self::Kill => "KILL".to_owned(),
+            Self::Die => "DIE".to_owned(),
+            Self::Restart => "RESTART".to_owned(),
+            Self::Wallops => "WALLOPS".to_owned(),
+            Self::Motd => "MOTD".to_owned(),
             Self::Ping => "PING".to_owned(),
             Self::Pong => "PONG".to_owned(),
             Self::Error => "ERROR".to_owned(),
@@ -267,6 +285,12 @@ impl Command {
             "NAMES" => Some(Self::Names),
             "INVITE" => Some(Self::Invite),
             "AWAY" => Some(Self::Away),
+            "OPER" => Some(Self::Oper),
+            "KILL" => Some(Self::Kill),
+            "DIE" => Some(Self::Die),
+            "RESTART" => Some(Self::Restart),
+            "WALLOPS" => Some(Self::Wallops),
+            "MOTD" => Some(Self::Motd),
             "PING" => Some(Self::Ping),
             "PONG" => Some(Self::Pong),
             "ERROR" => Some(Self::Error),
@@ -310,6 +334,12 @@ mod tests {
         assert_eq!(Command::Names.as_str(), "NAMES");
         assert_eq!(Command::Invite.as_str(), "INVITE");
         assert_eq!(Command::Away.as_str(), "AWAY");
+        assert_eq!(Command::Oper.as_str(), "OPER");
+        assert_eq!(Command::Kill.as_str(), "KILL");
+        assert_eq!(Command::Die.as_str(), "DIE");
+        assert_eq!(Command::Restart.as_str(), "RESTART");
+        assert_eq!(Command::Wallops.as_str(), "WALLOPS");
+        assert_eq!(Command::Motd.as_str(), "MOTD");
         assert_eq!(Command::Ping.as_str(), "PING");
         assert_eq!(Command::Pong.as_str(), "PONG");
         assert_eq!(Command::Error.as_str(), "ERROR");
@@ -608,6 +638,82 @@ mod tests {
     #[test]
     fn pirc_unknown_namespace() {
         assert_eq!(PircSubcommand::from_namespace("FOOBAR", "JOIN"), None);
+    }
+
+    // ---- Operator commands: from_keyword ----
+
+    #[test]
+    fn command_oper_from_keyword() {
+        assert_eq!(Command::from_keyword("OPER"), Some(Command::Oper));
+    }
+
+    #[test]
+    fn command_kill_from_keyword() {
+        assert_eq!(Command::from_keyword("KILL"), Some(Command::Kill));
+    }
+
+    #[test]
+    fn command_die_from_keyword() {
+        assert_eq!(Command::from_keyword("DIE"), Some(Command::Die));
+    }
+
+    #[test]
+    fn command_restart_from_keyword() {
+        assert_eq!(Command::from_keyword("RESTART"), Some(Command::Restart));
+    }
+
+    #[test]
+    fn command_wallops_from_keyword() {
+        assert_eq!(Command::from_keyword("WALLOPS"), Some(Command::Wallops));
+    }
+
+    #[test]
+    fn command_motd_from_keyword() {
+        assert_eq!(Command::from_keyword("MOTD"), Some(Command::Motd));
+    }
+
+    // ---- Operator commands: round-trip ----
+
+    #[test]
+    fn command_oper_round_trip() {
+        assert_eq!(Command::from_keyword("OPER"), Some(Command::Oper));
+        assert_eq!(Command::Oper.as_str(), "OPER");
+        assert_eq!(Command::Oper.to_string(), "OPER");
+    }
+
+    #[test]
+    fn command_kill_round_trip() {
+        assert_eq!(Command::from_keyword("KILL"), Some(Command::Kill));
+        assert_eq!(Command::Kill.as_str(), "KILL");
+        assert_eq!(Command::Kill.to_string(), "KILL");
+    }
+
+    #[test]
+    fn command_die_round_trip() {
+        assert_eq!(Command::from_keyword("DIE"), Some(Command::Die));
+        assert_eq!(Command::Die.as_str(), "DIE");
+        assert_eq!(Command::Die.to_string(), "DIE");
+    }
+
+    #[test]
+    fn command_restart_round_trip() {
+        assert_eq!(Command::from_keyword("RESTART"), Some(Command::Restart));
+        assert_eq!(Command::Restart.as_str(), "RESTART");
+        assert_eq!(Command::Restart.to_string(), "RESTART");
+    }
+
+    #[test]
+    fn command_wallops_round_trip() {
+        assert_eq!(Command::from_keyword("WALLOPS"), Some(Command::Wallops));
+        assert_eq!(Command::Wallops.as_str(), "WALLOPS");
+        assert_eq!(Command::Wallops.to_string(), "WALLOPS");
+    }
+
+    #[test]
+    fn command_motd_round_trip() {
+        assert_eq!(Command::from_keyword("MOTD"), Some(Command::Motd));
+        assert_eq!(Command::Motd.as_str(), "MOTD");
+        assert_eq!(Command::Motd.to_string(), "MOTD");
     }
 
     // ---- PircSubcommand: core not namespaced ----

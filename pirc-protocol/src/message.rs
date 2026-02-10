@@ -90,6 +90,9 @@ impl Message {
             Command::Privmsg | Command::Notice => (2, "target and message"),
             Command::Kick | Command::Ban => (2, "channel and target"),
             Command::Invite => (2, "nickname and channel"),
+            Command::Oper => (2, "name and password"),
+            Command::Kill => (2, "nickname and comment"),
+            Command::Wallops => (1, "message"),
             _ => (0, ""),
         };
 
