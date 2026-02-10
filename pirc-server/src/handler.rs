@@ -886,3 +886,7 @@ mod list_names_tests;
 #[cfg(test)]
 #[path = "oper_tests.rs"]
 mod oper_tests;
+
+#[cfg(test)]
+#[path = "ctcp_tests.rs"]
+mod ctcp_tests;
