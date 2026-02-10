@@ -70,6 +70,17 @@ impl ChannelRegistry {
             .collect()
     }
 
+    /// List all channels with their Arc handles.
+    ///
+    /// Returns a vector of `(name, channel_arc)` tuples for use by handlers
+    /// that need direct access to channel state (e.g., LIST filtering by modes).
+    pub fn list_all(&self) -> Vec<(ChannelName, Arc<RwLock<Channel>>)> {
+        self.by_name
+            .iter()
+            .map(|entry| (entry.key().clone(), Arc::clone(entry.value())))
+            .collect()
+    }
+
     /// Returns the number of channels in the registry.
     pub fn channel_count(&self) -> usize {
         self.by_name.len()

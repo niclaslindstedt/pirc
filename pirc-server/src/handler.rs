@@ -16,7 +16,7 @@ use tracing::warn;
 
 use crate::channel_registry::ChannelRegistry;
 use crate::config::ServerConfig;
-use crate::handler_channel::{handle_ban, handle_channel_mode, handle_invite, handle_join, handle_kick, handle_notice, handle_part, handle_privmsg, handle_topic, remove_user_from_all_channels};
+use crate::handler_channel::{handle_ban, handle_channel_mode, handle_invite, handle_join, handle_kick, handle_list, handle_names, handle_notice, handle_part, handle_privmsg, handle_topic, remove_user_from_all_channels};
 use crate::registry::UserRegistry;
 use crate::user::UserSession;
 
@@ -108,6 +108,8 @@ pub fn handle_message(
             Command::Ban => handle_ban(msg, connection_id, registry, channels, sender),
             Command::Privmsg => handle_privmsg(msg, connection_id, registry, channels, sender),
             Command::Notice => handle_notice(msg, connection_id, registry, channels, sender),
+            Command::List => handle_list(msg, connection_id, registry, channels, sender),
+            Command::Names => handle_names(msg, connection_id, registry, channels, sender),
             Command::Ping => handle_ping(msg, sender),
             // PONG and other commands are silently absorbed.
             _ => {}
@@ -690,8 +692,9 @@ fn handle_ping(msg: &Message, sender: &mpsc::UnboundedSender<Message>) {
 
 /// Handle the QUIT command from a registered user.
 ///
-/// Removes the user from all channels, cleans up empty channels,
-/// removes the user from the registry, and sends an ERROR closing link message.
+/// Broadcasts QUIT to all channel members, removes the user from all channels,
+/// cleans up empty channels, removes the user from the registry, and sends
+/// an ERROR closing link message.
 fn handle_quit(
     msg: &Message,
     connection_id: u64,
@@ -702,16 +705,33 @@ fn handle_quit(
 ) {
     let quit_message = msg.params.first().map_or("Client Quit", |s| s.as_str());
 
-    let (hostname, nickname) = if let Some(session_arc) = registry.get_by_connection(connection_id)
-    {
-        let session = session_arc.read().expect("session lock poisoned");
-        (session.hostname.clone(), Some(session.nickname.clone()))
-    } else {
-        (state.hostname.clone(), None)
-    };
+    let (hostname, nickname, username) =
+        if let Some(session_arc) = registry.get_by_connection(connection_id) {
+            let session = session_arc.read().expect("session lock poisoned");
+            (
+                session.hostname.clone(),
+                Some(session.nickname.clone()),
+                Some(session.username.clone()),
+            )
+        } else {
+            (state.hostname.clone(), None, None)
+        };
 
-    // Remove user from all channels.
-    if let Some(ref nick) = nickname {
+    // Build the QUIT message with the user's prefix.
+    if let (Some(ref nick), Some(ref user)) = (&nickname, &username) {
+        let quit_msg = Message::builder(Command::Quit)
+            .prefix(Prefix::User {
+                nick: nick.clone(),
+                user: user.clone(),
+                host: hostname.clone(),
+            })
+            .trailing(quit_message)
+            .build();
+
+        // Broadcast QUIT to all channel members (deduplicated) then remove from channels.
+        broadcast_quit_and_remove(nick, &quit_msg, channels, registry);
+    } else if let Some(ref nick) = nickname {
+        // No user info available, just remove silently.
         remove_user_from_all_channels(nick, channels);
     }
 
@@ -726,6 +746,50 @@ fn handle_quit(
         .trailing(&format!("Closing Link: {hostname} (Quit: {quit_message})"))
         .build();
     let _ = sender.send(error_msg);
+}
+
+/// Broadcast a QUIT message to all unique recipients across all channels the user
+/// is in, then remove the user from all channels and clean up empty ones.
+fn broadcast_quit_and_remove(
+    nick: &Nickname,
+    quit_msg: &Message,
+    channels: &Arc<ChannelRegistry>,
+    registry: &Arc<UserRegistry>,
+) {
+    use std::collections::HashSet;
+
+    let channel_list = channels.list_all();
+    let mut notified: HashSet<Nickname> = HashSet::new();
+
+    for (chan_name, channel_arc) in &channel_list {
+        let members: Vec<Nickname> = {
+            let channel = channel_arc.read().expect("channel lock poisoned");
+            if !channel.members.contains_key(nick) {
+                continue;
+            }
+            channel.members.keys().cloned().collect()
+        };
+
+        // Send QUIT to each member we haven't notified yet.
+        for member_nick in &members {
+            if member_nick == nick {
+                continue;
+            }
+            if notified.insert(member_nick.clone()) {
+                if let Some(session_arc) = registry.get_by_nick(member_nick) {
+                    let session = session_arc.read().expect("session lock poisoned");
+                    let _ = session.sender.send(quit_msg.clone());
+                }
+            }
+        }
+
+        // Remove user from channel.
+        {
+            let mut channel = channel_arc.write().expect("channel lock poisoned");
+            channel.members.remove(nick);
+        }
+        channels.remove_if_empty(chan_name);
+    }
 }
 
 pub(crate) fn send_numeric(
@@ -777,3 +841,7 @@ mod ban_invite_tests;
 #[cfg(test)]
 #[path = "privmsg_notice_tests.rs"]
 mod privmsg_notice_tests;
+
+#[cfg(test)]
+#[path = "list_names_tests.rs"]
+mod list_names_tests;

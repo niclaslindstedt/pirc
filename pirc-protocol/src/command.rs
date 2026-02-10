@@ -194,6 +194,8 @@ pub enum Command {
     Whois,
     /// List channels.
     List,
+    /// Query channel member names.
+    Names,
     /// Invite a user to a channel.
     Invite,
     /// Set away status.
@@ -230,6 +232,7 @@ impl Command {
             Self::Topic => "TOPIC".to_owned(),
             Self::Whois => "WHOIS".to_owned(),
             Self::List => "LIST".to_owned(),
+            Self::Names => "NAMES".to_owned(),
             Self::Invite => "INVITE".to_owned(),
             Self::Away => "AWAY".to_owned(),
             Self::Ping => "PING".to_owned(),
@@ -261,6 +264,7 @@ impl Command {
             "TOPIC" => Some(Self::Topic),
             "WHOIS" => Some(Self::Whois),
             "LIST" => Some(Self::List),
+            "NAMES" => Some(Self::Names),
             "INVITE" => Some(Self::Invite),
             "AWAY" => Some(Self::Away),
             "PING" => Some(Self::Ping),
@@ -303,6 +307,7 @@ mod tests {
         assert_eq!(Command::Topic.as_str(), "TOPIC");
         assert_eq!(Command::Whois.as_str(), "WHOIS");
         assert_eq!(Command::List.as_str(), "LIST");
+        assert_eq!(Command::Names.as_str(), "NAMES");
         assert_eq!(Command::Invite.as_str(), "INVITE");
         assert_eq!(Command::Away.as_str(), "AWAY");
         assert_eq!(Command::Ping.as_str(), "PING");
