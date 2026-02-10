@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use pirc_common::Nickname;
+use pirc_common::{Nickname, UserError};
 use pirc_protocol::numeric::{
     ERR_ALREADYREGISTERED, ERR_ERRONEUSNICKNAME, ERR_NEEDMOREPARAMS, ERR_NICKNAMEINUSE, ERR_NOMOTD,
     ERR_NONICKNAMEGIVEN, RPL_CREATED, RPL_WELCOME, RPL_YOURHOST,
@@ -56,6 +56,18 @@ pub fn handle_message(
     state: &mut PreRegistrationState,
     config: &ServerConfig,
 ) {
+    if state.registered {
+        // Post-registration command dispatch.
+        match &msg.command {
+            Command::Nick => handle_nick_change(msg, connection_id, registry, sender),
+            Command::User => handle_user(msg, sender, state),
+            Command::Ping => handle_ping(msg, sender),
+            _ => {}
+        }
+        return;
+    }
+
+    // Pre-registration command dispatch.
     match &msg.command {
         Command::Nick => handle_nick(msg, registry, sender, state),
         Command::User => handle_user(msg, sender, state),
@@ -67,7 +79,7 @@ pub fn handle_message(
     }
 
     // After processing NICK or USER, check if registration can complete.
-    if state.is_ready() && !state.registered {
+    if state.is_ready() {
         complete_registration(connection_id, registry, sender, state, config);
     }
 }
@@ -105,6 +117,80 @@ fn handle_nick(
     }
 
     state.nick = Some(nick);
+}
+
+/// Handle a NICK command from an already-registered user.
+///
+/// Validates the new nickname, checks for collisions, atomically updates
+/// the registry, and sends the NICK confirmation with the old prefix.
+fn handle_nick_change(
+    msg: &Message,
+    connection_id: u64,
+    registry: &Arc<UserRegistry>,
+    sender: &mpsc::UnboundedSender<Message>,
+) {
+    if msg.params.is_empty() {
+        send_numeric(sender, ERR_NONICKNAMEGIVEN, &["*"], "No nickname given");
+        return;
+    }
+
+    let nick_str = &msg.params[0];
+    let Ok(new_nick) = Nickname::new(nick_str) else {
+        send_numeric(
+            sender,
+            ERR_ERRONEUSNICKNAME,
+            &[nick_str],
+            "Erroneous nickname",
+        );
+        return;
+    };
+
+    // Look up the current session to get old nick and user/host info.
+    let Some(session_arc) = registry.get_by_connection(connection_id) else {
+        return;
+    };
+
+    let (old_nick, username, hostname) = {
+        let session = session_arc.read().expect("session lock poisoned");
+        (
+            session.nickname.clone(),
+            session.username.clone(),
+            session.hostname.clone(),
+        )
+    };
+
+    // Attempt the nick change in the registry.
+    match registry.change_nick(&old_nick, new_nick.clone()) {
+        Ok(()) => {
+            // Send NICK confirmation with old prefix: :oldnick!user@host NICK newnick
+            let nick_msg = Message::builder(Command::Nick)
+                .prefix(Prefix::User {
+                    nick: old_nick,
+                    user: username,
+                    host: hostname,
+                })
+                .param(new_nick.as_ref())
+                .build();
+            let _ = sender.send(nick_msg);
+
+            // Update last_active timestamp.
+            let mut session = session_arc.write().expect("session lock poisoned");
+            session.last_active = Instant::now();
+        }
+        Err(UserError::NickInUse { .. }) => {
+            let current_nick = {
+                let session = session_arc.read().expect("session lock poisoned");
+                session.nickname.clone()
+            };
+            send_numeric(
+                sender,
+                ERR_NICKNAMEINUSE,
+                &[current_nick.as_ref(), new_nick.as_ref()],
+                "Nickname is already in use",
+            );
+        }
+        Err(_) => {}
+    }
 }
 
 fn handle_user(
@@ -583,6 +669,153 @@ mod tests {
         // First connection should have welcome
         let welcome = rx1.recv().await.unwrap();
         assert_eq!(welcome.numeric_code(), Some(RPL_WELCOME));
+    }
+
+    /// Helper: register a user and drain the welcome burst.
+    fn register_user(
+        nick: &str,
+        username: &str,
+        connection_id: u64,
+        hostname: &str,
+        registry: &Arc<UserRegistry>,
+        config: &ServerConfig,
+    ) -> (
+        mpsc::UnboundedSender<Message>,
+        mpsc::UnboundedReceiver<Message>,
+        PreRegistrationState,
+    ) {
+        let (tx, mut rx) = make_sender();
+        let mut state = PreRegistrationState::new(hostname.to_owned());
+        handle_message(&nick_msg(nick), connection_id, registry, &tx, &mut state, config);
+        handle_message(
+            &user_msg(username, &format!("{nick} Test")),
+            connection_id,
+            registry,
+            &tx,
+            &mut state,
+            config,
+        );
+        assert!(state.registered, "registration should have completed");
+        // Drain welcome burst (RPL_WELCOME, RPL_YOURHOST, RPL_CREATED, ERR_NOMOTD)
+        while rx.try_recv().is_ok() {}
+        (tx, rx, state)
+    }
+
+    #[tokio::test]
+    async fn nick_change_after_registration_succeeds() {
+        let registry = Arc::new(UserRegistry::new());
+        let config = make_config();
+        let (tx, mut rx, mut state) =
+            register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+
+        handle_message(&nick_msg("NewAlice"), 1, &registry, &tx, &mut state, &config);
+
+        let reply = rx.recv().await.unwrap();
+        assert_eq!(reply.command, Command::Nick);
+        assert_eq!(reply.params[0], "NewAlice");
+
+        // Verify old-nick prefix
+        let prefix = reply.prefix.as_ref().unwrap();
+        assert_eq!(prefix.to_string(), "Alice!alice@127.0.0.1");
+
+        // Registry should have the new nick, not the old one
+        let old = Nickname::new("Alice").unwrap();
+        assert!(registry.get_by_nick(&old).is_none());
+        let new = Nickname::new("NewAlice").unwrap();
+        assert!(registry.get_by_nick(&new).is_some());
+    }
+
+    #[tokio::test]
+    async fn nick_change_collision_returns_err() {
+        let registry = Arc::new(UserRegistry::new());
+        let config = make_config();
+        let (tx, mut rx, mut state) =
+            register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+        let (_tx2, _rx2, _state2) =
+            register_user("Bob", "bob", 2, "127.0.0.2", &registry, &config);
+
+        // Alice tries to change to Bob's nick
+        handle_message(&nick_msg("Bob"), 1, &registry, &tx, &mut state, &config);
+
+        let reply = rx.recv().await.unwrap();
+        assert_eq!(reply.numeric_code(), Some(ERR_NICKNAMEINUSE));
+
+        // Alice should still have her old nick
+        let alice = Nickname::new("Alice").unwrap();
+        assert!(registry.get_by_nick(&alice).is_some());
+    }
+
+    #[tokio::test]
+    async fn nick_change_invalid_returns_err() {
+        let registry = Arc::new(UserRegistry::new());
+        let config = make_config();
+        let (tx, mut rx, mut state) =
+            register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+
+        handle_message(&nick_msg("123bad"), 1, &registry, &tx, &mut state, &config);
+
+        let reply = rx.recv().await.unwrap();
+        assert_eq!(reply.numeric_code(), Some(ERR_ERRONEUSNICKNAME));
+
+        // Alice should still have her old nick
+        let alice = Nickname::new("Alice").unwrap();
+        assert!(registry.get_by_nick(&alice).is_some());
+    }
+
+    #[tokio::test]
+    async fn nick_change_case_only_succeeds() {
+        let registry = Arc::new(UserRegistry::new());
+        let config = make_config();
+        let (tx, mut rx, mut state) =
+            register_user("alice", "alice", 1, "127.0.0.1", &registry, &config);
+
+        handle_message(&nick_msg("ALICE"), 1, &registry, &tx, &mut state, &config);
+
+        let reply = rx.recv().await.unwrap();
+        assert_eq!(reply.command, Command::Nick);
+        assert_eq!(reply.params[0], "ALICE");
+
+        // Prefix should have the old casing
+        let prefix = reply.prefix.as_ref().unwrap();
+        assert_eq!(prefix.to_string(), "alice!alice@127.0.0.1");
+
+        // Registry should reflect the updated casing
+        let lookup = Nickname::new("alice").unwrap();
+        let session_arc = registry.get_by_nick(&lookup).unwrap();
+        let session = session_arc.read().unwrap();
+        assert_eq!(session.nickname.to_string(), "ALICE");
+    }
+
+    #[tokio::test]
+    async fn nick_change_no_param_returns_err() {
+        let registry = Arc::new(UserRegistry::new());
+        let config = make_config();
+        let (tx, mut rx, mut state) =
+            register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+
+        let msg = Message::new(Command::Nick, vec![]);
+        handle_message(&msg, 1, &registry, &tx, &mut state, &config);
+
+        let reply = rx.recv().await.unwrap();
+        assert_eq!(reply.numeric_code(), Some(ERR_NONICKNAMEGIVEN));
+    }
+
+    #[tokio::test]
+    async fn nick_change_prefix_has_correct_old_nick() {
+        let registry = Arc::new(UserRegistry::new());
+        let config = make_config();
+        let (tx, mut rx, mut state) =
+            register_user("OldNick", "theuser", 1, "10.0.0.5", &registry, &config);
+
+        handle_message(&nick_msg("NewNick"), 1, &registry, &tx, &mut state, &config);
+
+        let reply = rx.recv().await.unwrap();
+        assert_eq!(reply.command, Command::Nick);
+        assert_eq!(reply.params[0], "NewNick");
+        assert_eq!(
+            reply.prefix.as_ref().unwrap().to_string(),
+            "OldNick!theuser@10.0.0.5"
+        );
     }
 
     #[tokio::test]
