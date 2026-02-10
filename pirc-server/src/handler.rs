@@ -5,7 +5,8 @@ use pirc_common::{Nickname, UserError};
 use pirc_common::UserMode;
 use pirc_protocol::numeric::{
     ERR_ALREADYREGISTERED, ERR_ERRONEUSNICKNAME, ERR_NEEDMOREPARAMS, ERR_NICKNAMEINUSE, ERR_NOMOTD,
-    ERR_NONICKNAMEGIVEN, ERR_NOSUCHNICK, RPL_AWAY, RPL_CREATED, RPL_ENDOFWHOIS, RPL_WELCOME,
+    ERR_NONICKNAMEGIVEN, ERR_NOSUCHNICK, ERR_UMODEUNKNOWNFLAG, ERR_USERSDONTMATCH, RPL_AWAY,
+    RPL_CREATED, RPL_ENDOFWHOIS, RPL_NOWAWAY, RPL_UMODEIS, RPL_UNAWAY, RPL_WELCOME,
     RPL_WHOISOPERATOR, RPL_WHOISIDLE, RPL_WHOISSERVER, RPL_WHOISUSER, RPL_YOURHOST,
 };
 use pirc_protocol::{Command, Message, Prefix};
@@ -64,6 +65,8 @@ pub fn handle_message(
             Command::Nick => handle_nick_change(msg, connection_id, registry, sender),
             Command::User => handle_user(msg, sender, state),
             Command::Whois => handle_whois(msg, connection_id, registry, sender),
+            Command::Away => handle_away(msg, connection_id, registry, sender),
+            Command::Mode => handle_user_mode(msg, connection_id, registry, sender),
             Command::Ping => handle_ping(msg, sender),
             _ => {}
         }
@@ -318,6 +321,164 @@ fn handle_whois(
         &[&requestor_nick, &nick],
         "End of /WHOIS list",
     );
+}
+
+/// Handle the AWAY command from a registered user.
+///
+/// `AWAY :message` sets the user as away. `AWAY` (no params) clears away status.
+fn handle_away(
+    msg: &Message,
+    connection_id: u64,
+    registry: &Arc<UserRegistry>,
+    sender: &mpsc::UnboundedSender<Message>,
+) {
+    let Some(session_arc) = registry.get_by_connection(connection_id) else {
+        return;
+    };
+
+    let nick = {
+        let session = session_arc.read().expect("session lock poisoned");
+        session.nickname.to_string()
+    };
+
+    if msg.params.is_empty() {
+        // Clear away status.
+        {
+            let mut session = session_arc.write().expect("session lock poisoned");
+            session.away_message = None;
+        }
+        send_numeric(
+            sender,
+            RPL_UNAWAY,
+            &[&nick],
+            "You are no longer marked as being away",
+        );
+    } else {
+        // Set away with message.
+        let away_msg = msg.params[0].clone();
+        {
+            let mut session = session_arc.write().expect("session lock poisoned");
+            session.away_message = Some(away_msg);
+        }
+        send_numeric(
+            sender,
+            RPL_NOWAWAY,
+            &[&nick],
+            "You have been marked as being away",
+        );
+    }
+}
+
+/// Handle the MODE command targeting a user nick.
+///
+/// - `MODE <own-nick>` → RPL_UMODEIS with current modes
+/// - `MODE <own-nick> <modestring>` → apply mode changes
+/// - `MODE <other-nick>` → ERR_USERSDONTMATCH
+fn handle_user_mode(
+    msg: &Message,
+    connection_id: u64,
+    registry: &Arc<UserRegistry>,
+    sender: &mpsc::UnboundedSender<Message>,
+) {
+    let Some(session_arc) = registry.get_by_connection(connection_id) else {
+        return;
+    };
+
+    let nick = {
+        let session = session_arc.read().expect("session lock poisoned");
+        session.nickname.to_string()
+    };
+
+    if msg.params.is_empty() {
+        send_numeric(
+            sender,
+            ERR_NEEDMOREPARAMS,
+            &[&nick, "MODE"],
+            "Not enough parameters",
+        );
+        return;
+    }
+
+    let target = &msg.params[0];
+
+    // Check if target is this user (case-insensitive).
+    let is_self = {
+        let session = session_arc.read().expect("session lock poisoned");
+        target.eq_ignore_ascii_case(session.nickname.as_ref())
+    };
+
+    if !is_self {
+        send_numeric(
+            sender,
+            ERR_USERSDONTMATCH,
+            &[&nick],
+            "Cannot change mode for other users",
+        );
+        return;
+    }
+
+    if msg.params.len() < 2 {
+        // Mode query: return current modes.
+        let mode_string = {
+            let session = session_arc.read().expect("session lock poisoned");
+            format_user_modes(&session.modes)
+        };
+        send_numeric(sender, RPL_UMODEIS, &[&nick, &mode_string], "");
+        return;
+    }
+
+    // Mode set: parse and apply the mode string.
+    let modestring = &msg.params[1];
+    let mut adding = true;
+    let mut unknown = false;
+
+    for ch in modestring.chars() {
+        match ch {
+            '+' => adding = true,
+            '-' => adding = false,
+            'o' => {
+                // Cannot self-promote to operator via MODE; can only remove.
+                if !adding {
+                    let mut session = session_arc.write().expect("session lock poisoned");
+                    session.modes.remove(&UserMode::Operator);
+                }
+            }
+            'v' => {
+                let mut session = session_arc.write().expect("session lock poisoned");
+                if adding {
+                    session.modes.insert(UserMode::Voiced);
+                } else {
+                    session.modes.remove(&UserMode::Voiced);
+                }
+            }
+            _ => {
+                unknown = true;
+            }
+        }
+    }
+
+    if unknown {
+        send_numeric(
+            sender,
+            ERR_UMODEUNKNOWNFLAG,
+            &[&nick],
+            "Unknown MODE flag",
+        );
+    }
+
+    // Confirm current modes after changes.
+    let mode_string = {
+        let session = session_arc.read().expect("session lock poisoned");
+        format_user_modes(&session.modes)
+    };
+    send_numeric(sender, RPL_UMODEIS, &[&nick, &mode_string], "");
+}
+
+/// Format user modes as a mode string like `+ov` or `+`.
+fn format_user_modes(modes: &HashSet<UserMode>) -> String {
+    let mut chars: Vec<char> = modes.iter().filter_map(|m| m.mode_char()).collect();
+    chars.sort();
+    format!("+{}", chars.into_iter().collect::<String>())
 }
 
 fn handle_user(

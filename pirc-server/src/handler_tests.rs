@@ -701,3 +701,267 @@ async fn motd_text_is_sent_when_configured() {
         Some(pirc_protocol::numeric::RPL_ENDOFMOTD)
     );
 }
+
+// ---- AWAY command tests ----
+
+fn away_msg(text: &str) -> Message {
+    Message::new(Command::Away, vec![text.to_owned()])
+}
+
+fn away_clear() -> Message {
+    Message::new(Command::Away, vec![])
+}
+
+#[tokio::test]
+async fn away_set_returns_rpl_nowaway() {
+    let registry = Arc::new(UserRegistry::new());
+    let config = make_config();
+    let (tx, mut rx, mut state) =
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+
+    handle_message(&away_msg("Gone fishing"), 1, &registry, &tx, &mut state, &config);
+
+    let reply = rx.recv().await.unwrap();
+    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_NOWAWAY));
+    assert!(reply.trailing().unwrap().contains("marked as being away"));
+
+    // Verify session has away message
+    let nick = Nickname::new("Alice").unwrap();
+    let session = registry.get_by_nick(&nick).unwrap();
+    let s = session.read().unwrap();
+    assert_eq!(s.away_message.as_deref(), Some("Gone fishing"));
+}
+
+#[tokio::test]
+async fn away_clear_returns_rpl_unaway() {
+    let registry = Arc::new(UserRegistry::new());
+    let config = make_config();
+    let (tx, mut rx, mut state) =
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+
+    // First set away
+    handle_message(&away_msg("BRB"), 1, &registry, &tx, &mut state, &config);
+    let _ = rx.recv().await.unwrap(); // drain RPL_NOWAWAY
+
+    // Now clear away
+    handle_message(&away_clear(), 1, &registry, &tx, &mut state, &config);
+
+    let reply = rx.recv().await.unwrap();
+    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UNAWAY));
+    assert!(reply.trailing().unwrap().contains("no longer marked as being away"));
+
+    // Verify session has no away message
+    let nick = Nickname::new("Alice").unwrap();
+    let session = registry.get_by_nick(&nick).unwrap();
+    let s = session.read().unwrap();
+    assert!(s.away_message.is_none());
+}
+
+#[tokio::test]
+async fn away_set_then_update_message() {
+    let registry = Arc::new(UserRegistry::new());
+    let config = make_config();
+    let (tx, mut rx, mut state) =
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+
+    handle_message(&away_msg("First"), 1, &registry, &tx, &mut state, &config);
+    let _ = rx.recv().await.unwrap();
+
+    handle_message(&away_msg("Second"), 1, &registry, &tx, &mut state, &config);
+    let reply = rx.recv().await.unwrap();
+    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_NOWAWAY));
+
+    let nick = Nickname::new("Alice").unwrap();
+    let session = registry.get_by_nick(&nick).unwrap();
+    let s = session.read().unwrap();
+    assert_eq!(s.away_message.as_deref(), Some("Second"));
+}
+
+// ---- MODE command tests ----
+
+fn mode_query(nick: &str) -> Message {
+    Message::new(Command::Mode, vec![nick.to_owned()])
+}
+
+fn mode_set(nick: &str, modestring: &str) -> Message {
+    Message::new(Command::Mode, vec![nick.to_owned(), modestring.to_owned()])
+}
+
+fn mode_no_params() -> Message {
+    Message::new(Command::Mode, vec![])
+}
+
+#[tokio::test]
+async fn mode_query_own_returns_rpl_umodeis() {
+    let registry = Arc::new(UserRegistry::new());
+    let config = make_config();
+    let (tx, mut rx, mut state) =
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+
+    handle_message(&mode_query("Alice"), 1, &registry, &tx, &mut state, &config);
+
+    let reply = rx.recv().await.unwrap();
+    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
+    assert_eq!(reply.params[1], "+"); // no modes set
+}
+
+#[tokio::test]
+async fn mode_query_other_returns_err_usersdontmatch() {
+    let registry = Arc::new(UserRegistry::new());
+    let config = make_config();
+    let (tx, mut rx, mut state) =
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+    let (_tx2, _rx2, _state2) =
+        register_user("Bob", "bob", 2, "127.0.0.2", &registry, &config);
+
+    handle_message(&mode_query("Bob"), 1, &registry, &tx, &mut state, &config);
+
+    let reply = rx.recv().await.unwrap();
+    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_USERSDONTMATCH));
+}
+
+#[tokio::test]
+async fn mode_no_params_returns_err_needmoreparams() {
+    let registry = Arc::new(UserRegistry::new());
+    let config = make_config();
+    let (tx, mut rx, mut state) =
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+
+    handle_message(&mode_no_params(), 1, &registry, &tx, &mut state, &config);
+
+    let reply = rx.recv().await.unwrap();
+    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NEEDMOREPARAMS));
+}
+
+#[tokio::test]
+async fn mode_set_voiced_on_self() {
+    let registry = Arc::new(UserRegistry::new());
+    let config = make_config();
+    let (tx, mut rx, mut state) =
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+
+    handle_message(&mode_set("Alice", "+v"), 1, &registry, &tx, &mut state, &config);
+
+    let reply = rx.recv().await.unwrap();
+    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
+    assert_eq!(reply.params[1], "+v");
+
+    // Verify mode was set
+    let nick = Nickname::new("Alice").unwrap();
+    let session = registry.get_by_nick(&nick).unwrap();
+    let s = session.read().unwrap();
+    assert!(s.modes.contains(&UserMode::Voiced));
+}
+
+#[tokio::test]
+async fn mode_set_operator_self_ignored() {
+    let registry = Arc::new(UserRegistry::new());
+    let config = make_config();
+    let (tx, mut rx, mut state) =
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+
+    // Trying +o should not self-promote
+    handle_message(&mode_set("Alice", "+o"), 1, &registry, &tx, &mut state, &config);
+
+    let reply = rx.recv().await.unwrap();
+    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
+    assert_eq!(reply.params[1], "+"); // operator not added
+
+    let nick = Nickname::new("Alice").unwrap();
+    let session = registry.get_by_nick(&nick).unwrap();
+    let s = session.read().unwrap();
+    assert!(!s.modes.contains(&UserMode::Operator));
+}
+
+#[tokio::test]
+async fn mode_remove_operator() {
+    let registry = Arc::new(UserRegistry::new());
+    let config = make_config();
+    let (tx, mut rx, mut state) =
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+
+    // Manually set operator
+    {
+        let nick = Nickname::new("Alice").unwrap();
+        let session = registry.get_by_nick(&nick).unwrap();
+        let mut s = session.write().unwrap();
+        s.modes.insert(UserMode::Operator);
+    }
+
+    handle_message(&mode_set("Alice", "-o"), 1, &registry, &tx, &mut state, &config);
+
+    let reply = rx.recv().await.unwrap();
+    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
+    assert_eq!(reply.params[1], "+"); // operator removed
+
+    let nick = Nickname::new("Alice").unwrap();
+    let session = registry.get_by_nick(&nick).unwrap();
+    let s = session.read().unwrap();
+    assert!(!s.modes.contains(&UserMode::Operator));
+}
+
+#[tokio::test]
+async fn mode_unknown_flag_returns_err() {
+    let registry = Arc::new(UserRegistry::new());
+    let config = make_config();
+    let (tx, mut rx, mut state) =
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+
+    handle_message(&mode_set("Alice", "+x"), 1, &registry, &tx, &mut state, &config);
+
+    let reply = rx.recv().await.unwrap();
+    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_UMODEUNKNOWNFLAG));
+
+    // Also sends RPL_UMODEIS after unknown flag
+    let reply = rx.recv().await.unwrap();
+    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
+}
+
+#[tokio::test]
+async fn mode_set_other_returns_err_usersdontmatch() {
+    let registry = Arc::new(UserRegistry::new());
+    let config = make_config();
+    let (tx, mut rx, mut state) =
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+    let (_tx2, _rx2, _state2) =
+        register_user("Bob", "bob", 2, "127.0.0.2", &registry, &config);
+
+    handle_message(&mode_set("Bob", "+v"), 1, &registry, &tx, &mut state, &config);
+
+    let reply = rx.recv().await.unwrap();
+    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_USERSDONTMATCH));
+}
+
+#[tokio::test]
+async fn mode_query_case_insensitive() {
+    let registry = Arc::new(UserRegistry::new());
+    let config = make_config();
+    let (tx, mut rx, mut state) =
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+
+    // Query with different casing
+    handle_message(&mode_query("alice"), 1, &registry, &tx, &mut state, &config);
+
+    let reply = rx.recv().await.unwrap();
+    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
+}
+
+#[tokio::test]
+async fn mode_combined_modestring() {
+    let registry = Arc::new(UserRegistry::new());
+    let config = make_config();
+    let (tx, mut rx, mut state) =
+        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &config);
+
+    // Set +v then -v in one string
+    handle_message(&mode_set("Alice", "+v-v"), 1, &registry, &tx, &mut state, &config);
+
+    let reply = rx.recv().await.unwrap();
+    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
+    assert_eq!(reply.params[1], "+"); // v was added then removed
+
+    let nick = Nickname::new("Alice").unwrap();
+    let session = registry.get_by_nick(&nick).unwrap();
+    let s = session.read().unwrap();
+    assert!(!s.modes.contains(&UserMode::Voiced));
+}
