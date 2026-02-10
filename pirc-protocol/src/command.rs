@@ -170,6 +170,8 @@ impl fmt::Display for PircSubcommand {
 pub enum Command {
     /// Set or change nickname.
     Nick,
+    /// Register username and realname: `USER <username> <mode> <unused> :<realname>`.
+    User,
     /// Join a channel.
     Join,
     /// Leave a channel.
@@ -216,6 +218,7 @@ impl Command {
     pub fn as_str(&self) -> String {
         match self {
             Self::Nick => "NICK".to_owned(),
+            Self::User => "USER".to_owned(),
             Self::Join => "JOIN".to_owned(),
             Self::Part => "PART".to_owned(),
             Self::Privmsg => "PRIVMSG".to_owned(),
@@ -246,6 +249,7 @@ impl Command {
     pub fn from_keyword(s: &str) -> Option<Self> {
         match s {
             "NICK" => Some(Self::Nick),
+            "USER" => Some(Self::User),
             "JOIN" => Some(Self::Join),
             "PART" => Some(Self::Part),
             "PRIVMSG" => Some(Self::Privmsg),
@@ -287,6 +291,7 @@ mod tests {
     #[test]
     fn command_as_str() {
         assert_eq!(Command::Nick.as_str(), "NICK");
+        assert_eq!(Command::User.as_str(), "USER");
         assert_eq!(Command::Join.as_str(), "JOIN");
         assert_eq!(Command::Part.as_str(), "PART");
         assert_eq!(Command::Privmsg.as_str(), "PRIVMSG");
@@ -343,6 +348,13 @@ mod tests {
         let cmd = Command::Numeric(353);
         let cloned = cmd.clone();
         assert_eq!(cmd, cloned);
+    }
+
+    #[test]
+    fn command_user_round_trip() {
+        assert_eq!(Command::from_keyword("USER"), Some(Command::User));
+        assert_eq!(Command::User.as_str(), "USER");
+        assert_eq!(Command::User.to_string(), "USER");
     }
 
     // ---- PircSubcommand: core ----
