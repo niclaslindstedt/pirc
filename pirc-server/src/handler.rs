@@ -5,9 +5,10 @@ use pirc_common::{Nickname, UserError};
 use pirc_common::UserMode;
 use pirc_protocol::numeric::{
     ERR_ALREADYREGISTERED, ERR_ERRONEUSNICKNAME, ERR_NEEDMOREPARAMS, ERR_NICKNAMEINUSE,
-    ERR_NOMOTD, ERR_NONICKNAMEGIVEN, ERR_NOSUCHNICK, ERR_UMODEUNKNOWNFLAG, ERR_USERSDONTMATCH,
-    RPL_AWAY, RPL_CREATED, RPL_ENDOFWHOIS, RPL_NOWAWAY, RPL_UMODEIS, RPL_UNAWAY, RPL_WELCOME,
-    RPL_WHOISOPERATOR, RPL_WHOISIDLE, RPL_WHOISSERVER, RPL_WHOISUSER, RPL_YOURHOST,
+    ERR_NOMOTD, ERR_NOOPERHOST, ERR_NONICKNAMEGIVEN, ERR_NOSUCHNICK, ERR_PASSWDMISMATCH,
+    ERR_UMODEUNKNOWNFLAG, ERR_USERSDONTMATCH, RPL_AWAY, RPL_CREATED, RPL_ENDOFWHOIS, RPL_NOWAWAY,
+    RPL_UMODEIS, RPL_UNAWAY, RPL_WELCOME, RPL_WHOISOPERATOR, RPL_WHOISIDLE, RPL_WHOISSERVER,
+    RPL_WHOISUSER, RPL_YOURHOST, RPL_YOUREOPER,
 };
 use pirc_protocol::{Command, Message, Prefix};
 use tokio::sync::mpsc;
@@ -110,6 +111,7 @@ pub fn handle_message(
             Command::Notice => handle_notice(msg, connection_id, registry, channels, sender),
             Command::List => handle_list(msg, connection_id, registry, channels, sender),
             Command::Names => handle_names(msg, connection_id, registry, channels, sender),
+            Command::Oper => handle_oper(msg, connection_id, registry, sender, config),
             Command::Ping => handle_ping(msg, sender),
             // PONG and other commands are silently absorbed.
             _ => {}
@@ -792,6 +794,155 @@ fn broadcast_quit_and_remove(
     }
 }
 
+/// Check if a user has IRC operator privileges.
+pub(crate) fn is_oper(session: &UserSession) -> bool {
+    session.modes.contains(&UserMode::Operator)
+}
+
+/// Handle the OPER command to authenticate as an IRC operator.
+///
+/// `OPER <name> <password>` validates credentials from the server config,
+/// optionally checks host mask, sets `UserMode::Operator`, and sends
+/// `RPL_YOUREOPER` and a MODE notification on success.
+fn handle_oper(
+    msg: &Message,
+    connection_id: u64,
+    registry: &Arc<UserRegistry>,
+    sender: &mpsc::UnboundedSender<Message>,
+    config: &ServerConfig,
+) {
+    let Some(session_arc) = registry.get_by_connection(connection_id) else {
+        return;
+    };
+
+    let (nick, username, hostname) = {
+        let session = session_arc.read().expect("session lock poisoned");
+        (
+            session.nickname.to_string(),
+            session.username.clone(),
+            session.hostname.clone(),
+        )
+    };
+
+    if msg.params.len() < 2 {
+        send_numeric(
+            sender,
+            ERR_NEEDMOREPARAMS,
+            &[&nick, "OPER"],
+            "Not enough parameters",
+        );
+        return;
+    }
+
+    let oper_name = &msg.params[0];
+    let oper_password = &msg.params[1];
+
+    // Look up operator credentials by name.
+    let oper_config = config.operators.iter().find(|o| o.name == *oper_name);
+
+    let Some(oper_config) = oper_config else {
+        send_numeric(
+            sender,
+            ERR_PASSWDMISMATCH,
+            &[&nick],
+            "Password incorrect",
+        );
+        return;
+    };
+
+    // Verify password.
+    if oper_config.password != *oper_password {
+        send_numeric(
+            sender,
+            ERR_PASSWDMISMATCH,
+            &[&nick],
+            "Password incorrect",
+        );
+        return;
+    }
+
+    // Check host mask if configured.
+    if let Some(ref mask) = oper_config.host_mask {
+        if !host_matches_mask(&hostname, mask) {
+            send_numeric(
+                sender,
+                ERR_NOOPERHOST,
+                &[&nick],
+                "No O-lines for your host",
+            );
+            return;
+        }
+    }
+
+    // Grant operator status.
+    {
+        let mut session = session_arc.write().expect("session lock poisoned");
+        session.modes.insert(UserMode::Operator);
+    }
+
+    // Send RPL_YOUREOPER (381).
+    send_numeric(
+        sender,
+        RPL_YOUREOPER,
+        &[&nick],
+        "You are now an IRC operator",
+    );
+
+    // Send MODE change notification: :nick!user@host MODE nick :+o
+    let mode_msg = Message::builder(Command::Mode)
+        .prefix(Prefix::User {
+            nick: nick.parse().unwrap_or_else(|_| pirc_common::Nickname::new("*").unwrap()),
+            user: username,
+            host: hostname,
+        })
+        .param(&nick)
+        .trailing("+o")
+        .build();
+    let _ = sender.send(mode_msg);
+}
+
+/// Simple glob-style host mask matching.
+///
+/// Supports `*` as a wildcard that matches any sequence of characters.
+fn host_matches_mask(host: &str, mask: &str) -> bool {
+    let parts: Vec<&str> = mask.split('*').collect();
+
+    if parts.len() == 1 {
+        // No wildcard: exact match.
+        return host == mask;
+    }
+
+    let mut pos = 0;
+
+    // First part must match at the start.
+    if !parts[0].is_empty() {
+        if !host.starts_with(parts[0]) {
+            return false;
+        }
+        pos = parts[0].len();
+    }
+
+    // Last part must match at the end.
+    let last = parts[parts.len() - 1];
+    if !last.is_empty() && !host.ends_with(last) {
+        return false;
+    }
+
+    // Middle parts must appear in order.
+    for &part in &parts[1..parts.len() - 1] {
+        if part.is_empty() {
+            continue;
+        }
+        if let Some(idx) = host[pos..].find(part) {
+            pos += idx + part.len();
+        } else {
+            return false;
+        }
+    }
+
+    true
+}
+
 pub(crate) fn send_numeric(
     sender: &mpsc::UnboundedSender<Message>,
     code: u16,
@@ -853,3 +1004,7 @@ mod privmsg_notice_tests;
 #[cfg(test)]
 #[path = "list_names_tests.rs"]
 mod list_names_tests;
+
+#[cfg(test)]
+#[path = "oper_tests.rs"]
+mod oper_tests;

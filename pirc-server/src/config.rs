@@ -23,6 +23,7 @@ pub struct ServerConfig {
     pub limits: LimitsConfig,
     pub cluster: ClusterConfig,
     pub motd: MotdConfig,
+    pub operators: Vec<OperConfig>,
     pub log_level: String,
 }
 
@@ -123,6 +124,7 @@ impl Default for ServerConfig {
             limits: LimitsConfig::default(),
             cluster: ClusterConfig::default(),
             motd: MotdConfig::default(),
+            operators: Vec::new(),
             log_level: String::from("info"),
         }
     }
@@ -195,6 +197,14 @@ pub struct ClusterConfig {
 pub struct MotdConfig {
     pub path: Option<String>,
     pub text: Option<String>,
+}
+
+/// IRC operator credentials.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperConfig {
+    pub name: String,
+    pub password: String,
+    pub host_mask: Option<String>,
 }
 
 #[cfg(test)]
@@ -454,6 +464,11 @@ bind_address = "127.0.0.1"
                 path: Some(String::from("/etc/pirc/motd.txt")),
                 text: Some(String::from("Welcome to pirc!")),
             },
+            operators: vec![OperConfig {
+                name: String::from("admin"),
+                password: String::from("secret"),
+                host_mask: Some(String::from("127.0.0.*")),
+            }],
             log_level: String::from("debug"),
         };
 
