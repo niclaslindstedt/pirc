@@ -16,7 +16,7 @@ use tracing::warn;
 
 use crate::channel_registry::ChannelRegistry;
 use crate::config::ServerConfig;
-use crate::handler_channel::{handle_join, handle_kick, handle_part, handle_topic, remove_user_from_all_channels};
+use crate::handler_channel::{handle_channel_mode, handle_join, handle_kick, handle_part, handle_topic, remove_user_from_all_channels};
 use crate::registry::UserRegistry;
 use crate::user::UserSession;
 
@@ -92,7 +92,14 @@ pub fn handle_message(
             Command::User => handle_user(msg, sender, state),
             Command::Whois => handle_whois(msg, connection_id, registry, sender),
             Command::Away => handle_away(msg, connection_id, registry, sender),
-            Command::Mode => handle_user_mode(msg, connection_id, registry, sender),
+            Command::Mode => {
+                // Route to channel or user mode handler based on target.
+                if msg.params.first().is_some_and(|t| t.starts_with('#') || t.starts_with('&')) {
+                    handle_channel_mode(msg, connection_id, registry, channels, sender)
+                } else {
+                    handle_user_mode(msg, connection_id, registry, sender)
+                }
+            }
             Command::Join => handle_join(msg, connection_id, registry, channels, sender),
             Command::Part => handle_part(msg, connection_id, registry, channels, sender),
             Command::Topic => handle_topic(msg, connection_id, registry, channels, sender),
@@ -754,3 +761,7 @@ mod topic_tests;
 #[cfg(test)]
 #[path = "kick_tests.rs"]
 mod kick_tests;
+
+#[cfg(test)]
+#[path = "channel_mode_tests.rs"]
+mod channel_mode_tests;
