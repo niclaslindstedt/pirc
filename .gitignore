@@ -9,3 +9,5 @@
 
 # Environment files
 .env
+
+.swarm/session.json
