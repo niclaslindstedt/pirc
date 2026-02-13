@@ -2,6 +2,9 @@
 
 use std::os::unix::io::RawFd;
 
+use super::signal::SignalHandler;
+use super::terminal::terminal_size;
+
 /// A structured key event parsed from raw terminal input bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyEvent {
@@ -35,6 +38,8 @@ pub enum KeyEvent {
     Escape,
     /// Ctrl+key combination. The char is the lowercase letter (e.g. `Ctrl('c')`).
     Ctrl(char),
+    /// Terminal window resize event with new dimensions (cols, rows).
+    Resize(u16, u16),
     /// An unrecognized escape sequence.
     Unknown(Vec<u8>),
 }
@@ -43,9 +48,13 @@ pub enum KeyEvent {
 ///
 /// Uses `libc::poll` and `libc::read` on a file descriptor (typically stdin)
 /// to read raw bytes, then parses escape sequences into structured events.
+///
+/// When a `SignalHandler` is attached, also polls the signal pipe and emits
+/// `KeyEvent::Resize` events when SIGWINCH is received.
 pub struct InputReader {
     fd: RawFd,
     buf: Vec<u8>,
+    signal_handler: Option<SignalHandler>,
 }
 
 impl InputReader {
@@ -54,6 +63,7 @@ impl InputReader {
         Self {
             fd,
             buf: Vec::with_capacity(64),
+            signal_handler: None,
         }
     }
 
@@ -62,30 +72,78 @@ impl InputReader {
         Self::new(libc::STDIN_FILENO)
     }
 
+    /// Attach a `SignalHandler` so that SIGWINCH events produce `KeyEvent::Resize`.
+    pub fn set_signal_handler(&mut self, handler: SignalHandler) {
+        self.signal_handler = Some(handler);
+    }
+
     /// Poll for a key event with the given timeout in milliseconds.
     ///
     /// Returns `Some(KeyEvent)` if a key event is available, or `None` if the
     /// timeout expires with no input. Returns `None` on read errors.
+    ///
+    /// When a signal handler is attached, also polls the signal pipe.
+    /// Resize events take priority over key input.
     pub fn poll_event(&mut self, timeout_ms: u32) -> Option<KeyEvent> {
-        if !self.poll_ready(timeout_ms) {
-            return None;
+        match self.poll_ready(timeout_ms) {
+            PollResult::None => None,
+            PollResult::Resize => {
+                if let Some(ref handler) = self.signal_handler {
+                    handler.drain();
+                }
+                if let Some(size) = terminal_size() {
+                    Some(KeyEvent::Resize(size.cols, size.rows))
+                } else {
+                    None
+                }
+            }
+            PollResult::Input => {
+                self.read_bytes();
+                if self.buf.is_empty() {
+                    return None;
+                }
+                Some(self.parse_event())
+            }
         }
-        self.read_bytes();
-        if self.buf.is_empty() {
-            return None;
-        }
-        Some(self.parse_event())
     }
 
-    /// Check whether the fd has data available within `timeout_ms` milliseconds.
-    fn poll_ready(&self, timeout_ms: u32) -> bool {
-        let mut pfd = libc::pollfd {
-            fd: self.fd,
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        let ret = unsafe { libc::poll(&mut pfd, 1, timeout_ms as i32) };
-        ret > 0 && (pfd.revents & libc::POLLIN) != 0
+    /// Check whether the fd or signal pipe has data available.
+    fn poll_ready(&self, timeout_ms: u32) -> PollResult {
+        let has_signal = self.signal_handler.is_some();
+        let nfds: libc::nfds_t = if has_signal { 2 } else { 1 };
+
+        let mut pfds = [
+            libc::pollfd {
+                fd: self.fd,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: self
+                    .signal_handler
+                    .as_ref()
+                    .map_or(-1, |h| h.pipe_fd()),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+
+        let ret = unsafe { libc::poll(pfds.as_mut_ptr(), nfds, timeout_ms as i32) };
+
+        if ret <= 0 {
+            return PollResult::None;
+        }
+
+        // Check signal pipe first (resize takes priority)
+        if has_signal && (pfds[1].revents & libc::POLLIN) != 0 {
+            return PollResult::Resize;
+        }
+
+        if (pfds[0].revents & libc::POLLIN) != 0 {
+            return PollResult::Input;
+        }
+
+        PollResult::None
     }
 
     /// Read available bytes from the fd into the internal buffer.
@@ -104,6 +162,16 @@ impl InputReader {
         self.buf.clear();
         event
     }
+}
+
+/// Internal result of polling for readiness.
+enum PollResult {
+    /// Nothing ready within the timeout.
+    None,
+    /// The signal pipe is readable (SIGWINCH received).
+    Resize,
+    /// The input fd is readable (key data available).
+    Input,
 }
 
 /// Parse a key event from a raw byte slice.
@@ -742,6 +810,81 @@ mod tests {
             assert_eq!(inner, bytes);
         } else {
             panic!("Expected Unknown variant");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Resize event
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_resize_event() {
+        let event = KeyEvent::Resize(120, 40);
+        assert_eq!(event, KeyEvent::Resize(120, 40));
+        assert_ne!(event, KeyEvent::Resize(80, 24));
+    }
+
+    #[test]
+    fn test_resize_event_clone() {
+        let event = KeyEvent::Resize(80, 24);
+        let cloned = event.clone();
+        assert_eq!(event, cloned);
+    }
+
+    #[test]
+    fn test_resize_event_debug() {
+        let event = KeyEvent::Resize(120, 40);
+        let debug = format!("{event:?}");
+        assert!(debug.contains("Resize"));
+        assert!(debug.contains("120"));
+        assert!(debug.contains("40"));
+    }
+
+    // -----------------------------------------------------------------------
+    // InputReader with signal handler
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_input_reader_set_signal_handler() {
+        let mut reader = InputReader::new(0);
+        assert!(reader.signal_handler.is_none());
+        let handler = SignalHandler::new().expect("should create signal handler");
+        reader.set_signal_handler(handler);
+        assert!(reader.signal_handler.is_some());
+    }
+
+    #[test]
+    fn test_input_reader_poll_no_signal_handler() {
+        // Without a signal handler, poll should just check stdin
+        let mut reader = InputReader::new(0);
+        // With a zero timeout, should return None (no input ready)
+        let event = reader.poll_event(0);
+        assert!(event.is_none());
+    }
+
+    #[test]
+    fn test_input_reader_poll_resize_on_sigwinch() {
+        let mut reader = InputReader::new(0);
+        let handler = SignalHandler::new().expect("should create signal handler");
+        reader.set_signal_handler(handler);
+
+        // Send SIGWINCH to ourselves
+        unsafe { libc::raise(libc::SIGWINCH) };
+
+        // Poll should return a Resize event
+        let event = reader.poll_event(100);
+        match event {
+            Some(KeyEvent::Resize(cols, rows)) => {
+                // In CI the terminal_size() may return None causing no event,
+                // but in a real terminal we should get dimensions.
+                // Just verify we got positive values if we get Resize.
+                assert!(cols > 0, "cols should be positive");
+                assert!(rows > 0, "rows should be positive");
+            }
+            None => {
+                // Acceptable in CI where terminal_size() returns None
+            }
+            other => panic!("Expected Resize or None, got {other:?}"),
         }
     }
 }
