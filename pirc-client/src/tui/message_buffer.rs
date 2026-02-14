@@ -170,10 +170,12 @@ impl MessageBuffer {
         self.has_activity = false;
     }
 
-    /// Clear all messages and reset scroll state.
+    /// Clear all messages and reset scroll state, unread count, and activity flag.
     pub fn clear(&mut self) {
         self.messages.clear();
         self.scroll_offset = 0;
+        self.unread_count = 0;
+        self.has_activity = false;
     }
 
     /// Return the number of messages in the buffer.
@@ -522,6 +524,8 @@ mod tests {
         assert_eq!(buf.len(), 0);
         assert!(buf.is_empty());
         assert!(buf.is_at_bottom());
+        assert_eq!(buf.unread_count(), 0);
+        assert!(!buf.has_activity());
     }
 
     // --- Search ---
