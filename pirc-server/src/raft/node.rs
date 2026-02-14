@@ -5,6 +5,7 @@ use tracing::{debug, info, warn};
 
 use super::election::{compute_election_timeout, is_log_up_to_date, ElectionTracker};
 use super::log::RaftLog;
+use super::membership::{ClusterMembership, MembershipChange, MembershipError};
 use super::rpc::{
     AppendEntries, AppendEntriesResponse, RaftMessage, RequestVote, RequestVoteResponse,
 };
@@ -35,6 +36,8 @@ pub struct RaftNode<T: Send + Sync, S: RaftStorage<T>> {
     pub(crate) last_snapshot: Option<Snapshot>,
     /// Buffer for receiving chunked snapshot data from the leader.
     pub(crate) pending_snapshot: Option<Vec<u8>>,
+    /// Cluster membership state (tracks voting members and pending changes).
+    pub(crate) membership: ClusterMembership,
 }
 
 impl<T, S> RaftNode<T, S>
@@ -78,7 +81,8 @@ where
 
         let (tx, rx) = mpsc::unbounded_channel();
 
-        let cluster_size = 1 + config.peers.len();
+        let membership = ClusterMembership::new(config.node_id, &config.peers);
+        let cluster_size = membership.member_count();
         let node = Self {
             config,
             state: RaftState::Follower,
@@ -93,6 +97,7 @@ where
             outbound: tx,
             last_snapshot,
             pending_snapshot: None,
+            membership,
         };
 
         Ok((node, rx))
@@ -136,14 +141,19 @@ where
         &self.config
     }
 
-    /// Total number of nodes in the cluster (self + peers).
+    /// Total number of voting members in the cluster.
     pub fn cluster_size(&self) -> usize {
-        1 + self.config.peers.len()
+        self.membership.member_count()
     }
 
-    /// Majority quorum size.
+    /// Majority quorum size based on current membership.
     pub fn quorum_size(&self) -> usize {
-        self.cluster_size() / 2 + 1
+        self.membership.quorum_size()
+    }
+
+    /// Get the current cluster membership.
+    pub fn membership(&self) -> &ClusterMembership {
+        &self.membership
     }
 
     // ---- Term management ----
@@ -166,6 +176,8 @@ where
             self.state = RaftState::Follower;
             self.leader_state = None;
             self.election_tracker.reset();
+            // Roll back any uncommitted membership change since we lost leadership.
+            self.membership.rollback_change();
             self.storage.save_term(self.current_term).await?;
             self.storage.save_voted_for(None).await?;
             return Ok(true);
@@ -337,7 +349,8 @@ where
 
         self.state = RaftState::Leader;
         self.current_leader = Some(self.config.node_id);
-        self.leader_state = Some(LeaderState::new(&self.config.peers, self.log.last_index()));
+        let peers = self.membership.peers(self.config.node_id);
+        self.leader_state = Some(LeaderState::new(&peers, self.log.last_index()));
 
         // Send initial empty AppendEntries (heartbeats) to all peers.
         self.send_heartbeats();
@@ -617,6 +630,180 @@ where
     }
 }
 
+// ---- Membership change operations ----
+
+impl<T, S> RaftNode<T, S>
+where
+    T: Clone + PartialEq + Send + Sync + serde::Serialize + serde::de::DeserializeOwned + 'static,
+    S: RaftStorage<T>,
+{
+    /// Propose a membership change to the cluster.
+    ///
+    /// Safety constraints enforced:
+    /// - Must be the leader
+    /// - No other membership change can be pending
+    /// - Leader must have committed at least one entry in the current term
+    /// - Cannot add a server that is already a member
+    /// - Cannot remove a server that is not a member
+    /// - Cannot remove the last member
+    ///
+    /// The `noop_command` is appended to the log as the entry carrying the
+    /// membership change. The actual membership metadata is tracked internally.
+    pub fn propose_membership_change(
+        &mut self,
+        change: MembershipChange,
+        noop_command: T,
+    ) -> Result<LogIndex, MembershipError> {
+        if self.state != RaftState::Leader {
+            return Err(MembershipError::NotLeader);
+        }
+
+        if self.membership.has_pending_change() {
+            let pending = self.membership.pending_change().unwrap();
+            return Err(MembershipError::ChangePending(pending.index));
+        }
+
+        // Leader must have committed an entry in the current term.
+        if !self.has_committed_in_current_term() {
+            return Err(MembershipError::NoCurrentTermCommit);
+        }
+
+        // Validate the change.
+        match &change {
+            MembershipChange::AddServer(node_id, _) => {
+                if self.membership.is_member(*node_id) {
+                    return Err(MembershipError::AlreadyMember(*node_id));
+                }
+            }
+            MembershipChange::RemoveServer(node_id) => {
+                if !self.membership.is_member(*node_id) {
+                    return Err(MembershipError::NotMember(*node_id));
+                }
+                if self.membership.member_count() <= 1 {
+                    return Err(MembershipError::CannotRemoveLastMember);
+                }
+            }
+        }
+
+        // Append the entry to the log.
+        let index = self.log.last_index() + 1;
+        let entry = super::types::LogEntry {
+            term: self.current_term,
+            index,
+            command: noop_command,
+        };
+        self.log.append(entry);
+
+        // Extract the new member ID before consuming the change.
+        let added_node = if let MembershipChange::AddServer(node_id, _) = &change {
+            Some(*node_id)
+        } else {
+            None
+        };
+
+        info!(
+            node = %self.config.node_id,
+            index = %index,
+            change = ?change,
+            "proposed membership change"
+        );
+
+        // Apply the membership change immediately (Raft single-server change rule).
+        self.membership.begin_change(index, change);
+
+        // Update leader state for the new member if adding.
+        if let Some(new_node) = added_node {
+            if let Some(ref mut leader) = self.leader_state {
+                leader
+                    .next_index
+                    .insert(new_node, self.log.last_index() + 1);
+                leader.match_index.insert(new_node, LogIndex::new(0));
+            }
+        }
+
+        // Replicate to all peers (including newly added ones).
+        self.send_append_entries_to_all();
+
+        Ok(index)
+    }
+
+    /// Check if the leader has committed at least one entry in the current term.
+    pub fn has_committed_in_current_term(&self) -> bool {
+        let commit = self.volatile.commit_index;
+        if commit.as_u64() == 0 {
+            return false;
+        }
+
+        // Check entries from commit_index down to find one from the current term.
+        let mut idx = commit.as_u64();
+        while idx > 0 {
+            if let Some(term) = self.log.term_at(LogIndex::new(idx)) {
+                if term == self.current_term {
+                    return true;
+                }
+                if term < self.current_term {
+                    break;
+                }
+            }
+            idx -= 1;
+        }
+        false
+    }
+
+    /// Notify the membership tracker that the entry at the given index
+    /// has been committed. If it corresponds to a pending membership change,
+    /// finalize it.
+    ///
+    /// Returns `true` if the leader should step down (removed itself).
+    pub fn commit_membership_change_if_pending(&mut self, committed_index: LogIndex) -> bool {
+        let should_step_down = if let Some(pending) = self.membership.pending_change() {
+            if committed_index >= pending.index {
+                let is_self_removal = matches!(
+                    &pending.change,
+                    MembershipChange::RemoveServer(id) if *id == self.config.node_id
+                );
+                self.membership.commit_change();
+
+                // If removing a server, clean up leader state.
+                if let Some(ref mut leader) = self.leader_state {
+                    // Remove entries for servers no longer in the cluster.
+                    leader
+                        .next_index
+                        .retain(|id, _| self.membership.is_member(*id));
+                    leader
+                        .match_index
+                        .retain(|id, _| self.membership.is_member(*id));
+                }
+
+                info!(
+                    node = %self.config.node_id,
+                    index = %committed_index,
+                    generation = self.membership.generation(),
+                    "membership change committed"
+                );
+
+                is_self_removal
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if should_step_down {
+            info!(
+                node = %self.config.node_id,
+                "stepping down: removed from cluster"
+            );
+            self.state = RaftState::Follower;
+            self.leader_state = None;
+            self.current_leader = None;
+        }
+
+        should_step_down
+    }
+}
+
 // Provide a way to inspect the node's votes for testing.
 impl<T, S> RaftNode<T, S>
 where
@@ -635,3 +822,7 @@ mod node_tests;
 #[cfg(test)]
 #[path = "node_snapshot_tests.rs"]
 mod node_snapshot_tests;
+
+#[cfg(test)]
+#[path = "membership_tests.rs"]
+mod membership_tests;

@@ -177,6 +177,9 @@ where
     /// This replaces the simple heartbeat-only approach: on each tick the leader
     /// sends entries from `next_index` for each peer, which doubles as a heartbeat
     /// when there are no new entries.
+    ///
+    /// Uses the current membership to determine the set of peers, so newly added
+    /// servers receive entries immediately.
     pub fn send_append_entries_to_all(&self) {
         if self.state != RaftState::Leader {
             warn!(
@@ -187,7 +190,8 @@ where
             return;
         }
 
-        for &peer in &self.config.peers {
+        let peers = self.membership.peers(self.config.node_id);
+        for peer in peers {
             self.replicate_to_peer(peer);
         }
     }
@@ -248,6 +252,9 @@ where
                 "advancing commit index"
             );
             self.volatile.commit_index = new_commit;
+
+            // Check if a pending membership change has been committed.
+            self.commit_membership_change_if_pending(new_commit);
         }
     }
 
