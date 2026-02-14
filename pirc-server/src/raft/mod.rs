@@ -5,6 +5,7 @@ pub mod log;
 pub mod node;
 pub mod replication;
 pub mod rpc;
+pub mod snapshot;
 pub mod state;
 pub mod storage;
 pub mod transport;
@@ -17,6 +18,10 @@ pub use log::RaftLog;
 pub use node::RaftNode;
 pub use rpc::{
     AppendEntries, AppendEntriesResponse, RaftMessage, RequestVote, RequestVoteResponse,
+};
+pub use snapshot::{
+    InstallSnapshot, InstallSnapshotResponse, NullStateMachine, Snapshot, SnapshotError,
+    StateMachine,
 };
 pub use state::{LeaderState, PersistentState, VolatileState};
 pub use storage::{RaftStorage, StorageError, StorageResult};

@@ -1,12 +1,15 @@
 use std::collections::HashSet;
 
 use tokio::sync::mpsc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::election::{compute_election_timeout, is_log_up_to_date, ElectionTracker};
 use super::log::RaftLog;
 use super::rpc::{
     AppendEntries, AppendEntriesResponse, RaftMessage, RequestVote, RequestVoteResponse,
+};
+use super::snapshot::{
+    InstallSnapshot, InstallSnapshotResponse, Snapshot, SnapshotError, StateMachine,
 };
 use super::state::{LeaderState, VolatileState};
 use super::storage::RaftStorage;
@@ -28,6 +31,10 @@ pub struct RaftNode<T: Send + Sync, S: RaftStorage<T>> {
     pub(crate) election_tracker: ElectionTracker,
     pub(crate) storage: S,
     pub(crate) outbound: mpsc::UnboundedSender<(NodeId, RaftMessage<T>)>,
+    /// The most recent snapshot, if any.
+    pub(crate) last_snapshot: Option<Snapshot>,
+    /// Buffer for receiving chunked snapshot data from the leader.
+    pub(crate) pending_snapshot: Option<Vec<u8>>,
 }
 
 impl<T, S> RaftNode<T, S>
@@ -48,7 +55,26 @@ where
         let current_term = storage.load_term().await?;
         let voted_for = storage.load_voted_for().await?;
         let entries = storage.load_log().await?;
-        let log = RaftLog::from_entries(entries);
+        let mut log = RaftLog::from_entries(entries);
+
+        // Load snapshot metadata and restore log offset if a snapshot exists.
+        let last_snapshot =
+            if let Some((data, last_included_index, last_included_term)) =
+                storage.load_snapshot().await?
+            {
+                log.compact_to(last_included_index);
+                // If log was empty (snapshot is ahead), set offset directly.
+                if log.offset() < last_included_index {
+                    log.reset_to_snapshot(last_included_index, last_included_term);
+                }
+                Some(Snapshot {
+                    last_included_index,
+                    last_included_term,
+                    data,
+                })
+            } else {
+                None
+            };
 
         let (tx, rx) = mpsc::unbounded_channel();
 
@@ -65,6 +91,8 @@ where
             election_tracker: ElectionTracker::new(cluster_size),
             storage,
             outbound: tx,
+            last_snapshot,
+            pending_snapshot: None,
         };
 
         Ok((node, rx))
@@ -413,6 +441,179 @@ where
     /// implementing deterministic pre-planned succession.
     pub fn election_timeout(&self) -> std::time::Duration {
         compute_election_timeout(&self.config)
+    }
+
+    // ---- Snapshot operations ----
+
+    /// Create a snapshot of the current state machine state and compact the log.
+    ///
+    /// This calls `state_machine.snapshot()` to get the serialized state,
+    /// saves it to persistent storage, and then compacts the log up to
+    /// `last_applied`.
+    pub async fn create_snapshot<M: StateMachine<T>>(
+        &mut self,
+        state_machine: &M,
+    ) -> Result<(), SnapshotError> {
+        let last_applied = self.volatile.last_applied;
+        if last_applied.as_u64() == 0 {
+            return Ok(()); // Nothing to snapshot.
+        }
+
+        // If we already have a snapshot at this index, skip.
+        if let Some(ref snap) = self.last_snapshot {
+            if snap.last_included_index >= last_applied {
+                return Ok(());
+            }
+        }
+
+        let last_applied_term = self
+            .log
+            .term_at(last_applied)
+            .unwrap_or(self.log.snapshot_term());
+
+        let data = state_machine.snapshot();
+
+        // Persist snapshot to storage.
+        self.storage
+            .save_snapshot(&data, last_applied, last_applied_term)
+            .await?;
+
+        // Compact the log.
+        self.log.compact_to(last_applied);
+
+        info!(
+            node = %self.config.node_id,
+            last_included_index = %last_applied,
+            last_included_term = %last_applied_term,
+            "created snapshot and compacted log"
+        );
+
+        self.last_snapshot = Some(Snapshot {
+            last_included_index: last_applied,
+            last_included_term: last_applied_term,
+            data,
+        });
+
+        Ok(())
+    }
+
+    /// Check if the log has grown past the snapshot threshold and a
+    /// snapshot should be created.
+    pub fn should_snapshot(&self) -> bool {
+        self.log.len() >= self.config.snapshot_threshold
+    }
+
+    /// Get the most recent snapshot, if any.
+    pub fn last_snapshot(&self) -> Option<&Snapshot> {
+        self.last_snapshot.as_ref()
+    }
+
+    /// Handle an incoming `InstallSnapshot` RPC.
+    ///
+    /// Implements the chunked snapshot transfer protocol:
+    /// - Rejects if sender's term is stale.
+    /// - Accumulates chunks until the final one arrives.
+    /// - On completion, restores the state machine and compacts the log.
+    pub async fn handle_install_snapshot<M: StateMachine<T>>(
+        &mut self,
+        req: InstallSnapshot,
+        state_machine: &mut M,
+    ) -> Result<InstallSnapshotResponse, SnapshotError> {
+        // Step down if the sender has a higher term.
+        self.handle_term_update(req.term).await?;
+
+        // Reply with current term if request term < our term.
+        if req.term < self.current_term {
+            return Ok(InstallSnapshotResponse {
+                term: self.current_term,
+            });
+        }
+
+        // Valid leader — reset election state.
+        self.state = RaftState::Follower;
+        self.current_leader = Some(req.leader_id);
+        self.leader_state = None;
+        self.election_tracker.reset();
+
+        // Handle chunked transfer.
+        if req.offset == 0 {
+            // First chunk: start a new pending snapshot buffer.
+            self.pending_snapshot = Some(req.data);
+        } else if let Some(ref mut buf) = self.pending_snapshot {
+            // Subsequent chunk: append to existing buffer.
+            buf.extend_from_slice(&req.data);
+        } else {
+            // Received a non-first chunk without a pending buffer — skip.
+            warn!(
+                node = %self.config.node_id,
+                offset = req.offset,
+                "received InstallSnapshot chunk without pending buffer"
+            );
+            return Ok(InstallSnapshotResponse {
+                term: self.current_term,
+            });
+        }
+
+        if !req.done {
+            // More chunks to come.
+            return Ok(InstallSnapshotResponse {
+                term: self.current_term,
+            });
+        }
+
+        // All chunks received — install the snapshot.
+        let snapshot_data = self.pending_snapshot.take().unwrap_or_default();
+
+        info!(
+            node = %self.config.node_id,
+            last_included_index = %req.last_included_index,
+            last_included_term = %req.last_included_term,
+            size = snapshot_data.len(),
+            "installing snapshot from leader"
+        );
+
+        // Check if our log has an entry at last_included_index with matching term.
+        let keep_suffix =
+            self.log.term_at(req.last_included_index) == Some(req.last_included_term);
+
+        if keep_suffix {
+            // Keep log entries after last_included_index, discard the rest.
+            self.log.compact_to(req.last_included_index);
+        } else {
+            // Discard entire log.
+            self.log
+                .reset_to_snapshot(req.last_included_index, req.last_included_term);
+        }
+
+        // Restore state machine from snapshot.
+        state_machine.restore(&snapshot_data)?;
+
+        // Save snapshot to persistent storage.
+        self.storage
+            .save_snapshot(
+                &snapshot_data,
+                req.last_included_index,
+                req.last_included_term,
+            )
+            .await?;
+
+        // Update volatile state.
+        if req.last_included_index > self.volatile.commit_index {
+            self.volatile.commit_index = req.last_included_index;
+        }
+        if req.last_included_index > self.volatile.last_applied {
+            self.volatile.last_applied = req.last_included_index;
+        }
+
+        self.last_snapshot = Some(Snapshot {
+            last_included_index: req.last_included_index,
+            last_included_term: req.last_included_term,
+            data: snapshot_data,
+        });
+
+        Ok(InstallSnapshotResponse {
+            term: self.current_term,
+        })
     }
 }
 

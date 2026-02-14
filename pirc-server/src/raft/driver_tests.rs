@@ -8,6 +8,7 @@ use crate::raft::driver::{RaftBuilder, RaftError};
 use crate::raft::rpc::{
     AppendEntries, AppendEntriesResponse, RaftMessage, RequestVote, RequestVoteResponse,
 };
+use crate::raft::snapshot::NullStateMachine;
 use crate::raft::storage::{RaftStorage, StorageResult};
 use crate::raft::types::{LogEntry, LogIndex, NodeId, RaftConfig, RaftState, Term};
 
@@ -109,6 +110,7 @@ fn test_config(node_id: u64, peers: Vec<u64>) -> RaftConfig {
         heartbeat_interval: Duration::from_millis(30),
         node_id: NodeId::new(node_id),
         peers: peers.into_iter().map(NodeId::new).collect(),
+        ..RaftConfig::default()
     }
 }
 
@@ -119,6 +121,7 @@ async fn builder_creates_driver_and_handle() {
     let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await
         .unwrap();
@@ -135,8 +138,9 @@ async fn builder_creates_driver_and_handle() {
 #[tokio::test]
 #[should_panic(expected = "config is required")]
 async fn builder_panics_without_config() {
-    let _ = RaftBuilder::<String, MemStorage>::new()
+    let _ = RaftBuilder::<String, MemStorage, NullStateMachine>::new()
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await;
 }
@@ -144,8 +148,19 @@ async fn builder_panics_without_config() {
 #[tokio::test]
 #[should_panic(expected = "storage is required")]
 async fn builder_panics_without_storage() {
-    let _ = RaftBuilder::<String, MemStorage>::new()
+    let _ = RaftBuilder::<String, MemStorage, NullStateMachine>::new()
         .config(test_config(1, vec![2, 3]))
+        .state_machine(NullStateMachine)
+        .build()
+        .await;
+}
+
+#[tokio::test]
+#[should_panic(expected = "state_machine is required")]
+async fn builder_panics_without_state_machine() {
+    let _ = RaftBuilder::<String, MemStorage, NullStateMachine>::new()
+        .config(test_config(1, vec![2, 3]))
+        .storage(MemStorage::new())
         .build()
         .await;
 }
@@ -157,6 +172,7 @@ async fn handle_propose_fails_when_not_leader() {
     let (_driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await
         .unwrap();
@@ -172,6 +188,7 @@ async fn handle_take_commit_rx() {
     let (_driver, mut handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await
         .unwrap();
@@ -192,6 +209,7 @@ async fn driver_shuts_down_on_signal() {
     let (mut driver, _handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await
         .unwrap();
@@ -210,6 +228,7 @@ async fn driver_solo_node_becomes_leader_on_election_timeout() {
     let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
         .config(test_config(1, vec![]))
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await
         .unwrap();
@@ -235,6 +254,7 @@ async fn driver_election_timeout_fires_and_starts_election() {
     let (mut driver, handle, shutdown, _inbound_tx, mut outbound_rx) = RaftBuilder::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await
         .unwrap();
@@ -268,6 +288,7 @@ async fn driver_becomes_leader_after_majority_votes() {
     let (mut driver, handle, shutdown, inbound_tx, mut outbound_rx) = RaftBuilder::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await
         .unwrap();
@@ -317,6 +338,7 @@ async fn driver_handles_append_entries_from_leader() {
     let (mut driver, handle, shutdown, inbound_tx, mut outbound_rx) = RaftBuilder::new()
         .config(test_config(2, vec![1, 3]))
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await
         .unwrap();
@@ -368,6 +390,7 @@ async fn driver_election_timer_resets_on_append_entries() {
     let (mut driver, handle, shutdown, inbound_tx, _outbound_rx) = RaftBuilder::new()
         .config(test_config(2, vec![1, 3]))
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await
         .unwrap();
@@ -404,6 +427,7 @@ async fn driver_handles_request_vote_and_grants() {
     let (mut driver, handle, shutdown, inbound_tx, mut outbound_rx) = RaftBuilder::new()
         .config(test_config(2, vec![1, 3]))
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await
         .unwrap();
@@ -451,6 +475,7 @@ async fn driver_client_proposal_as_leader() {
     let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
         .config(test_config(1, vec![]))
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await
         .unwrap();
@@ -482,6 +507,7 @@ async fn driver_committed_entries_sent_to_commit_channel() {
     let (mut driver, mut handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
         .config(test_config(1, vec![]))
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await
         .unwrap();
@@ -516,6 +542,7 @@ async fn driver_heartbeats_sent_periodically_as_leader() {
     let (mut driver, handle, shutdown, _inbound_tx, mut outbound_rx) = RaftBuilder::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await
         .unwrap();
@@ -533,6 +560,7 @@ async fn driver_heartbeats_sent_periodically_as_leader() {
     let (mut driver, handle, shutdown, inbound_tx, mut outbound_rx) = RaftBuilder::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await
         .unwrap();
@@ -586,6 +614,7 @@ async fn driver_steps_down_on_higher_term() {
     let (mut driver, handle, shutdown, inbound_tx, _outbound_rx) = RaftBuilder::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await
         .unwrap();
@@ -639,6 +668,7 @@ async fn shutdown_sender_can_be_called_multiple_times() {
     let (mut driver, _handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
         .config(test_config(1, vec![]))
         .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
         .build()
         .await
         .unwrap();

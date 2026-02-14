@@ -1,6 +1,7 @@
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use super::rpc::{AppendEntries, RaftMessage};
+use super::snapshot::InstallSnapshot;
 use super::storage::RaftStorage;
 use super::types::{LogIndex, NodeId, RaftState, Term};
 
@@ -16,6 +17,10 @@ where
     /// This is the core replication mechanism: the leader sends log entries
     /// that the peer is missing. If the peer has no missing entries, this
     /// acts as a heartbeat.
+    ///
+    /// If the peer's `next_index` points to a compacted region of the log
+    /// (entries that have been removed by snapshotting), this sends an
+    /// `InstallSnapshot` RPC instead.
     pub fn replicate_to_peer(&self, peer_id: NodeId) {
         if self.state != RaftState::Leader {
             warn!(
@@ -35,12 +40,20 @@ where
             .copied()
             .unwrap_or(LogIndex::new(1));
 
-        // The entry just before next_idx for the consistency check.
+        // If the peer needs entries that have been compacted, send a snapshot.
+        // When next_idx <= offset, those entries no longer exist in the log.
+        let offset = self.log.offset();
+        if offset.as_u64() > 0 && next_idx <= offset {
+            self.send_snapshot_to_peer(peer_id);
+            return;
+        }
+
         let prev_log_index = if next_idx.as_u64() > 0 {
             next_idx - 1
         } else {
             LogIndex::new(0)
         };
+
         let prev_log_term = if prev_log_index.as_u64() > 0 {
             self.log.term_at(prev_log_index).unwrap_or_default()
         } else {
@@ -59,6 +72,104 @@ where
         };
 
         let _ = self.outbound.send((peer_id, RaftMessage::AppendEntries(ae)));
+    }
+
+    /// Send the most recent snapshot to a lagging peer using chunked transfer.
+    fn send_snapshot_to_peer(&self, peer_id: NodeId) {
+        let Some(ref snapshot) = self.last_snapshot else {
+            warn!(
+                node = %self.node_id(),
+                peer = %peer_id,
+                "need to send snapshot but none available"
+            );
+            return;
+        };
+
+        info!(
+            node = %self.node_id(),
+            peer = %peer_id,
+            last_included_index = %snapshot.last_included_index,
+            "sending snapshot to lagging peer"
+        );
+
+        let chunk_size = self.config.snapshot_chunk_size;
+        let data = &snapshot.data;
+        let total = data.len();
+
+        if total == 0 {
+            // Empty snapshot: send a single empty done=true message.
+            let msg = InstallSnapshot {
+                term: self.current_term,
+                leader_id: self.node_id(),
+                last_included_index: snapshot.last_included_index,
+                last_included_term: snapshot.last_included_term,
+                offset: 0,
+                data: Vec::new(),
+                done: true,
+            };
+            let _ = self
+                .outbound
+                .send((peer_id, RaftMessage::InstallSnapshot(msg)));
+            return;
+        }
+
+        let mut offset = 0;
+        while offset < total {
+            let end = std::cmp::min(offset + chunk_size, total);
+            let done = end >= total;
+            let chunk = data[offset..end].to_vec();
+
+            let msg = InstallSnapshot {
+                term: self.current_term,
+                leader_id: self.node_id(),
+                last_included_index: snapshot.last_included_index,
+                last_included_term: snapshot.last_included_term,
+                offset: offset as u64,
+                data: chunk,
+                done,
+            };
+            let _ = self
+                .outbound
+                .send((peer_id, RaftMessage::InstallSnapshot(msg)));
+
+            offset = end;
+        }
+    }
+
+    /// Handle an incoming `InstallSnapshotResponse`.
+    ///
+    /// On success, updates `next_index` for the peer to point just after
+    /// the snapshot's last included index.
+    pub async fn handle_install_snapshot_response(
+        &mut self,
+        from: NodeId,
+        resp: super::snapshot::InstallSnapshotResponse,
+    ) -> Result<(), super::storage::StorageError> {
+        self.handle_term_update(resp.term).await?;
+
+        if self.state != RaftState::Leader {
+            return Ok(());
+        }
+
+        if let Some(ref mut leader) = self.leader_state {
+            // Update next_index to just after the snapshot.
+            if let Some(ref snapshot) = self.last_snapshot {
+                let new_next = snapshot.last_included_index + 1;
+                let new_match = snapshot.last_included_index;
+                leader.next_index.insert(from, new_next);
+                leader.match_index.insert(from, new_match);
+                debug!(
+                    node = %self.node_id(),
+                    peer = %from,
+                    next_index = %new_next,
+                    "updated peer after snapshot install"
+                );
+            }
+        }
+
+        self.advance_commit_index();
+
+        Ok(())
     }
 
     /// Send `AppendEntries` to all peers, including any outstanding log entries.

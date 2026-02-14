@@ -134,6 +134,20 @@ pub struct RaftConfig {
     pub node_id: NodeId,
     /// Peer node identifiers.
     pub peers: Vec<NodeId>,
+    /// Number of log entries before triggering a snapshot.
+    #[serde(default = "default_snapshot_threshold")]
+    pub snapshot_threshold: usize,
+    /// Size of each chunk when transferring snapshots (bytes).
+    #[serde(default = "default_snapshot_chunk_size")]
+    pub snapshot_chunk_size: usize,
+}
+
+fn default_snapshot_threshold() -> usize {
+    1000
+}
+
+fn default_snapshot_chunk_size() -> usize {
+    65_536
 }
 
 impl Default for RaftConfig {
@@ -144,6 +158,8 @@ impl Default for RaftConfig {
             heartbeat_interval: Duration::from_millis(50),
             node_id: NodeId::new(0),
             peers: Vec::new(),
+            snapshot_threshold: default_snapshot_threshold(),
+            snapshot_chunk_size: default_snapshot_chunk_size(),
         }
     }
 }
@@ -333,6 +349,7 @@ mod tests {
             heartbeat_interval: Duration::from_millis(75),
             node_id: NodeId::new(1),
             peers: vec![NodeId::new(2), NodeId::new(3)],
+            ..RaftConfig::default()
         };
         let json = serde_json::to_string(&config).unwrap();
         let deserialized: RaftConfig = serde_json::from_str(&json).unwrap();

@@ -11,7 +11,7 @@ use pirc_server::channel_registry::ChannelRegistry;
 use pirc_server::config::ServerConfig;
 use pirc_server::handler::{self, HandleResult, PreRegistrationState};
 use pirc_server::raft::transport::{PeerConnections, PeerMap};
-use pirc_server::raft::{FileStorage, RaftBuilder, RaftHandle};
+use pirc_server::raft::{FileStorage, NullStateMachine, RaftBuilder, RaftHandle};
 use pirc_server::registry::UserRegistry;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{error, info, warn};
@@ -283,9 +283,10 @@ async fn init_raft_cluster(
     let storage = FileStorage::new(&data_dir).await?;
 
     let (mut driver, handle, shutdown_sender, inbound_tx, outbound_rx) =
-        RaftBuilder::<String, FileStorage>::new()
+        RaftBuilder::<String, FileStorage, NullStateMachine>::new()
             .config(raft_config)
             .storage(storage)
+            .state_machine(NullStateMachine)
             .build()
             .await?;
 

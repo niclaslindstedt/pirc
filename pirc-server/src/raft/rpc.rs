@@ -2,6 +2,7 @@ use pirc_common::RaftError;
 use pirc_protocol::{Command, Message, PircSubcommand};
 use serde::{Deserialize, Serialize};
 
+use super::snapshot::{InstallSnapshot, InstallSnapshotResponse};
 use super::types::{LogEntry, LogIndex, NodeId, Term};
 
 /// `RequestVote` RPC (sent by candidates to gather votes).
@@ -46,6 +47,8 @@ pub enum RaftMessage<T> {
     RequestVoteResponse(RequestVoteResponse),
     AppendEntries(AppendEntries<T>),
     AppendEntriesResponse(AppendEntriesResponse),
+    InstallSnapshot(InstallSnapshot),
+    InstallSnapshotResponse(InstallSnapshotResponse),
 }
 
 impl<T: Serialize> RaftMessage<T> {

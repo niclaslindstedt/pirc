@@ -4,6 +4,7 @@ use tracing::{debug, info, warn};
 
 use super::node::RaftNode;
 use super::rpc::RaftMessage;
+use super::snapshot::StateMachine;
 use super::storage::RaftStorage;
 use super::types::{LogEntry, LogIndex, NodeId, RaftConfig, RaftState, Term};
 
@@ -101,12 +102,15 @@ pub fn shutdown_channel() -> (ShutdownSender, ShutdownSignal) {
 ///
 /// Owns the [`RaftNode`] and processes timers (election timeout, heartbeat
 /// interval), inbound messages, and client proposals via `tokio::select!`.
-pub struct RaftDriver<T, S>
+pub struct RaftDriver<T, S, M>
 where
     T: Clone + PartialEq + Send + Sync + serde::Serialize + serde::de::DeserializeOwned + 'static,
     S: RaftStorage<T>,
+    M: StateMachine<T>,
 {
     node: RaftNode<T, S>,
+    /// Application-level state machine for applying commands and snapshots.
+    state_machine: M,
     /// Receives messages from other Raft nodes (delivered by the transport layer).
     inbound_rx: mpsc::UnboundedReceiver<(NodeId, RaftMessage<T>)>,
     /// Receives outbound messages from the node (to be delivered by transport).
@@ -125,10 +129,11 @@ where
     election_reset: bool,
 }
 
-impl<T, S> RaftDriver<T, S>
+impl<T, S, M> RaftDriver<T, S, M>
 where
     T: Clone + PartialEq + Send + Sync + serde::Serialize + serde::de::DeserializeOwned + 'static,
     S: RaftStorage<T>,
+    M: StateMachine<T>,
 {
     /// Run the event loop until shutdown is signalled.
     pub async fn run(&mut self) {
@@ -200,6 +205,9 @@ where
 
             // Apply any newly committed entries.
             self.apply_committed_entries();
+
+            // Trigger snapshot if log exceeds threshold.
+            self.maybe_snapshot().await;
         }
     }
 
@@ -266,8 +274,6 @@ where
                 let req_term = req.term;
                 match self.node.handle_append_entries(req).await {
                     Ok(resp) => {
-                        // Reset election timer on valid AppendEntries from current
-                        // or higher term leader (even if log match failed).
                         if req_term >= self.node.current_term() {
                             self.election_reset = true;
                         }
@@ -295,6 +301,52 @@ where
                         "error handling AppendEntriesResponse"
                     );
                 }
+            }
+            RaftMessage::InstallSnapshot(req) => self.handle_install_snapshot(from, req).await,
+            RaftMessage::InstallSnapshotResponse(resp) => {
+                if let Err(e) = self
+                    .node
+                    .handle_install_snapshot_response(from, resp)
+                    .await
+                {
+                    warn!(
+                        node = %self.node.node_id(),
+                        from = %from,
+                        error = %e,
+                        "error handling InstallSnapshotResponse"
+                    );
+                }
+            }
+        }
+    }
+
+    async fn handle_install_snapshot(
+        &mut self,
+        from: NodeId,
+        req: super::snapshot::InstallSnapshot,
+    ) {
+        let req_term = req.term;
+        match self
+            .node
+            .handle_install_snapshot(req, &mut self.state_machine)
+            .await
+        {
+            Ok(resp) => {
+                if req_term >= self.node.current_term() {
+                    self.election_reset = true;
+                }
+                let _ = self
+                    .node
+                    .outbound
+                    .send((from, RaftMessage::InstallSnapshotResponse(resp)));
+            }
+            Err(e) => {
+                warn!(
+                    node = %self.node.node_id(),
+                    from = %from,
+                    error = %e,
+                    "error handling InstallSnapshot"
+                );
             }
         }
     }
@@ -338,12 +390,26 @@ where
             idx += 1;
         }
 
-        // Now apply them (this updates last_applied).
-        self.node.apply_committed(|_| {});
+        // Now apply them via the state machine and update last_applied.
+        self.node.apply_committed(|cmd| {
+            self.state_machine.apply(cmd);
+        });
 
         // Send entries to the commit channel.
         for entry in entries_to_send {
             let _ = self.commit_tx.send(entry);
+        }
+    }
+
+    async fn maybe_snapshot(&mut self) {
+        if self.node.should_snapshot() {
+            if let Err(e) = self.node.create_snapshot(&self.state_machine).await {
+                warn!(
+                    node = %self.node.node_id(),
+                    error = %e,
+                    "failed to create snapshot"
+                );
+            }
         }
     }
 
@@ -367,35 +433,40 @@ where
 }
 
 /// Builder for constructing a [`RaftDriver`] and [`RaftHandle`] pair.
-pub struct RaftBuilder<T, S>
+pub struct RaftBuilder<T, S, M>
 where
     T: Clone + PartialEq + Send + Sync + serde::Serialize + serde::de::DeserializeOwned + 'static,
     S: RaftStorage<T>,
+    M: StateMachine<T>,
 {
     config: Option<RaftConfig>,
     storage: Option<S>,
+    state_machine: Option<M>,
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<T, S> Default for RaftBuilder<T, S>
+impl<T, S, M> Default for RaftBuilder<T, S, M>
 where
     T: Clone + PartialEq + Send + Sync + serde::Serialize + serde::de::DeserializeOwned + 'static,
     S: RaftStorage<T>,
+    M: StateMachine<T>,
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T, S> RaftBuilder<T, S>
+impl<T, S, M> RaftBuilder<T, S, M>
 where
     T: Clone + PartialEq + Send + Sync + serde::Serialize + serde::de::DeserializeOwned + 'static,
     S: RaftStorage<T>,
+    M: StateMachine<T>,
 {
     pub fn new() -> Self {
         Self {
             config: None,
             storage: None,
+            state_machine: None,
             _marker: std::marker::PhantomData,
         }
     }
@@ -414,6 +485,13 @@ where
         self
     }
 
+    /// Set the state machine.
+    #[must_use]
+    pub fn state_machine(mut self, sm: M) -> Self {
+        self.state_machine = Some(sm);
+        self
+    }
+
     /// Build the driver and handle.
     ///
     /// Returns:
@@ -425,12 +503,12 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if `config` or `storage` was not set.
+    /// Panics if `config`, `storage`, or `state_machine` was not set.
     pub async fn build(
         self,
     ) -> Result<
         (
-            RaftDriver<T, S>,
+            RaftDriver<T, S, M>,
             RaftHandle<T>,
             ShutdownSender,
             mpsc::UnboundedSender<(NodeId, RaftMessage<T>)>,
@@ -440,6 +518,9 @@ where
     > {
         let config = self.config.expect("RaftBuilder: config is required");
         let storage = self.storage.expect("RaftBuilder: storage is required");
+        let state_machine = self
+            .state_machine
+            .expect("RaftBuilder: state_machine is required");
 
         let (node, outbound_rx) = RaftNode::new(config, storage).await?;
 
@@ -454,6 +535,7 @@ where
 
         let driver = RaftDriver {
             node,
+            state_machine,
             inbound_rx,
             outbound_rx,
             outbound_fwd,

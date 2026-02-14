@@ -184,6 +184,7 @@ where
 
     async fn truncate_log_from(&self, index: LogIndex) -> StorageResult<()> {
         let entries: Vec<LogEntry<T>> = self.load_log().await?;
+        #[allow(clippy::cast_possible_truncation)]
         let keep_count = index.as_u64().saturating_sub(1) as usize;
         let kept = &entries[..std::cmp::min(keep_count, entries.len())];
 
@@ -219,14 +220,12 @@ where
     }
 
     async fn load_snapshot(&self) -> StorageResult<Option<(Vec<u8>, LogIndex, Term)>> {
-        let meta_data = match self.read_file(&self.snapshot_meta_path()).await? {
-            Some(data) => data,
-            None => return Ok(None),
+        let Some(meta_data) = self.read_file(&self.snapshot_meta_path()).await? else {
+            return Ok(None);
         };
 
-        let snapshot_data = match self.read_file(&self.snapshot_path()).await? {
-            Some(data) => data,
-            None => return Ok(None),
+        let Some(snapshot_data) = self.read_file(&self.snapshot_path()).await? else {
+            return Ok(None);
         };
 
         let meta_str = String::from_utf8(meta_data).map_err(|e| {

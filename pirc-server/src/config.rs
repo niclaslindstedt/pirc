@@ -259,6 +259,7 @@ impl ClusterConfig {
             heartbeat_interval: Duration::from_millis(self.heartbeat_interval_ms.unwrap_or(50)),
             node_id,
             peers,
+            ..RaftConfig::default()
         })
     }
 
