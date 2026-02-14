@@ -18,6 +18,8 @@ pub enum KeyEvent {
     Delete,
     /// Tab key.
     Tab,
+    /// Shift+Tab (back-tab / CSI Z).
+    BackTab,
     /// Arrow up.
     Up,
     /// Arrow down.
@@ -239,6 +241,8 @@ fn parse_csi_sequence(buf: &[u8]) -> KeyEvent {
         b'B' => KeyEvent::Down,
         b'C' => KeyEvent::Right,
         b'D' => KeyEvent::Left,
+        // Back-tab: ESC [ Z (Shift+Tab)
+        b'Z' => KeyEvent::BackTab,
         // Home/End: ESC [ H / ESC [ F
         b'H' => KeyEvent::Home,
         b'F' => KeyEvent::End,
@@ -389,6 +393,11 @@ mod tests {
     #[test]
     fn test_tab() {
         assert_eq!(parse_key_event(b"\t"), KeyEvent::Tab);
+    }
+
+    #[test]
+    fn test_backtab() {
+        assert_eq!(parse_key_event(b"\x1b[Z"), KeyEvent::BackTab);
     }
 
     #[test]
