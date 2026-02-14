@@ -1,5 +1,6 @@
 pub mod ansi;
 pub mod buffer;
+pub mod buffer_manager;
 pub mod input;
 pub mod input_history;
 pub mod input_line_state;
@@ -21,4 +22,5 @@ pub use layout::{Layout, Rect};
 pub use signal::SignalHandler;
 pub use tab_completion::TabCompleter;
 pub use message_buffer::{BufferLine, LineType, MessageBuffer};
+pub use buffer_manager::{BufferId, BufferManager};
 pub use terminal::{RawModeGuard, TerminalSize, terminal_size};
