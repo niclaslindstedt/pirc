@@ -47,7 +47,15 @@ fn register_user(
 ) {
     let (tx, mut rx) = make_sender();
     let mut state = PreRegistrationState::new(hostname.to_owned());
-    handle_message(&nick_msg(nick), connection_id, registry, channels, &tx, &mut state, config);
+    handle_message(
+        &nick_msg(nick),
+        connection_id,
+        registry,
+        channels,
+        &tx,
+        &mut state,
+        config,
+    );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
         connection_id,
@@ -72,14 +80,29 @@ async fn whois_existing_user_returns_reply_sequence() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Register a target user
     let (_tx2, _rx2, _state2) =
         register_user("Bob", "bob", 2, "10.0.0.2", &registry, &channels, &config);
 
-    handle_message(&whois_msg("Bob"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &whois_msg("Bob"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     // RPL_WHOISUSER (311)
     let reply = rx.recv().await.unwrap();
@@ -102,7 +125,9 @@ async fn whois_existing_user_returns_reply_sequence() {
     assert_eq!(reply.numeric_code(), Some(RPL_WHOISIDLE));
     assert_eq!(reply.params[1], "Bob");
     // idle_secs should be a number
-    reply.params[2].parse::<u64>().expect("idle secs is a number");
+    reply.params[2]
+        .parse::<u64>()
+        .expect("idle secs is a number");
     // signon should be a number
     reply.params[3].parse::<u64>().expect("signon is a number");
 
@@ -117,8 +142,15 @@ async fn whois_nonexistent_nick_returns_nosuchnick() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     handle_message(
         &whois_msg("Ghost"),
@@ -142,8 +174,15 @@ async fn whois_no_param_returns_nonicknamegiven() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let msg = Message::new(Command::Whois, vec![]);
     handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
@@ -157,8 +196,15 @@ async fn whois_away_user_includes_rpl_away() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Register Bob and set away
     let (_tx2, _rx2, _state2) =
@@ -170,7 +216,15 @@ async fn whois_away_user_includes_rpl_away() {
         session.away_message = Some("Gone fishing".to_owned());
     }
 
-    handle_message(&whois_msg("Bob"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &whois_msg("Bob"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     // RPL_WHOISUSER (311)
     let reply = rx.recv().await.unwrap();
@@ -199,8 +253,15 @@ async fn whois_operator_includes_rpl_whoisoperator() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Register Bob and set operator mode
     let (_tx2, _rx2, _state2) =
@@ -212,7 +273,15 @@ async fn whois_operator_includes_rpl_whoisoperator() {
         session.modes.insert(pirc_common::UserMode::Operator);
     }
 
-    handle_message(&whois_msg("Bob"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &whois_msg("Bob"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     // RPL_WHOISUSER (311)
     let reply = rx.recv().await.unwrap();
@@ -241,14 +310,29 @@ async fn whois_idle_time_is_reasonable() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Register Bob
     let (_tx2, _rx2, _state2) =
         register_user("Bob", "bob", 2, "10.0.0.2", &registry, &channels, &config);
 
-    handle_message(&whois_msg("Bob"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &whois_msg("Bob"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     // Skip to RPL_WHOISIDLE
     let _ = rx.recv().await.unwrap(); // 311

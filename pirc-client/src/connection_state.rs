@@ -326,10 +326,7 @@ mod tests {
         assert!(mgr
             .transition(ConnectionState::Reconnecting { attempt: 1 })
             .is_ok());
-        assert_eq!(
-            *mgr.state(),
-            ConnectionState::Reconnecting { attempt: 1 }
-        );
+        assert_eq!(*mgr.state(), ConnectionState::Reconnecting { attempt: 1 });
     }
 
     #[test]
@@ -364,9 +361,7 @@ mod tests {
     #[test]
     fn disconnected_to_registering_invalid() {
         let mut mgr = ConnectionManager::new(&default_config());
-        let err = mgr
-            .transition(ConnectionState::Registering)
-            .unwrap_err();
+        let err = mgr.transition(ConnectionState::Registering).unwrap_err();
         assert!(err.to_string().contains("Disconnected"));
         assert!(err.to_string().contains("Registering"));
     }

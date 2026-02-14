@@ -230,18 +230,16 @@ impl InputHandler {
         // Parse and produce the action.
         match command_parser::parse(&text) {
             ParsedInput::ChatMessage(msg) => InputAction::ChatMessage(msg),
-            ParsedInput::Command { name, args } => {
-                match ClientCommand::from_parsed(&name, &args) {
-                    Ok(cmd) => {
-                        if let ClientCommand::Quit(reason) = cmd {
-                            InputAction::Quit(reason)
-                        } else {
-                            InputAction::Command(cmd)
-                        }
+            ParsedInput::Command { name, args } => match ClientCommand::from_parsed(&name, &args) {
+                Ok(cmd) => {
+                    if let ClientCommand::Quit(reason) = cmd {
+                        InputAction::Quit(reason)
+                    } else {
+                        InputAction::Command(cmd)
                     }
-                    Err(e) => InputAction::CommandError(e),
                 }
-            }
+                Err(e) => InputAction::CommandError(e),
+            },
         }
     }
 

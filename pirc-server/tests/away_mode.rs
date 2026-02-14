@@ -17,7 +17,11 @@ use pirc_server::registry::UserRegistry;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
-async fn start_server() -> (SocketAddr, pirc_network::ShutdownController, Arc<UserRegistry>) {
+async fn start_server() -> (
+    SocketAddr,
+    pirc_network::ShutdownController,
+    Arc<UserRegistry>,
+) {
     let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let listener = Listener::bind(addr).await.unwrap();
     let local_addr = listener.local_addr().unwrap();
@@ -39,8 +43,15 @@ async fn start_server() -> (SocketAddr, pirc_network::ShutdownController, Arc<Us
                     let channels = Arc::clone(&conn_channels);
                     let config = Arc::clone(&config);
                     tokio::spawn(async move {
-                        handle_connection(connection, peer_addr, conn_shutdown, registry, channels, config)
-                            .await;
+                        handle_connection(
+                            connection,
+                            peer_addr,
+                            conn_shutdown,
+                            registry,
+                            channels,
+                            config,
+                        )
+                        .await;
                     });
                 }
                 Ok(None) => break,
@@ -67,7 +78,9 @@ async fn handle_connection(
     loop {
         match connection.recv_with_shutdown(&mut shutdown).await {
             Ok(Some(msg)) => {
-                handler::handle_message(&msg, conn_id, &registry, &channels, &tx, &mut state, &config);
+                handler::handle_message(
+                    &msg, conn_id, &registry, &channels, &tx, &mut state, &config,
+                );
                 while let Ok(out_msg) = rx.try_recv() {
                     if connection.send(out_msg).await.is_err() {
                         return;
@@ -207,10 +220,7 @@ async fn mode_set_and_query_over_tcp() {
     register_and_drain(&mut client, "Alice", "alice").await;
 
     // Set +v
-    let mode_set = Message::new(
-        Command::Mode,
-        vec!["Alice".to_owned(), "+v".to_owned()],
-    );
+    let mode_set = Message::new(Command::Mode, vec!["Alice".to_owned(), "+v".to_owned()]);
     client.send(mode_set).await.unwrap();
 
     let reply = recv_msg(&mut client).await;
@@ -236,10 +246,7 @@ async fn mode_unknown_flag_over_tcp() {
     let mut client = connect(addr).await;
     register_and_drain(&mut client, "Alice", "alice").await;
 
-    let mode = Message::new(
-        Command::Mode,
-        vec!["Alice".to_owned(), "+x".to_owned()],
-    );
+    let mode = Message::new(Command::Mode, vec!["Alice".to_owned(), "+x".to_owned()]);
     client.send(mode).await.unwrap();
 
     let reply = recv_msg(&mut client).await;

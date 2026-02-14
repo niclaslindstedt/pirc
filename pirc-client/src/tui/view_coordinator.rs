@@ -226,7 +226,12 @@ impl ViewCoordinator {
 
         // Chat area
         let nick_width = 12;
-        render_chat_area(buf, &layout.chat_area, self.buffers.active_mut(), nick_width);
+        render_chat_area(
+            buf,
+            &layout.chat_area,
+            self.buffers.active_mut(),
+            nick_width,
+        );
 
         // Status bar
         let info = StatusBarInfo {
@@ -424,33 +429,22 @@ mod tests {
         let mut vc = ViewCoordinator::new(80, 24, 100);
         vc.buffers_mut().open(BufferId::Channel("#a".into()));
         vc.buffers_mut().open(BufferId::Channel("#b".into()));
-        vc.buffers_mut()
-            .switch_to(&BufferId::Status);
+        vc.buffers_mut().switch_to(&BufferId::Status);
 
         vc.switch_next_buffer();
-        assert_eq!(
-            *vc.buffers().active_id(),
-            BufferId::Channel("#a".into())
-        );
+        assert_eq!(*vc.buffers().active_id(), BufferId::Channel("#a".into()));
         vc.switch_next_buffer();
-        assert_eq!(
-            *vc.buffers().active_id(),
-            BufferId::Channel("#b".into())
-        );
+        assert_eq!(*vc.buffers().active_id(), BufferId::Channel("#b".into()));
     }
 
     #[test]
     fn switch_prev_buffer_cycles() {
         let mut vc = ViewCoordinator::new(80, 24, 100);
         vc.buffers_mut().open(BufferId::Channel("#a".into()));
-        vc.buffers_mut()
-            .switch_to(&BufferId::Status);
+        vc.buffers_mut().switch_to(&BufferId::Status);
 
         vc.switch_prev_buffer();
-        assert_eq!(
-            *vc.buffers().active_id(),
-            BufferId::Channel("#a".into())
-        );
+        assert_eq!(*vc.buffers().active_id(), BufferId::Channel("#a".into()));
     }
 
     #[test]
@@ -463,10 +457,7 @@ mod tests {
         assert_eq!(*vc.buffers().active_id(), BufferId::Status);
 
         assert!(vc.switch_buffer_by_number(1));
-        assert_eq!(
-            *vc.buffers().active_id(),
-            BufferId::Channel("#a".into())
-        );
+        assert_eq!(*vc.buffers().active_id(), BufferId::Channel("#a".into()));
 
         assert!(!vc.switch_buffer_by_number(10));
     }
@@ -562,10 +553,7 @@ mod tests {
     fn push_message_to_buffer() {
         let mut vc = ViewCoordinator::new(80, 24, 100);
         vc.buffers_mut().open(BufferId::Channel("#test".into()));
-        vc.push_message(
-            &BufferId::Channel("#test".into()),
-            make_line("hello"),
-        );
+        vc.push_message(&BufferId::Channel("#test".into()), make_line("hello"));
         assert_eq!(
             vc.buffers()
                 .get(&BufferId::Channel("#test".into()))

@@ -62,35 +62,20 @@ pub(crate) fn handle_oper(
     let oper_config = config.operators.iter().find(|o| o.name == *oper_name);
 
     let Some(oper_config) = oper_config else {
-        send_numeric(
-            sender,
-            ERR_PASSWDMISMATCH,
-            &[&nick],
-            "Password incorrect",
-        );
+        send_numeric(sender, ERR_PASSWDMISMATCH, &[&nick], "Password incorrect");
         return;
     };
 
     // Verify password.
     if oper_config.password != *oper_password {
-        send_numeric(
-            sender,
-            ERR_PASSWDMISMATCH,
-            &[&nick],
-            "Password incorrect",
-        );
+        send_numeric(sender, ERR_PASSWDMISMATCH, &[&nick], "Password incorrect");
         return;
     }
 
     // Check host mask if configured.
     if let Some(ref mask) = oper_config.host_mask {
         if !host_matches_mask(&hostname, mask) {
-            send_numeric(
-                sender,
-                ERR_NOOPERHOST,
-                &[&nick],
-                "No O-lines for your host",
-            );
+            send_numeric(sender, ERR_NOOPERHOST, &[&nick], "No O-lines for your host");
             return;
         }
     }
@@ -112,7 +97,9 @@ pub(crate) fn handle_oper(
     // Send MODE change notification: :nick!user@host MODE nick :+o
     let mode_msg = Message::builder(Command::Mode)
         .prefix(Prefix::User {
-            nick: nick.parse().unwrap_or_else(|_| pirc_common::Nickname::new("*").unwrap()),
+            nick: nick
+                .parse()
+                .unwrap_or_else(|_| pirc_common::Nickname::new("*").unwrap()),
             user: username,
             host: hostname,
         })

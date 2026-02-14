@@ -140,7 +140,9 @@ pub fn handle_ban(
     if removing {
         // Remove ban.
         let mut channel = channel_arc.write().expect("channel lock poisoned");
-        channel.ban_list.retain(|b| !b.mask.eq_ignore_ascii_case(&mask));
+        channel
+            .ban_list
+            .retain(|b| !b.mask.eq_ignore_ascii_case(&mask));
     } else {
         // Add ban.
         let now = std::time::SystemTime::now()

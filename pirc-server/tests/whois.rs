@@ -8,8 +8,8 @@ use pirc_common::Nickname;
 use pirc_network::connection::AsyncTransport;
 use pirc_network::{Connection, Listener, ShutdownSignal};
 use pirc_protocol::numeric::{
-    ERR_NONICKNAMEGIVEN, ERR_NOSUCHNICK, RPL_AWAY, RPL_ENDOFWHOIS, RPL_WHOISOPERATOR,
-    RPL_WHOISIDLE, RPL_WHOISSERVER, RPL_WHOISUSER, RPL_WELCOME,
+    ERR_NONICKNAMEGIVEN, ERR_NOSUCHNICK, RPL_AWAY, RPL_ENDOFWHOIS, RPL_WELCOME, RPL_WHOISIDLE,
+    RPL_WHOISOPERATOR, RPL_WHOISSERVER, RPL_WHOISUSER,
 };
 use pirc_protocol::{Command, Message};
 use pirc_server::channel_registry::ChannelRegistry;
@@ -20,7 +20,11 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
 /// Start a test server that uses the real handler with registration support.
-async fn start_server() -> (SocketAddr, pirc_network::ShutdownController, Arc<UserRegistry>) {
+async fn start_server() -> (
+    SocketAddr,
+    pirc_network::ShutdownController,
+    Arc<UserRegistry>,
+) {
     let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let listener = Listener::bind(addr).await.unwrap();
     let local_addr = listener.local_addr().unwrap();
@@ -42,8 +46,15 @@ async fn start_server() -> (SocketAddr, pirc_network::ShutdownController, Arc<Us
                     let channels = Arc::clone(&conn_channels);
                     let config = Arc::clone(&config);
                     tokio::spawn(async move {
-                        handle_connection(connection, peer_addr, conn_shutdown, registry, channels, config)
-                            .await;
+                        handle_connection(
+                            connection,
+                            peer_addr,
+                            conn_shutdown,
+                            registry,
+                            channels,
+                            config,
+                        )
+                        .await;
                     });
                 }
                 Ok(None) => break,
@@ -70,7 +81,9 @@ async fn handle_connection(
     loop {
         match connection.recv_with_shutdown(&mut shutdown).await {
             Ok(Some(msg)) => {
-                handler::handle_message(&msg, conn_id, &registry, &channels, &tx, &mut state, &config);
+                handler::handle_message(
+                    &msg, conn_id, &registry, &channels, &tx, &mut state, &config,
+                );
                 while let Ok(out_msg) = rx.try_recv() {
                     if connection.send(out_msg).await.is_err() {
                         return;
@@ -122,7 +135,10 @@ async fn recv_msg(client: &mut Connection) -> Message {
 /// Register a client, drain the welcome burst (001, 002, 003, 422).
 async fn register_and_drain(client: &mut Connection, nick: &str, username: &str) {
     client.send(nick_msg(nick)).await.unwrap();
-    client.send(user_msg(username, &format!("{nick} Test"))).await.unwrap();
+    client
+        .send(user_msg(username, &format!("{nick} Test")))
+        .await
+        .unwrap();
 
     let welcome = recv_msg(client).await;
     assert_eq!(welcome.numeric_code(), Some(RPL_WELCOME));

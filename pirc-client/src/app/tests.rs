@@ -60,7 +60,14 @@ fn push_status_adds_to_status_buffer() {
     let config = ClientConfig::default();
     let mut app = App::new(config);
     app.push_status("hello world");
-    assert!(app.view.buffers().get(&crate::tui::buffer_manager::BufferId::Status).unwrap().len() > 0);
+    assert!(
+        app.view
+            .buffers()
+            .get(&crate::tui::buffer_manager::BufferId::Status)
+            .unwrap()
+            .len()
+            > 0
+    );
 }
 
 #[test]
@@ -141,10 +148,7 @@ fn handle_server_message_rpl_welcome() {
     let msg = Message::with_prefix(
         pirc_protocol::Prefix::Server("irc.test.net".into()),
         pirc_protocol::Command::Numeric(1),
-        vec![
-            "testuser".into(),
-            "Welcome to the test network!".into(),
-        ],
+        vec!["testuser".into(), "Welcome to the test network!".into()],
     );
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -181,10 +185,7 @@ fn handle_server_message_rpl_welcome_updates_nick() {
     let msg = Message::with_prefix(
         pirc_protocol::Prefix::Server("irc.test.net".into()),
         pirc_protocol::Command::Numeric(1),
-        vec![
-            "servernick".into(),
-            "Welcome!".into(),
-        ],
+        vec!["servernick".into(), "Welcome!".into()],
     );
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -208,7 +209,10 @@ fn handle_server_message_info_numerics() {
         .transition(ConnectionState::Registering)
         .unwrap();
     app.registration = Some(RegistrationState::new(
-        "user".into(), vec![], "user".into(), "user".into(),
+        "user".into(),
+        vec![],
+        "user".into(),
+        "user".into(),
     ));
 
     let initial_count = app
@@ -260,7 +264,11 @@ fn handle_server_message_nick_in_use() {
 
     let msg = Message::new(
         pirc_protocol::Command::Numeric(433),
-        vec!["*".into(), "mynick".into(), "Nickname is already in use".into()],
+        vec![
+            "*".into(),
+            "mynick".into(),
+            "Nickname is already in use".into(),
+        ],
     );
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -281,10 +289,7 @@ fn handle_server_message_ping_no_buffer_output() {
     let config = ClientConfig::default();
     let mut app = App::new(config);
 
-    let msg = Message::new(
-        pirc_protocol::Command::Ping,
-        vec!["server".into()],
-    );
+    let msg = Message::new(pirc_protocol::Command::Ping, vec!["server".into()]);
 
     let initial_count = app
         .view
@@ -318,10 +323,7 @@ fn handle_server_message_pong_updates_lag() {
     // Simulate having sent a PING
     app.ping_sent_at = Some(Instant::now() - Duration::from_millis(42));
 
-    let msg = Message::new(
-        pirc_protocol::Command::Pong,
-        vec!["pirc-12345".into()],
-    );
+    let msg = Message::new(pirc_protocol::Command::Pong, vec!["pirc-12345".into()]);
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -343,10 +345,7 @@ fn handle_server_message_pong_without_ping_is_ignored() {
     // No PING was sent
     assert!(app.ping_sent_at.is_none());
 
-    let msg = Message::new(
-        pirc_protocol::Command::Pong,
-        vec!["something".into()],
-    );
+    let msg = Message::new(pirc_protocol::Command::Pong, vec!["something".into()]);
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -457,7 +456,9 @@ fn handle_server_message_privmsg_to_channel() {
     let buf = app
         .view
         .buffers()
-        .get(&crate::tui::buffer_manager::BufferId::Channel("#test".into()))
+        .get(&crate::tui::buffer_manager::BufferId::Channel(
+            "#test".into(),
+        ))
         .expect("channel buffer should exist");
     assert_eq!(buf.len(), 1);
 }
@@ -523,7 +524,10 @@ fn handle_disconnect_clears_registration() {
         .transition(ConnectionState::Registering)
         .unwrap();
     app.registration = Some(RegistrationState::new(
-        "user".into(), vec![], "user".into(), "user".into(),
+        "user".into(),
+        vec![],
+        "user".into(),
+        "user".into(),
     ));
     app.registration_deadline = Some(Instant::now() + REGISTRATION_TIMEOUT);
 
@@ -606,10 +610,7 @@ fn handle_disconnect_no_reconnect_when_disabled() {
     // Should NOT have scheduled a reconnect
     assert!(app.reconnect_at.is_none());
     assert_eq!(app.reconnect_attempt, 0);
-    assert_eq!(
-        *app.connection_mgr.state(),
-        ConnectionState::Disconnected
-    );
+    assert_eq!(*app.connection_mgr.state(), ConnectionState::Disconnected);
 }
 
 #[test]
@@ -625,9 +626,7 @@ fn schedule_reconnect_exponential_backoff() {
 
     // Attempt 2: delay = 5 * 2^1 = 10s
     // Reset state for next schedule
-    let _ = app
-        .connection_mgr
-        .transition(ConnectionState::Disconnected);
+    let _ = app.connection_mgr.transition(ConnectionState::Disconnected);
     app.schedule_reconnect(2);
     let at2 = app.reconnect_at.unwrap();
     assert_eq!(app.reconnect_attempt, 2);
@@ -635,9 +634,7 @@ fn schedule_reconnect_exponential_backoff() {
     assert!(at2 > at1);
 
     // Attempt 5: delay = 5 * 2^4 = 80s → capped at 60s
-    let _ = app
-        .connection_mgr
-        .transition(ConnectionState::Disconnected);
+    let _ = app.connection_mgr.transition(ConnectionState::Disconnected);
     app.schedule_reconnect(5);
     assert_eq!(app.reconnect_attempt, 5);
 }
@@ -652,10 +649,14 @@ fn handle_disconnect_captures_channels_for_rejoin() {
     // Open some channel buffers
     app.view
         .buffers_mut()
-        .ensure_open(crate::tui::buffer_manager::BufferId::Channel("#rust".into()));
+        .ensure_open(crate::tui::buffer_manager::BufferId::Channel(
+            "#rust".into(),
+        ));
     app.view
         .buffers_mut()
-        .ensure_open(crate::tui::buffer_manager::BufferId::Channel("#pirc".into()));
+        .ensure_open(crate::tui::buffer_manager::BufferId::Channel(
+            "#pirc".into(),
+        ));
 
     // Force into connected state
     app.connection_mgr
@@ -705,10 +706,7 @@ fn disconnect_command_disables_auto_reconnect() {
 
     assert!(!app.connection_mgr.auto_reconnect());
     assert!(app.reconnect_at.is_none());
-    assert_eq!(
-        *app.connection_mgr.state(),
-        ConnectionState::Disconnected
-    );
+    assert_eq!(*app.connection_mgr.state(), ConnectionState::Disconnected);
 }
 
 #[test]
@@ -734,10 +732,7 @@ fn disconnect_command_cancels_pending_reconnect() {
     assert!(!app.connection_mgr.auto_reconnect());
     assert!(app.reconnect_at.is_none());
     assert_eq!(app.reconnect_attempt, 0);
-    assert_eq!(
-        *app.connection_mgr.state(),
-        ConnectionState::Disconnected
-    );
+    assert_eq!(*app.connection_mgr.state(), ConnectionState::Disconnected);
 }
 
 #[test]

@@ -151,10 +151,7 @@ impl InputLineState {
         // Skip trailing whitespace.
         while self.cursor_char > 0 {
             let prev = prev_char_boundary(&self.buf, self.cursor_byte);
-            let ch = self.buf[prev..self.cursor_byte]
-                .chars()
-                .next()
-                .unwrap();
+            let ch = self.buf[prev..self.cursor_byte].chars().next().unwrap();
             if !ch.is_whitespace() {
                 break;
             }
@@ -165,10 +162,7 @@ impl InputLineState {
         // Delete non-whitespace characters (the word).
         while self.cursor_char > 0 {
             let prev = prev_char_boundary(&self.buf, self.cursor_byte);
-            let ch = self.buf[prev..self.cursor_byte]
-                .chars()
-                .next()
-                .unwrap();
+            let ch = self.buf[prev..self.cursor_byte].chars().next().unwrap();
             if ch.is_whitespace() {
                 break;
             }

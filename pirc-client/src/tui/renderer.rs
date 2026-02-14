@@ -166,7 +166,11 @@ impl<W: Write> Renderer<W> {
 }
 
 /// Emit an SGR style change only when the new style differs from the current.
-fn emit_style_change(w: &mut impl Write, current: &mut Option<Style>, new_style: Style) -> io::Result<()> {
+fn emit_style_change(
+    w: &mut impl Write,
+    current: &mut Option<Style>,
+    new_style: Style,
+) -> io::Result<()> {
     if *current == Some(new_style) {
         return Ok(());
     }
@@ -386,7 +390,10 @@ mod tests {
         let out = output_str(&r);
         // Count occurrences of the green SGR code — should appear only once
         let green_count = out.matches("\x1b[0m\x1b[32m").count();
-        assert_eq!(green_count, 1, "SGR should be emitted only once for a uniform-style run");
+        assert_eq!(
+            green_count, 1,
+            "SGR should be emitted only once for a uniform-style run"
+        );
     }
 
     #[test]
@@ -616,10 +623,7 @@ mod tests {
     #[test]
     fn test_combined_attributes() {
         let mut r = test_renderer(10, 1);
-        let style = Style::new()
-            .bold(true)
-            .underline(true)
-            .fg(Color::Cyan);
+        let style = Style::new().bold(true).underline(true).fg(Color::Cyan);
         r.back_buffer().write_str(0, 0, "hi", style);
         r.flush().unwrap();
 

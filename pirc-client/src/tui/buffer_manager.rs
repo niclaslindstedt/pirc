@@ -361,7 +361,12 @@ mod tests {
         // Push a message to #a while it's not active
         mgr.switch_to(&BufferId::Status);
         mgr.push_to(&BufferId::Channel("#a".into()), make_line("hello"));
-        assert_eq!(mgr.get(&BufferId::Channel("#a".into())).unwrap().unread_count(), 1);
+        assert_eq!(
+            mgr.get(&BufferId::Channel("#a".into()))
+                .unwrap()
+                .unread_count(),
+            1
+        );
 
         // Opening #a should mark it read
         mgr.open(BufferId::Channel("#a".into()));
@@ -451,7 +456,10 @@ mod tests {
         mgr.open(BufferId::Channel("#test".into()));
         let buf = mgr.get_mut(&BufferId::Channel("#test".into())).unwrap();
         buf.push_message(make_line("hello"));
-        assert_eq!(mgr.get(&BufferId::Channel("#test".into())).unwrap().len(), 1);
+        assert_eq!(
+            mgr.get(&BufferId::Channel("#test".into())).unwrap().len(),
+            1
+        );
     }
 
     // --- Active ---
@@ -481,7 +489,12 @@ mod tests {
         mgr.open(BufferId::Channel("#a".into()));
         mgr.switch_to(&BufferId::Status);
         mgr.push_to(&BufferId::Channel("#a".into()), make_line("msg"));
-        assert_eq!(mgr.get(&BufferId::Channel("#a".into())).unwrap().unread_count(), 1);
+        assert_eq!(
+            mgr.get(&BufferId::Channel("#a".into()))
+                .unwrap()
+                .unread_count(),
+            1
+        );
 
         mgr.switch_to(&BufferId::Channel("#a".into()));
         assert_eq!(mgr.active().unread_count(), 0);
@@ -573,12 +586,15 @@ mod tests {
 
         assert!(mgr.reorder(1, 3)); // move #a to end
         let list: Vec<_> = mgr.buffer_list().into_iter().map(|(id, ..)| id).collect();
-        assert_eq!(list, vec![
-            BufferId::Status,
-            BufferId::Channel("#b".into()),
-            BufferId::Channel("#c".into()),
-            BufferId::Channel("#a".into()),
-        ]);
+        assert_eq!(
+            list,
+            vec![
+                BufferId::Status,
+                BufferId::Channel("#b".into()),
+                BufferId::Channel("#c".into()),
+                BufferId::Channel("#a".into()),
+            ]
+        );
     }
 
     #[test]
@@ -706,7 +722,12 @@ mod tests {
         mgr.switch_to(&BufferId::Status);
 
         mgr.push_to(&BufferId::Channel("#a".into()), make_line("hello"));
-        assert_eq!(mgr.get(&BufferId::Channel("#a".into())).unwrap().unread_count(), 1);
+        assert_eq!(
+            mgr.get(&BufferId::Channel("#a".into()))
+                .unwrap()
+                .unread_count(),
+            1
+        );
     }
 
     #[test]
@@ -764,7 +785,12 @@ mod tests {
         mgr.push_to(&BufferId::Channel("#rust".into()), make_line("hi"));
 
         // #general has unread, #rust (active) does not
-        assert_eq!(mgr.get(&BufferId::Channel("#general".into())).unwrap().unread_count(), 2);
+        assert_eq!(
+            mgr.get(&BufferId::Channel("#general".into()))
+                .unwrap()
+                .unread_count(),
+            2
+        );
         assert_eq!(mgr.active().unread_count(), 0);
 
         // Switch to #general — unread clears
@@ -791,7 +817,12 @@ mod tests {
         assert_eq!(mgr.buffer_count(), 2);
 
         // It should have 1 unread (since Status is active)
-        assert_eq!(mgr.get(&BufferId::Query("alice".into())).unwrap().unread_count(), 1);
+        assert_eq!(
+            mgr.get(&BufferId::Query("alice".into()))
+                .unwrap()
+                .unread_count(),
+            1
+        );
 
         // Switch to alice's query
         mgr.switch_to(&BufferId::Query("alice".into()));

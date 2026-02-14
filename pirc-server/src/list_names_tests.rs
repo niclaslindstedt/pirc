@@ -106,10 +106,25 @@ async fn list_empty_returns_only_listend() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "localhost", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&list_msg(), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &list_msg(),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.try_recv().unwrap();
     assert_eq!(reply.command, Command::Numeric(RPL_LISTEND));
@@ -122,11 +137,26 @@ async fn list_shows_channels_with_members_and_topics() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "localhost", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Join a channel.
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {} // drain JOIN replies
 
     // Set a topic.
@@ -136,7 +166,15 @@ async fn list_shows_channels_with_members_and_topics() {
         ch.topic = Some(("Welcome to general!".to_owned(), "Alice".to_owned(), 100));
     }
 
-    handle_message(&list_msg(), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &list_msg(),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.try_recv().unwrap();
     assert_eq!(reply.command, Command::Numeric(RPL_LIST));
@@ -156,9 +194,24 @@ async fn list_hides_secret_channels_from_non_members() {
     let config = make_config();
 
     // Alice joins #secret and sets it +s.
-    let (tx_a, mut rx_a, mut state_a) =
-        register_user("Alice", "alice", 1, "localhost", &registry, &channels, &config);
-    handle_message(&join_msg("#secret"), 1, &registry, &channels, &tx_a, &mut state_a, &config);
+    let (tx_a, mut rx_a, mut state_a) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
+    handle_message(
+        &join_msg("#secret"),
+        1,
+        &registry,
+        &channels,
+        &tx_a,
+        &mut state_a,
+        &config,
+    );
     while rx_a.try_recv().is_ok() {}
 
     {
@@ -171,7 +224,15 @@ async fn list_hides_secret_channels_from_non_members() {
     let (tx_b, mut rx_b, mut state_b) =
         register_user("Bob", "bob", 2, "localhost", &registry, &channels, &config);
 
-    handle_message(&list_msg(), 2, &registry, &channels, &tx_b, &mut state_b, &config);
+    handle_message(
+        &list_msg(),
+        2,
+        &registry,
+        &channels,
+        &tx_b,
+        &mut state_b,
+        &config,
+    );
 
     // Bob should only see RPL_LISTEND, no RPL_LIST for #secret.
     let reply = rx_b.try_recv().unwrap();
@@ -184,9 +245,24 @@ async fn list_shows_secret_channels_to_members() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "localhost", &registry, &channels, &config);
-    handle_message(&join_msg("#secret"), 1, &registry, &channels, &tx, &mut state, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
+    handle_message(
+        &join_msg("#secret"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     {
@@ -195,7 +271,15 @@ async fn list_shows_secret_channels_to_members() {
         ch.modes.insert(ChannelMode::Secret);
     }
 
-    handle_message(&list_msg(), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &list_msg(),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.try_recv().unwrap();
     assert_eq!(reply.command, Command::Numeric(RPL_LIST));
@@ -211,17 +295,45 @@ async fn list_with_filter_shows_only_matching_channels() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "localhost", &registry, &channels, &config);
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx, &mut state, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
-    handle_message(&join_msg("#random"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#random"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     // LIST with filter for #general only.
     handle_message(
         &list_msg_with_filter("#general"),
-        1, &registry, &channels, &tx, &mut state, &config,
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
     );
 
     let reply = rx.try_recv().unwrap();
@@ -238,12 +350,35 @@ async fn list_channel_with_no_topic_has_empty_trailing() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "localhost", &registry, &channels, &config);
-    handle_message(&join_msg("#notopic"), 1, &registry, &channels, &tx, &mut state, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
+    handle_message(
+        &join_msg("#notopic"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
-    handle_message(&list_msg(), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &list_msg(),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.try_recv().unwrap();
     assert_eq!(reply.command, Command::Numeric(RPL_LIST));
@@ -261,14 +396,34 @@ async fn names_specific_channel() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "localhost", &registry, &channels, &config);
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx, &mut state, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     handle_message(
         &names_msg_with_channel("#general"),
-        1, &registry, &channels, &tx, &mut state, &config,
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
     );
 
     let reply = rx.try_recv().unwrap();
@@ -286,12 +441,24 @@ async fn names_nonexistent_channel_sends_endofnames() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "localhost", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
 
     handle_message(
         &names_msg_with_channel("#doesnotexist"),
-        1, &registry, &channels, &tx, &mut state, &config,
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
     );
 
     let reply = rx.try_recv().unwrap();
@@ -304,19 +471,50 @@ async fn names_no_args_lists_user_channels() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx_a, mut rx_a, mut state_a) =
-        register_user("Alice", "alice", 1, "localhost", &registry, &channels, &config);
-    handle_message(&join_msg("#mychannel"), 1, &registry, &channels, &tx_a, &mut state_a, &config);
+    let (tx_a, mut rx_a, mut state_a) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
+    handle_message(
+        &join_msg("#mychannel"),
+        1,
+        &registry,
+        &channels,
+        &tx_a,
+        &mut state_a,
+        &config,
+    );
     while rx_a.try_recv().is_ok() {}
 
     // Create another channel that Alice is NOT in.
     let (tx_b, mut rx_b, mut state_b) =
         register_user("Bob", "bob", 2, "localhost", &registry, &channels, &config);
-    handle_message(&join_msg("#bobchannel"), 2, &registry, &channels, &tx_b, &mut state_b, &config);
+    handle_message(
+        &join_msg("#bobchannel"),
+        2,
+        &registry,
+        &channels,
+        &tx_b,
+        &mut state_b,
+        &config,
+    );
     while rx_b.try_recv().is_ok() {}
 
     // NAMES with no args for Alice.
-    handle_message(&names_msg(), 1, &registry, &channels, &tx_a, &mut state_a, &config);
+    handle_message(
+        &names_msg(),
+        1,
+        &registry,
+        &channels,
+        &tx_a,
+        &mut state_a,
+        &config,
+    );
 
     // Alice should get NAMREPLY + ENDOFNAMES for #mychannel only.
     let reply = rx_a.try_recv().unwrap();
@@ -336,20 +534,58 @@ async fn names_shows_prefixes_for_operators_and_voiced() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx_a, mut rx_a, mut state_a) =
-        register_user("Alice", "alice", 1, "localhost", &registry, &channels, &config);
+    let (tx_a, mut rx_a, mut state_a) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx_b, mut rx_b, mut state_b) =
         register_user("Bob", "bob", 2, "localhost", &registry, &channels, &config);
-    let (tx_c, mut rx_c, mut state_c) =
-        register_user("Carol", "carol", 3, "localhost", &registry, &channels, &config);
+    let (tx_c, mut rx_c, mut state_c) = register_user(
+        "Carol",
+        "carol",
+        3,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Alice joins first (operator), Bob and Carol join after.
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx_a, &mut state_a, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx_a,
+        &mut state_a,
+        &config,
+    );
     while rx_a.try_recv().is_ok() {}
-    handle_message(&join_msg("#test"), 2, &registry, &channels, &tx_b, &mut state_b, &config);
+    handle_message(
+        &join_msg("#test"),
+        2,
+        &registry,
+        &channels,
+        &tx_b,
+        &mut state_b,
+        &config,
+    );
     while rx_b.try_recv().is_ok() {}
     while rx_a.try_recv().is_ok() {} // drain Bob's JOIN from Alice
-    handle_message(&join_msg("#test"), 3, &registry, &channels, &tx_c, &mut state_c, &config);
+    handle_message(
+        &join_msg("#test"),
+        3,
+        &registry,
+        &channels,
+        &tx_c,
+        &mut state_c,
+        &config,
+    );
     while rx_c.try_recv().is_ok() {}
     while rx_a.try_recv().is_ok() {} // drain Carol's JOIN from Alice
 
@@ -357,24 +593,45 @@ async fn names_shows_prefixes_for_operators_and_voiced() {
     {
         let ch_arc = channels.get(&channel_name("#test")).unwrap();
         let mut ch = ch_arc.write().unwrap();
-        ch.members.insert(Nickname::new("Bob").unwrap(), MemberStatus::Voiced);
+        ch.members
+            .insert(Nickname::new("Bob").unwrap(), MemberStatus::Voiced);
     }
 
     // Ask for NAMES.
     handle_message(
         &names_msg_with_channel("#test"),
-        1, &registry, &channels, &tx_a, &mut state_a, &config,
+        1,
+        &registry,
+        &channels,
+        &tx_a,
+        &mut state_a,
+        &config,
     );
 
     let reply = rx_a.try_recv().unwrap();
     assert_eq!(reply.command, Command::Numeric(RPL_NAMREPLY));
     let names = reply.trailing().unwrap();
-    assert!(names.contains("@Alice"), "Alice should have @ prefix, got: {names}");
-    assert!(names.contains("+Bob"), "Bob should have + prefix, got: {names}");
-    assert!(names.contains("Carol"), "Carol should be in the list, got: {names}");
+    assert!(
+        names.contains("@Alice"),
+        "Alice should have @ prefix, got: {names}"
+    );
+    assert!(
+        names.contains("+Bob"),
+        "Bob should have + prefix, got: {names}"
+    );
+    assert!(
+        names.contains("Carol"),
+        "Carol should be in the list, got: {names}"
+    );
     // Carol should NOT have a prefix.
-    assert!(!names.contains("@Carol"), "Carol should NOT have @ prefix, got: {names}");
-    assert!(!names.contains("+Carol"), "Carol should NOT have + prefix, got: {names}");
+    assert!(
+        !names.contains("@Carol"),
+        "Carol should NOT have @ prefix, got: {names}"
+    );
+    assert!(
+        !names.contains("+Carol"),
+        "Carol should NOT have + prefix, got: {names}"
+    );
 }
 
 // ---- QUIT channel cleanup tests ----
@@ -385,11 +642,34 @@ async fn quit_removes_user_from_all_channels() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "localhost", &registry, &channels, &config);
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx, &mut state, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
-    handle_message(&join_msg("#random"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#random"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     // QUIT.
@@ -409,15 +689,38 @@ async fn quit_broadcasts_to_channel_members() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx_a, mut rx_a, mut state_a) =
-        register_user("Alice", "alice", 1, "localhost", &registry, &channels, &config);
+    let (tx_a, mut rx_a, mut state_a) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx_b, mut rx_b, mut state_b) =
         register_user("Bob", "bob", 2, "localhost", &registry, &channels, &config);
 
     // Both join #general.
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx_a, &mut state_a, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx_a,
+        &mut state_a,
+        &config,
+    );
     while rx_a.try_recv().is_ok() {}
-    handle_message(&join_msg("#general"), 2, &registry, &channels, &tx_b, &mut state_b, &config);
+    handle_message(
+        &join_msg("#general"),
+        2,
+        &registry,
+        &channels,
+        &tx_b,
+        &mut state_b,
+        &config,
+    );
     while rx_b.try_recv().is_ok() {}
     while rx_a.try_recv().is_ok() {} // drain Bob's JOIN from Alice
 
@@ -440,21 +743,60 @@ async fn quit_broadcasts_once_per_user_across_shared_channels() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx_a, mut rx_a, mut state_a) =
-        register_user("Alice", "alice", 1, "localhost", &registry, &channels, &config);
+    let (tx_a, mut rx_a, mut state_a) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx_b, mut rx_b, mut state_b) =
         register_user("Bob", "bob", 2, "localhost", &registry, &channels, &config);
 
     // Both join #general and #random.
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx_a, &mut state_a, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx_a,
+        &mut state_a,
+        &config,
+    );
     while rx_a.try_recv().is_ok() {}
-    handle_message(&join_msg("#general"), 2, &registry, &channels, &tx_b, &mut state_b, &config);
+    handle_message(
+        &join_msg("#general"),
+        2,
+        &registry,
+        &channels,
+        &tx_b,
+        &mut state_b,
+        &config,
+    );
     while rx_b.try_recv().is_ok() {}
     while rx_a.try_recv().is_ok() {}
 
-    handle_message(&join_msg("#random"), 1, &registry, &channels, &tx_a, &mut state_a, &config);
+    handle_message(
+        &join_msg("#random"),
+        1,
+        &registry,
+        &channels,
+        &tx_a,
+        &mut state_a,
+        &config,
+    );
     while rx_a.try_recv().is_ok() {}
-    handle_message(&join_msg("#random"), 2, &registry, &channels, &tx_b, &mut state_b, &config);
+    handle_message(
+        &join_msg("#random"),
+        2,
+        &registry,
+        &channels,
+        &tx_b,
+        &mut state_b,
+        &config,
+    );
     while rx_b.try_recv().is_ok() {}
     while rx_a.try_recv().is_ok() {}
 
@@ -476,17 +818,48 @@ async fn quit_cleans_up_empty_channels() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx_a, mut rx_a, mut state_a) =
-        register_user("Alice", "alice", 1, "localhost", &registry, &channels, &config);
+    let (tx_a, mut rx_a, mut state_a) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx_b, mut rx_b, mut state_b) =
         register_user("Bob", "bob", 2, "localhost", &registry, &channels, &config);
 
     // Alice joins #alone (only member), and both join #shared.
-    handle_message(&join_msg("#alone"), 1, &registry, &channels, &tx_a, &mut state_a, &config);
+    handle_message(
+        &join_msg("#alone"),
+        1,
+        &registry,
+        &channels,
+        &tx_a,
+        &mut state_a,
+        &config,
+    );
     while rx_a.try_recv().is_ok() {}
-    handle_message(&join_msg("#shared"), 1, &registry, &channels, &tx_a, &mut state_a, &config);
+    handle_message(
+        &join_msg("#shared"),
+        1,
+        &registry,
+        &channels,
+        &tx_a,
+        &mut state_a,
+        &config,
+    );
     while rx_a.try_recv().is_ok() {}
-    handle_message(&join_msg("#shared"), 2, &registry, &channels, &tx_b, &mut state_b, &config);
+    handle_message(
+        &join_msg("#shared"),
+        2,
+        &registry,
+        &channels,
+        &tx_b,
+        &mut state_b,
+        &config,
+    );
     while rx_b.try_recv().is_ok() {}
     while rx_a.try_recv().is_ok() {}
 
@@ -512,17 +885,45 @@ async fn names_comma_separated_channels() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "localhost", &registry, &channels, &config);
-    handle_message(&join_msg("#chan1"), 1, &registry, &channels, &tx, &mut state, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
+    handle_message(
+        &join_msg("#chan1"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
-    handle_message(&join_msg("#chan2"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#chan2"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     // NAMES #chan1,#chan2
     handle_message(
         &names_msg_with_channel("#chan1,#chan2"),
-        1, &registry, &channels, &tx, &mut state, &config,
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
     );
 
     // Should get NAMREPLY + ENDOFNAMES for each channel.
@@ -545,21 +946,60 @@ async fn list_multiple_channels_shows_correct_member_counts() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx_a, mut rx_a, mut state_a) =
-        register_user("Alice", "alice", 1, "localhost", &registry, &channels, &config);
+    let (tx_a, mut rx_a, mut state_a) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "localhost",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx_b, mut rx_b, mut state_b) =
         register_user("Bob", "bob", 2, "localhost", &registry, &channels, &config);
 
     // Alice joins #general, Bob joins #general and #random.
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx_a, &mut state_a, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx_a,
+        &mut state_a,
+        &config,
+    );
     while rx_a.try_recv().is_ok() {}
-    handle_message(&join_msg("#general"), 2, &registry, &channels, &tx_b, &mut state_b, &config);
+    handle_message(
+        &join_msg("#general"),
+        2,
+        &registry,
+        &channels,
+        &tx_b,
+        &mut state_b,
+        &config,
+    );
     while rx_b.try_recv().is_ok() {}
     while rx_a.try_recv().is_ok() {}
-    handle_message(&join_msg("#random"), 2, &registry, &channels, &tx_b, &mut state_b, &config);
+    handle_message(
+        &join_msg("#random"),
+        2,
+        &registry,
+        &channels,
+        &tx_b,
+        &mut state_b,
+        &config,
+    );
     while rx_b.try_recv().is_ok() {}
 
-    handle_message(&list_msg(), 1, &registry, &channels, &tx_a, &mut state_a, &config);
+    handle_message(
+        &list_msg(),
+        1,
+        &registry,
+        &channels,
+        &tx_a,
+        &mut state_a,
+        &config,
+    );
 
     // Collect RPL_LIST replies.
     let mut list_replies = vec![];

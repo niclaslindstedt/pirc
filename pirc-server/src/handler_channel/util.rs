@@ -46,11 +46,9 @@ pub fn send_names_reply(
         let mut names: Vec<String> = channel
             .members
             .iter()
-            .map(|(member_nick, status)| {
-                match status.prefix_char() {
-                    Some(prefix) => format!("{}{}", prefix, member_nick.as_ref()),
-                    None => member_nick.to_string(),
-                }
+            .map(|(member_nick, status)| match status.prefix_char() {
+                Some(prefix) => format!("{}{}", prefix, member_nick.as_ref()),
+                None => member_nick.to_string(),
             })
             .collect();
         names.sort();
@@ -75,7 +73,9 @@ pub fn send_names_reply(
 
 /// Check if a user mask matches any ban entry.
 pub fn is_banned(ban_list: &[crate::channel::BanEntry], user_mask: &str) -> bool {
-    ban_list.iter().any(|ban| matches_ban_mask(&ban.mask, user_mask))
+    ban_list
+        .iter()
+        .any(|ban| matches_ban_mask(&ban.mask, user_mask))
 }
 
 /// Simple glob-style ban mask matching.

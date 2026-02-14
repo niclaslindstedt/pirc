@@ -238,7 +238,10 @@ fn msg_missing_message() {
 fn query_with_message() {
     assert_eq!(
         ClientCommand::from_parsed("query", &args(&["nick", "hey there"])),
-        Ok(ClientCommand::Query("nick".into(), Some("hey there".into())))
+        Ok(ClientCommand::Query(
+            "nick".into(),
+            Some("hey there".into())
+        ))
     );
 }
 
@@ -1361,18 +1364,30 @@ fn to_message_all_producing_commands_validate() {
     let commands: Vec<(ClientCommand, Option<&str>)> = vec![
         (ClientCommand::Join("#test".into()), None),
         (ClientCommand::Part("#chan".into(), None), None),
-        (ClientCommand::Part("#chan".into(), Some("bye".into())), None),
+        (
+            ClientCommand::Part("#chan".into(), Some("bye".into())),
+            None,
+        ),
         (ClientCommand::Topic("#chan".into(), None), None),
-        (ClientCommand::Topic("#chan".into(), Some("hi".into())), None),
+        (
+            ClientCommand::Topic("#chan".into(), Some("hi".into())),
+            None,
+        ),
         (ClientCommand::Invite("nick".into(), "#chan".into()), None),
         (ClientCommand::Msg("nick".into(), "hi".into()), None),
         (ClientCommand::Query("nick".into(), Some("hi".into())), None),
         (ClientCommand::Me("waves".into()), Some("#chan")),
         (ClientCommand::Notice("user".into(), "hi".into()), None),
-        (ClientCommand::Ctcp("nick".into(), "PING".into(), None), None),
+        (
+            ClientCommand::Ctcp("nick".into(), "PING".into(), None),
+            None,
+        ),
         (ClientCommand::Nick("newnick".into()), None),
         (ClientCommand::Whois("user".into()), None),
-        (ClientCommand::Kick("#chan".into(), "nick".into(), None), None),
+        (
+            ClientCommand::Kick("#chan".into(), "nick".into(), None),
+            None,
+        ),
         (ClientCommand::Ban("#chan".into(), "mask".into()), None),
         (ClientCommand::Mode("#chan".into(), None), None),
         (ClientCommand::Oper("admin".into(), "pass".into()), None),
@@ -1380,7 +1395,8 @@ fn to_message_all_producing_commands_validate() {
     ];
 
     for (cmd, ctx) in &commands {
-        let msg = cmd.to_message(*ctx)
+        let msg = cmd
+            .to_message(*ctx)
             .unwrap_or_else(|| panic!("Expected Some(Message) for {cmd:?}"));
         assert_valid(&msg);
     }

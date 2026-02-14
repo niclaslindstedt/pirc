@@ -24,12 +24,16 @@ fn collect_lines(actions: &[HandlerAction]) -> Vec<(&BufferId, &BufferLine)> {
 
 /// Check if any action is OpenChannel with the given name.
 fn has_open_channel(actions: &[HandlerAction], name: &str) -> bool {
-    actions.iter().any(|a| matches!(a, HandlerAction::OpenChannel(c) if c == name))
+    actions
+        .iter()
+        .any(|a| matches!(a, HandlerAction::OpenChannel(c) if c == name))
 }
 
 /// Check if any action is UpdateNick with the given nick.
 fn has_update_nick(actions: &[HandlerAction], nick: &str) -> bool {
-    actions.iter().any(|a| matches!(a, HandlerAction::UpdateNick(n) if n == nick))
+    actions
+        .iter()
+        .any(|a| matches!(a, HandlerAction::UpdateNick(n) if n == nick))
 }
 
 // ── PRIVMSG to channel ──────────────────────────────────────────
@@ -169,11 +173,7 @@ fn notice_private_goes_to_status() {
 
 #[test]
 fn join_creates_buffer_and_pushes_line() {
-    let msg = Message::with_prefix(
-        user_prefix("alice"),
-        Command::Join,
-        vec!["#rust".into()],
-    );
+    let msg = Message::with_prefix(user_prefix("alice"), Command::Join, vec!["#rust".into()]);
     let actions = route_message(&msg, "mynick", TS);
     assert!(has_open_channel(&actions, "#rust"));
 
@@ -210,11 +210,7 @@ fn part_with_reason() {
 
 #[test]
 fn part_without_reason() {
-    let msg = Message::with_prefix(
-        user_prefix("bob"),
-        Command::Part,
-        vec!["#general".into()],
-    );
+    let msg = Message::with_prefix(user_prefix("bob"), Command::Part, vec!["#general".into()]);
     let actions = route_message(&msg, "mynick", TS);
     let lines = collect_lines(&actions);
     assert_eq!(lines.len(), 1);
@@ -247,11 +243,7 @@ fn quit_with_reason() {
 
 #[test]
 fn quit_without_reason() {
-    let msg = Message::with_prefix(
-        user_prefix("charlie"),
-        Command::Quit,
-        vec![],
-    );
+    let msg = Message::with_prefix(user_prefix("charlie"), Command::Quit, vec![]);
     let actions = route_message(&msg, "mynick", TS);
     let lines = collect_lines(&actions);
     assert_eq!(lines.len(), 1);
@@ -321,11 +313,7 @@ fn kick_missing_params() {
 
 #[test]
 fn nick_change_our_nick() {
-    let msg = Message::with_prefix(
-        user_prefix("mynick"),
-        Command::Nick,
-        vec!["newnick".into()],
-    );
+    let msg = Message::with_prefix(user_prefix("mynick"), Command::Nick, vec!["newnick".into()]);
     let actions = route_message(&msg, "mynick", TS);
     assert!(has_update_nick(&actions, "newnick"));
 
@@ -353,11 +341,7 @@ fn nick_change_other_user() {
 
 #[test]
 fn nick_missing_new_nick() {
-    let msg = Message::with_prefix(
-        user_prefix("alice"),
-        Command::Nick,
-        vec![],
-    );
+    let msg = Message::with_prefix(user_prefix("alice"), Command::Nick, vec![]);
     let actions = route_message(&msg, "mynick", TS);
     assert!(actions.is_empty());
 }
@@ -428,11 +412,7 @@ fn rpl_topic() {
     let msg = Message::with_prefix(
         server_prefix(),
         Command::Numeric(332),
-        vec![
-            "mynick".into(),
-            "#rust".into(),
-            "Welcome to #rust!".into(),
-        ],
+        vec!["mynick".into(), "#rust".into(), "Welcome to #rust!".into()],
     );
     let actions = route_message(&msg, "mynick", TS);
     let lines = collect_lines(&actions);
@@ -486,11 +466,7 @@ fn rpl_endofnames_silent() {
     let msg = Message::with_prefix(
         server_prefix(),
         Command::Numeric(366),
-        vec![
-            "mynick".into(),
-            "#rust".into(),
-            "End of /NAMES list".into(),
-        ],
+        vec!["mynick".into(), "#rust".into(), "End of /NAMES list".into()],
     );
     let actions = route_message(&msg, "mynick", TS);
     assert!(actions.is_empty());
@@ -522,11 +498,7 @@ fn err_nosuchchannel() {
     let msg = Message::with_prefix(
         server_prefix(),
         Command::Numeric(403),
-        vec![
-            "mynick".into(),
-            "#badchan".into(),
-            "No such channel".into(),
-        ],
+        vec!["mynick".into(), "#badchan".into(), "No such channel".into()],
     );
     let actions = route_message(&msg, "mynick", TS);
     let lines = collect_lines(&actions);
@@ -597,10 +569,7 @@ fn informational_numeric_to_status() {
     let msg = Message::with_prefix(
         server_prefix(),
         Command::Numeric(251),
-        vec![
-            "mynick".into(),
-            "There are 42 users online".into(),
-        ],
+        vec!["mynick".into(), "There are 42 users online".into()],
     );
     let actions = route_message(&msg, "mynick", TS);
     let lines = collect_lines(&actions);

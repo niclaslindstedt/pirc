@@ -33,10 +33,7 @@ pub fn handle_list(
     let nick_str = nick.to_string();
 
     // Optionally filter by specific channel names.
-    let filter_channels: Option<Vec<&str>> = msg
-        .params
-        .first()
-        .map(|p| p.split(',').collect());
+    let filter_channels: Option<Vec<&str>> = msg.params.first().map(|p| p.split(',').collect());
 
     // Iterate all channels and send RPL_LIST for visible ones.
     let channel_list = channels.list_all();
@@ -73,12 +70,7 @@ pub fn handle_list(
         );
     }
 
-    send_numeric(
-        sender,
-        RPL_LISTEND,
-        &[&nick_str],
-        "End of /LIST",
-    );
+    send_numeric(sender, RPL_LISTEND, &[&nick_str], "End of /LIST");
 }
 
 /// Handle the NAMES command.

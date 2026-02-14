@@ -305,7 +305,11 @@ fn route_topic(msg: &Message, ts: &str) -> Vec<HandlerAction> {
 }
 
 fn route_error(msg: &Message, ts: &str) -> Vec<HandlerAction> {
-    let content = msg.params.first().map(|s| s.as_str()).unwrap_or("Unknown error");
+    let content = msg
+        .params
+        .first()
+        .map(|s| s.as_str())
+        .unwrap_or("Unknown error");
 
     vec![HandlerAction::PushLine {
         target: BufferId::Status,
@@ -382,7 +386,11 @@ fn route_numeric(code: u16, msg: &Message, ts: &str) -> Vec<HandlerAction> {
         // ERR_NOSUCHNICK (401): <nick> <target> :No such nick/channel
         401 => {
             let target = msg.params.get(1).map(|s| s.as_str()).unwrap_or("?");
-            let text = msg.params.get(2).map(|s| s.as_str()).unwrap_or("No such nick/channel");
+            let text = msg
+                .params
+                .get(2)
+                .map(|s| s.as_str())
+                .unwrap_or("No such nick/channel");
             vec![HandlerAction::PushLine {
                 target: BufferId::Status,
                 line: BufferLine {
@@ -397,7 +405,11 @@ fn route_numeric(code: u16, msg: &Message, ts: &str) -> Vec<HandlerAction> {
         // ERR_NOSUCHCHANNEL (403): <nick> <channel> :No such channel
         403 => {
             let channel = msg.params.get(1).map(|s| s.as_str()).unwrap_or("?");
-            let text = msg.params.get(2).map(|s| s.as_str()).unwrap_or("No such channel");
+            let text = msg
+                .params
+                .get(2)
+                .map(|s| s.as_str())
+                .unwrap_or("No such channel");
             vec![HandlerAction::PushLine {
                 target: BufferId::Status,
                 line: BufferLine {

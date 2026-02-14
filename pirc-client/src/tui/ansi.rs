@@ -103,10 +103,7 @@ mod tests {
 
     #[test]
     fn test_move_to_large_values() {
-        assert_eq!(
-            collect(|w| move_to(w, 999, 500)),
-            "\x1b[500;999H"
-        );
+        assert_eq!(collect(|w| move_to(w, 999, 500)), "\x1b[500;999H");
     }
 
     #[test]
@@ -185,18 +182,12 @@ mod tests {
 
     #[test]
     fn test_set_scroll_region() {
-        assert_eq!(
-            collect(|w| set_scroll_region(w, 1, 24)),
-            "\x1b[1;24r"
-        );
+        assert_eq!(collect(|w| set_scroll_region(w, 1, 24)), "\x1b[1;24r");
     }
 
     #[test]
     fn test_set_scroll_region_partial() {
-        assert_eq!(
-            collect(|w| set_scroll_region(w, 5, 20)),
-            "\x1b[5;20r"
-        );
+        assert_eq!(collect(|w| set_scroll_region(w, 5, 20)), "\x1b[5;20r");
     }
 
     #[test]

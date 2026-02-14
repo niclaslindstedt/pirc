@@ -183,9 +183,7 @@ pub fn render_search_bar(
             " (no matches)".to_string()
         }
     } else {
-        let current = state
-            .current_match_index()
-            .unwrap_or(0);
+        let current = state.current_match_index().unwrap_or(0);
         format!(" ({}/{})", current, state.match_count())
     };
 
@@ -194,9 +192,7 @@ pub fn render_search_bar(
 
     // Calculate how much space is available for the query text.
     // Use chars().count() for UTF-8 safety.
-    let fixed_chars = prefix.chars().count()
-        + suffix.chars().count()
-        + match_info.chars().count();
+    let fixed_chars = prefix.chars().count() + suffix.chars().count() + match_info.chars().count();
 
     let available = width.saturating_sub(fixed_chars);
 

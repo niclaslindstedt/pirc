@@ -552,7 +552,11 @@ impl App {
         if self.registration.is_some() {
             let event = self.registration.as_mut().unwrap().handle_message(msg);
             match event {
-                RegistrationEvent::Welcome { server_name, nick, message } => {
+                RegistrationEvent::Welcome {
+                    server_name,
+                    nick,
+                    message,
+                } => {
                     // Complete registration
                     let sname = if server_name.is_empty() {
                         self.connection_mgr.server_addr().to_string()
@@ -560,9 +564,9 @@ impl App {
                         server_name
                     };
 
-                    let _ = self.connection_mgr.transition(ConnectionState::Connected {
-                        server_name: sname,
-                    });
+                    let _ = self
+                        .connection_mgr
+                        .transition(ConnectionState::Connected { server_name: sname });
                     self.connection_mgr.set_nick(nick.clone());
                     self.view.set_nick(nick);
 
@@ -582,7 +586,10 @@ impl App {
                     self.push_status(&text);
                     return;
                 }
-                RegistrationEvent::NickRetry { new_nick, nick_message } => {
+                RegistrationEvent::NickRetry {
+                    new_nick,
+                    nick_message,
+                } => {
                     self.push_status(&format!("Nick in use, trying {new_nick}..."));
                     self.connection_mgr.set_nick(new_nick.clone());
                     self.view.set_nick(new_nick);
@@ -733,7 +740,11 @@ impl App {
             "Reconnecting in {}s... (attempt {attempt})",
             delay.as_secs()
         ));
-        info!(attempt, delay_secs = delay.as_secs(), "scheduling reconnect");
+        info!(
+            attempt,
+            delay_secs = delay.as_secs(),
+            "scheduling reconnect"
+        );
     }
 
     /// Attempt to reconnect to the server.
@@ -832,10 +843,7 @@ impl App {
                 }
             }
         }
-        self.push_status(&format!(
-            "Rejoining {} channel(s)...",
-            channels.len()
-        ));
+        self.push_status(&format!("Rejoining {} channel(s)...", channels.len()));
     }
 
     /// Push a status message to the status buffer.

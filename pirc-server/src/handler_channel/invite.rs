@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use pirc_common::{ChannelMode, Nickname};
 use pirc_protocol::numeric::{
-    ERR_CHANOPRIVSNEEDED, ERR_NEEDMOREPARAMS, ERR_NOSUCHCHANNEL, ERR_NOSUCHNICK,
-    ERR_NOTONCHANNEL, ERR_USERONCHANNEL, RPL_INVITING,
+    ERR_CHANOPRIVSNEEDED, ERR_NEEDMOREPARAMS, ERR_NOSUCHCHANNEL, ERR_NOSUCHNICK, ERR_NOTONCHANNEL,
+    ERR_USERONCHANNEL, RPL_INVITING,
 };
 use pirc_protocol::{Command, Message, Prefix};
 use tokio::sync::mpsc;
@@ -143,12 +143,7 @@ pub fn handle_invite(
     }
 
     // Send RPL_INVITING to inviter.
-    send_numeric(
-        sender,
-        RPL_INVITING,
-        &[&nick_str, target_str, chan_str],
-        "",
-    );
+    send_numeric(sender, RPL_INVITING, &[&nick_str, target_str, chan_str], "");
 
     // Send INVITE message to target.
     let invite_msg = Message::builder(Command::Invite)

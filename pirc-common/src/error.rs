@@ -21,6 +21,25 @@ pub enum ChannelError {
     NotInChannel { channel: String },
 }
 
+/// Errors related to Raft consensus operations.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum RaftError {
+    #[error("not the leader")]
+    NotLeader,
+    #[error("term mismatch: local {local}, remote {remote}")]
+    TermMismatch { local: u64, remote: u64 },
+    #[error("log inconsistency at index {index}")]
+    LogInconsistency { index: u64 },
+    #[error("election timeout")]
+    ElectionTimeout,
+    #[error("peer unreachable: {peer}")]
+    PeerUnreachable { peer: String },
+    #[error("invalid RPC: {message}")]
+    InvalidRpc { message: String },
+    #[error("raft not initialized")]
+    NotInitialized,
+}
+
 /// Errors related to IRC user operations.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum UserError {
@@ -45,6 +64,8 @@ pub enum PircError {
     ChannelError(#[from] ChannelError),
     #[error(transparent)]
     UserError(#[from] UserError),
+    #[error(transparent)]
+    RaftError(#[from] RaftError),
     #[error("crypto error: {message}")]
     CryptoError { message: String },
     #[error("config error: {message}")]
@@ -140,6 +161,57 @@ mod tests {
         assert_eq!(err.to_string(), "user not found: bob");
     }
 
+    // ---- RaftError construction ----
+
+    #[test]
+    fn raft_not_leader() {
+        let err = RaftError::NotLeader;
+        assert_eq!(err.to_string(), "not the leader");
+    }
+
+    #[test]
+    fn raft_term_mismatch() {
+        let err = RaftError::TermMismatch {
+            local: 3,
+            remote: 5,
+        };
+        assert_eq!(err.to_string(), "term mismatch: local 3, remote 5");
+    }
+
+    #[test]
+    fn raft_log_inconsistency() {
+        let err = RaftError::LogInconsistency { index: 42 };
+        assert_eq!(err.to_string(), "log inconsistency at index 42");
+    }
+
+    #[test]
+    fn raft_election_timeout() {
+        let err = RaftError::ElectionTimeout;
+        assert_eq!(err.to_string(), "election timeout");
+    }
+
+    #[test]
+    fn raft_peer_unreachable() {
+        let err = RaftError::PeerUnreachable {
+            peer: "node-2".into(),
+        };
+        assert_eq!(err.to_string(), "peer unreachable: node-2");
+    }
+
+    #[test]
+    fn raft_invalid_rpc() {
+        let err = RaftError::InvalidRpc {
+            message: "unknown message type".into(),
+        };
+        assert_eq!(err.to_string(), "invalid RPC: unknown message type");
+    }
+
+    #[test]
+    fn raft_not_initialized() {
+        let err = RaftError::NotInitialized;
+        assert_eq!(err.to_string(), "raft not initialized");
+    }
+
     // ---- PircError construction ----
 
     #[test]
@@ -204,6 +276,14 @@ mod tests {
     }
 
     #[test]
+    fn raft_error_into_pirc_error() {
+        let raft_err = RaftError::NotLeader;
+        let pirc_err: PircError = raft_err.into();
+        assert!(matches!(pirc_err, PircError::RaftError(_)));
+        assert_eq!(pirc_err.to_string(), "not the leader");
+    }
+
+    #[test]
     fn io_error_into_pirc_error() {
         let io_err = io::Error::new(io::ErrorKind::ConnectionRefused, "refused");
         let pirc_err: PircError = io_err.into();
@@ -220,6 +300,10 @@ mod tests {
 
     fn returns_pirc_result_from_user() -> Result<()> {
         Err(UserError::NotOperator)?
+    }
+
+    fn returns_pirc_result_from_raft() -> Result<()> {
+        Err(RaftError::ElectionTimeout)?
     }
 
     fn returns_pirc_result_from_io() -> Result<()> {
@@ -243,6 +327,16 @@ mod tests {
         assert!(matches!(
             result.unwrap_err(),
             PircError::UserError(UserError::NotOperator)
+        ));
+    }
+
+    #[test]
+    fn question_mark_raft_error() {
+        let result = returns_pirc_result_from_raft();
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PircError::RaftError(RaftError::ElectionTimeout)
         ));
     }
 
@@ -291,6 +385,12 @@ mod tests {
     fn user_error_is_std_error() {
         let err: Box<dyn std::error::Error> = Box::new(UserError::NotOperator);
         assert_eq!(err.to_string(), "not an operator");
+    }
+
+    #[test]
+    fn raft_error_is_std_error() {
+        let err: Box<dyn std::error::Error> = Box::new(RaftError::NotLeader);
+        assert_eq!(err.to_string(), "not the leader");
     }
 
     // ---- Source chain ----

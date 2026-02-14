@@ -1,8 +1,8 @@
 use pirc_common::{ChannelName, Nickname};
 use pirc_protocol::numeric::{
-    ERR_CHANOPRIVSNEEDED, ERR_NEEDMOREPARAMS, ERR_NOSUCHCHANNEL, ERR_NOSUCHNICK,
-    ERR_NOTONCHANNEL, ERR_USERONCHANNEL, RPL_BANLIST, RPL_ENDOFBANLIST, RPL_INVITING,
-    ERR_BANNEDCHANNEL, ERR_INVITEONLYCHAN,
+    ERR_BANNEDCHANNEL, ERR_CHANOPRIVSNEEDED, ERR_INVITEONLYCHAN, ERR_NEEDMOREPARAMS,
+    ERR_NOSUCHCHANNEL, ERR_NOSUCHNICK, ERR_NOTONCHANNEL, ERR_USERONCHANNEL, RPL_BANLIST,
+    RPL_ENDOFBANLIST, RPL_INVITING,
 };
 
 use super::*;
@@ -44,17 +44,11 @@ fn join_msg(channels: &str) -> Message {
 }
 
 fn invite_msg(target: &str, channel: &str) -> Message {
-    Message::new(
-        Command::Invite,
-        vec![target.to_owned(), channel.to_owned()],
-    )
+    Message::new(Command::Invite, vec![target.to_owned(), channel.to_owned()])
 }
 
 fn ban_msg(params: &[&str]) -> Message {
-    Message::new(
-        Command::Ban,
-        params.iter().map(|s| s.to_string()).collect(),
-    )
+    Message::new(Command::Ban, params.iter().map(|s| s.to_string()).collect())
 }
 
 fn mode_msg(params: &[&str]) -> Message {
@@ -115,13 +109,28 @@ async fn invite_success_sends_rpl_inviting_and_invite_message() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (_tx2, mut rx2, _state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Alice joins #test (gets +o).
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx1, &mut state1, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
 
     // Alice invites Bob.
@@ -158,12 +167,27 @@ async fn invite_adds_target_to_invite_list() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (_tx2, _rx2, _state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx1, &mut state1, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
 
     handle_message(
@@ -188,16 +212,46 @@ async fn invite_non_invite_only_channel_no_op_required() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
-    let (_tx3, mut rx3, _state3) =
-        register_user("Charlie", "charlie", 3, "127.0.0.3", &registry, &channels, &config);
+    let (_tx3, mut rx3, _state3) = register_user(
+        "Charlie",
+        "charlie",
+        3,
+        "127.0.0.3",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Alice joins (gets +o), Bob joins (Normal).
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#test"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#test"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -227,13 +281,28 @@ async fn invited_user_can_join_invite_only_channel() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Alice joins #secret and sets +i.
-    handle_message(&join_msg("#secret"), 1, &registry, &channels, &tx1, &mut state1, &config);
+    handle_message(
+        &join_msg("#secret"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     handle_message(
         &mode_msg(&["#secret", "+i"]),
@@ -247,7 +316,15 @@ async fn invited_user_can_join_invite_only_channel() {
     while rx1.try_recv().is_ok() {}
 
     // Bob tries to join without invite — should fail.
-    handle_message(&join_msg("#secret"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#secret"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     let reply = rx2.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_INVITEONLYCHAN));
 
@@ -265,7 +342,15 @@ async fn invited_user_can_join_invite_only_channel() {
     while rx2.try_recv().is_ok() {}
 
     // Bob joins — should succeed now.
-    handle_message(&join_msg("#secret"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#secret"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
 
     // Should get JOIN broadcast, not an error.
     let reply = rx2.recv().await.unwrap();
@@ -286,8 +371,15 @@ async fn invite_no_params_returns_err_needmoreparams() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let msg = Message::new(Command::Invite, vec![]);
     handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
@@ -301,8 +393,15 @@ async fn invite_one_param_returns_err_needmoreparams() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let msg = Message::new(Command::Invite, vec!["Bob".to_owned()]);
     handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
@@ -316,10 +415,25 @@ async fn invite_target_does_not_exist_returns_err_nosuchnick() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     handle_message(
@@ -341,8 +455,15 @@ async fn invite_nonexistent_channel_returns_err_nosuchchannel() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (_tx2, _rx2, _state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
@@ -376,8 +497,15 @@ async fn invite_not_on_channel_returns_err_notonchannel() {
             .insert(Nickname::new("Op").unwrap(), MemberStatus::Operator);
     }
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (_tx2, _rx2, _state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
@@ -401,16 +529,46 @@ async fn invite_non_op_on_invite_only_channel_returns_err_chanoprivsneeded() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
-    let (_tx3, _rx3, _state3) =
-        register_user("Charlie", "charlie", 3, "127.0.0.3", &registry, &channels, &config);
+    let (_tx3, _rx3, _state3) = register_user(
+        "Charlie",
+        "charlie",
+        3,
+        "127.0.0.3",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Alice joins (op), Bob joins (normal), set +i.
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#test"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#test"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -446,14 +604,37 @@ async fn invite_target_already_on_channel_returns_err_useronchannel() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Both join.
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#test"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#test"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -483,10 +664,25 @@ async fn ban_list_empty() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     // BAN #test (no mask) — lists bans.
@@ -509,10 +705,25 @@ async fn ban_list_with_entries() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     // Add bans directly.
@@ -561,10 +772,25 @@ async fn ban_add_mask() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     handle_message(
@@ -604,10 +830,25 @@ async fn ban_remove_mask() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     // Add ban first.
@@ -653,13 +894,28 @@ async fn banned_user_cannot_join() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Alice joins and sets a ban on Bob's host.
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx1, &mut state1, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
 
     handle_message(
@@ -674,7 +930,15 @@ async fn banned_user_cannot_join() {
     while rx1.try_recv().is_ok() {}
 
     // Bob tries to join.
-    handle_message(&join_msg("#test"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#test"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
 
     let reply = rx2.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_BANNEDCHANNEL));
@@ -724,8 +988,15 @@ async fn ban_no_params_returns_err_needmoreparams() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let msg = Message::new(Command::Ban, vec![]);
     handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
@@ -739,8 +1010,15 @@ async fn ban_nonexistent_channel_returns_err_nosuchchannel() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     handle_message(
         &ban_msg(&["#nonexistent", "*!*@host"]),
@@ -772,8 +1050,15 @@ async fn ban_not_on_channel_returns_err_notonchannel() {
             .insert(Nickname::new("Op").unwrap(), MemberStatus::Operator);
     }
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     handle_message(
         &ban_msg(&["#test", "*!*@evil.host"]),
@@ -794,13 +1079,36 @@ async fn ban_non_operator_returns_err_chanoprivsneeded() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#test"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#test"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -832,13 +1140,36 @@ async fn ban_add_broadcasts_to_all_members() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#test"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#test"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -868,8 +1199,15 @@ async fn ban_invalid_channel_name_returns_err_nosuchchannel() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     handle_message(
         &ban_msg(&["nohash", "*!*@host"]),

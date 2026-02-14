@@ -4,5 +4,6 @@ pub mod config;
 pub mod handler;
 pub mod handler_channel;
 pub mod handler_oper;
+pub mod raft;
 pub mod registry;
 pub mod user;

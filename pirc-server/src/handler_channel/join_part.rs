@@ -108,7 +108,9 @@ pub fn handle_join(
                 }
 
                 // +i: invite only
-                if channel.modes.contains(&pirc_common::ChannelMode::InviteOnly)
+                if channel
+                    .modes
+                    .contains(&pirc_common::ChannelMode::InviteOnly)
                     && !channel.invite_list.contains(&nick)
                 {
                     send_numeric(
@@ -180,12 +182,7 @@ pub fn handle_join(
             let channel = channel_arc.read().expect("channel lock poisoned");
             match &channel.topic {
                 Some((text, who, timestamp)) => {
-                    send_numeric(
-                        sender,
-                        RPL_TOPIC,
-                        &[&nick_str, chan_name.as_ref()],
-                        text,
-                    );
+                    send_numeric(sender, RPL_TOPIC, &[&nick_str, chan_name.as_ref()], text);
                     send_numeric(
                         sender,
                         RPL_TOPICWHOTIME,

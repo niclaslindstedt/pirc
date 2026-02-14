@@ -47,8 +47,7 @@ pub fn terminal_size() -> Option<TerminalSize> {
 #[cfg(unix)]
 fn make_raw(termios: &mut libc::termios) {
     // Input flags: disable break signal, CR-to-NL, parity, strip, flow control
-    termios.c_iflag &=
-        !(libc::BRKINT | libc::ICRNL | libc::INPCK | libc::ISTRIP | libc::IXON);
+    termios.c_iflag &= !(libc::BRKINT | libc::ICRNL | libc::INPCK | libc::ISTRIP | libc::IXON);
 
     // Output flags: disable post-processing
     termios.c_oflag &= !libc::OPOST;
@@ -152,9 +151,17 @@ mod tests {
 
         make_raw(&mut termios);
 
-        assert_eq!(termios.c_lflag & libc::ICANON, 0, "ICANON should be cleared");
+        assert_eq!(
+            termios.c_lflag & libc::ICANON,
+            0,
+            "ICANON should be cleared"
+        );
         assert_eq!(termios.c_lflag & libc::ECHO, 0, "ECHO should be cleared");
-        assert_eq!(termios.c_lflag & libc::IEXTEN, 0, "IEXTEN should be cleared");
+        assert_eq!(
+            termios.c_lflag & libc::IEXTEN,
+            0,
+            "IEXTEN should be cleared"
+        );
         assert_eq!(termios.c_lflag & libc::ISIG, 0, "ISIG should be cleared");
     }
 
@@ -165,10 +172,18 @@ mod tests {
 
         make_raw(&mut termios);
 
-        assert_eq!(termios.c_iflag & libc::BRKINT, 0, "BRKINT should be cleared");
+        assert_eq!(
+            termios.c_iflag & libc::BRKINT,
+            0,
+            "BRKINT should be cleared"
+        );
         assert_eq!(termios.c_iflag & libc::ICRNL, 0, "ICRNL should be cleared");
         assert_eq!(termios.c_iflag & libc::INPCK, 0, "INPCK should be cleared");
-        assert_eq!(termios.c_iflag & libc::ISTRIP, 0, "ISTRIP should be cleared");
+        assert_eq!(
+            termios.c_iflag & libc::ISTRIP,
+            0,
+            "ISTRIP should be cleared"
+        );
         assert_eq!(termios.c_iflag & libc::IXON, 0, "IXON should be cleared");
     }
 

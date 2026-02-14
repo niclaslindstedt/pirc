@@ -43,10 +43,7 @@ fn join_msg(channels: &str) -> Message {
 }
 
 fn kick_msg(channel: &str, target: &str) -> Message {
-    Message::new(
-        Command::Kick,
-        vec![channel.to_owned(), target.to_owned()],
-    )
+    Message::new(Command::Kick, vec![channel.to_owned(), target.to_owned()])
 }
 
 fn kick_msg_reason(channel: &str, target: &str, reason: &str) -> Message {
@@ -103,14 +100,37 @@ async fn kick_success_broadcasts_to_all_members() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Alice joins (gets +o), Bob joins.
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#general"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -148,7 +168,9 @@ async fn kick_success_broadcasts_to_all_members() {
     let channel_arc = channels.get(&chan_name).unwrap();
     let channel = channel_arc.read().unwrap();
     assert!(!channel.members.contains_key(&Nickname::new("Bob").unwrap()));
-    assert!(channel.members.contains_key(&Nickname::new("Alice").unwrap()));
+    assert!(channel
+        .members
+        .contains_key(&Nickname::new("Alice").unwrap()));
 }
 
 #[tokio::test]
@@ -156,14 +178,37 @@ async fn kick_with_reason() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Alice joins (gets +o), Bob joins.
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#general"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -194,14 +239,37 @@ async fn kick_empty_channel_is_cleaned_up() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Alice joins (gets +o), Bob joins.
-    handle_message(&join_msg("#temp"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#temp"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#temp"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#temp"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -226,7 +294,15 @@ async fn kick_empty_channel_is_cleaned_up() {
 
     // Now Alice parts.
     let part_msg = Message::new(Command::Part, vec!["#temp".to_owned()]);
-    handle_message(&part_msg, 1, &registry, &channels, &tx1, &mut state1, &config);
+    handle_message(
+        &part_msg,
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
 
     // Channel should be cleaned up now.
@@ -238,20 +314,51 @@ async fn kick_last_member_cleans_up_channel() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Alice joins (gets +o), Bob joins.
-    handle_message(&join_msg("#temp"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#temp"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#temp"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#temp"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
     // Alice parts.
     let part_msg = Message::new(Command::Part, vec!["#temp".to_owned()]);
-    handle_message(&part_msg, 1, &registry, &channels, &tx1, &mut state1, &config);
+    handle_message(
+        &part_msg,
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -261,19 +368,44 @@ async fn kick_last_member_cleans_up_channel() {
         let channel_arc = channels.get(&chan_name).unwrap();
         let mut channel = channel_arc.write().unwrap();
         let bob_nick = Nickname::new("Bob").unwrap();
-        channel.members.insert(bob_nick.clone(), MemberStatus::Operator);
+        channel
+            .members
+            .insert(bob_nick.clone(), MemberStatus::Operator);
     }
 
     // Add a third user for Bob to kick.
-    let (tx3, mut rx3, mut state3) =
-        register_user("Charlie", "charlie", 3, "127.0.0.3", &registry, &channels, &config);
-    handle_message(&join_msg("#temp"), 3, &registry, &channels, &tx3, &mut state3, &config);
+    let (tx3, mut rx3, mut state3) = register_user(
+        "Charlie",
+        "charlie",
+        3,
+        "127.0.0.3",
+        &registry,
+        &channels,
+        &config,
+    );
+    handle_message(
+        &join_msg("#temp"),
+        3,
+        &registry,
+        &channels,
+        &tx3,
+        &mut state3,
+        &config,
+    );
     while rx2.try_recv().is_ok() {}
     while rx3.try_recv().is_ok() {}
 
     // Bob parts, Charlie becomes last member.
     let part_msg = Message::new(Command::Part, vec!["#temp".to_owned()]);
-    handle_message(&part_msg, 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &part_msg,
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx2.try_recv().is_ok() {}
     while rx3.try_recv().is_ok() {}
 
@@ -282,22 +414,44 @@ async fn kick_last_member_cleans_up_channel() {
         let chan_name = ChannelName::new("#temp").unwrap();
         let channel_arc = channels.get(&chan_name).unwrap();
         let mut channel = channel_arc.write().unwrap();
-        channel.members.insert(
-            Nickname::new("Charlie").unwrap(),
-            MemberStatus::Operator,
-        );
+        channel
+            .members
+            .insert(Nickname::new("Charlie").unwrap(), MemberStatus::Operator);
     }
 
     // Re-add a kickable user.
-    let (tx4, mut rx4, mut state4) =
-        register_user("Dave", "dave", 4, "127.0.0.4", &registry, &channels, &config);
-    handle_message(&join_msg("#temp"), 4, &registry, &channels, &tx4, &mut state4, &config);
+    let (tx4, mut rx4, mut state4) = register_user(
+        "Dave",
+        "dave",
+        4,
+        "127.0.0.4",
+        &registry,
+        &channels,
+        &config,
+    );
+    handle_message(
+        &join_msg("#temp"),
+        4,
+        &registry,
+        &channels,
+        &tx4,
+        &mut state4,
+        &config,
+    );
     while rx3.try_recv().is_ok() {}
     while rx4.try_recv().is_ok() {}
 
     // Charlie parts, Dave alone. Give Dave op.
     let part_msg = Message::new(Command::Part, vec!["#temp".to_owned()]);
-    handle_message(&part_msg, 3, &registry, &channels, &tx3, &mut state3, &config);
+    handle_message(
+        &part_msg,
+        3,
+        &registry,
+        &channels,
+        &tx3,
+        &mut state3,
+        &config,
+    );
     while rx3.try_recv().is_ok() {}
     while rx4.try_recv().is_ok() {}
 
@@ -321,8 +475,15 @@ async fn kick_no_params_returns_err_needmoreparams() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let msg = Message::new(Command::Kick, vec![]);
     handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
@@ -336,8 +497,15 @@ async fn kick_one_param_returns_err_needmoreparams() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let msg = Message::new(Command::Kick, vec!["#general".to_owned()]);
     handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
@@ -351,8 +519,15 @@ async fn kick_nonexistent_channel_returns_err_nosuchchannel() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     handle_message(
         &kick_msg("#nonexistent", "Bob"),
@@ -373,8 +548,15 @@ async fn kick_invalid_channel_name_returns_err_nosuchchannel() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     handle_message(
         &kick_msg("nochanprefix", "Bob"),
@@ -409,8 +591,15 @@ async fn kick_not_on_channel_returns_err_notonchannel() {
             .insert(Nickname::new("Target").unwrap(), MemberStatus::Normal);
     }
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Alice tries to kick from a channel she's not in.
     handle_message(
@@ -432,14 +621,37 @@ async fn kick_non_operator_returns_err_chanoprivsneeded() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Alice joins (gets +o), Bob joins (gets Normal).
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#general"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -461,7 +673,9 @@ async fn kick_non_operator_returns_err_chanoprivsneeded() {
     let chan_name = ChannelName::new("#general").unwrap();
     let channel_arc = channels.get(&chan_name).unwrap();
     let channel = channel_arc.read().unwrap();
-    assert!(channel.members.contains_key(&Nickname::new("Alice").unwrap()));
+    assert!(channel
+        .members
+        .contains_key(&Nickname::new("Alice").unwrap()));
 }
 
 #[tokio::test]
@@ -469,13 +683,28 @@ async fn kick_target_not_on_channel_returns_err_usernotinchannel() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (_tx2, _rx2, _state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Alice joins (gets +o). Bob does NOT join the channel.
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx1, &mut state1, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
 
     // Alice tries to kick Bob who is not in the channel.
@@ -498,17 +727,55 @@ async fn kick_voiced_user_cannot_kick() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
-    let (tx3, mut rx3, mut state3) =
-        register_user("Charlie", "charlie", 3, "127.0.0.3", &registry, &channels, &config);
+    let (tx3, mut rx3, mut state3) = register_user(
+        "Charlie",
+        "charlie",
+        3,
+        "127.0.0.3",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Alice joins (operator), Bob and Charlie join (normal).
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#general"), 2, &registry, &channels, &tx2, &mut state2, &config);
-    handle_message(&join_msg("#general"), 3, &registry, &channels, &tx3, &mut state3, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        3,
+        &registry,
+        &channels,
+        &tx3,
+        &mut state3,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
     while rx3.try_recv().is_ok() {}
@@ -540,7 +807,9 @@ async fn kick_voiced_user_cannot_kick() {
     let chan_name = ChannelName::new("#general").unwrap();
     let channel_arc = channels.get(&chan_name).unwrap();
     let channel = channel_arc.read().unwrap();
-    assert!(channel.members.contains_key(&Nickname::new("Charlie").unwrap()));
+    assert!(channel
+        .members
+        .contains_key(&Nickname::new("Charlie").unwrap()));
 }
 
 // ---- KICK: broadcast to third-party members ----
@@ -550,17 +819,55 @@ async fn kick_broadcasts_to_third_party_members() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
-    let (tx3, mut rx3, mut state3) =
-        register_user("Charlie", "charlie", 3, "127.0.0.3", &registry, &channels, &config);
+    let (tx3, mut rx3, mut state3) = register_user(
+        "Charlie",
+        "charlie",
+        3,
+        "127.0.0.3",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // All three join #general.
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#general"), 2, &registry, &channels, &tx2, &mut state2, &config);
-    handle_message(&join_msg("#general"), 3, &registry, &channels, &tx3, &mut state3, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        3,
+        &registry,
+        &channels,
+        &tx3,
+        &mut state3,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
     while rx3.try_recv().is_ok() {}

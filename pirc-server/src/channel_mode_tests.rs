@@ -96,8 +96,15 @@ async fn mode_nonexistent_channel() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     handle_message(
         &mode_msg(&["#nonexistent"]),
@@ -129,8 +136,15 @@ async fn mode_not_on_channel() {
             .insert(Nickname::new("Op").unwrap(), MemberStatus::Operator);
     }
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Alice tries to set modes on a channel she's not in.
     handle_message(
@@ -152,13 +166,36 @@ async fn mode_non_operator_cannot_set() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#test"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#test"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -188,10 +225,25 @@ async fn mode_unknown_mode_char() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     handle_message(
@@ -213,10 +265,25 @@ async fn mode_user_not_in_channel_for_op() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     // Try to +o a user who isn't in the channel.
@@ -241,16 +308,54 @@ async fn mode_change_broadcasts_to_all_members() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
-    let (tx3, mut rx3, mut state3) =
-        register_user("Charlie", "charlie", 3, "127.0.0.3", &registry, &channels, &config);
+    let (tx3, mut rx3, mut state3) = register_user(
+        "Charlie",
+        "charlie",
+        3,
+        "127.0.0.3",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#test"), 2, &registry, &channels, &tx2, &mut state2, &config);
-    handle_message(&join_msg("#test"), 3, &registry, &channels, &tx3, &mut state3, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#test"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
+    handle_message(
+        &join_msg("#test"),
+        3,
+        &registry,
+        &channels,
+        &tx3,
+        &mut state3,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
     while rx3.try_recv().is_ok() {}
@@ -291,10 +396,25 @@ async fn mode_set_all_flag_modes() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     // Set all 5 flag modes at once.
@@ -325,10 +445,25 @@ async fn mode_unset_all_flag_modes() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     // Set all modes first.
@@ -369,10 +504,25 @@ async fn mode_mixed_add_remove() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&join_msg("#test"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#test"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     // Set +i first.

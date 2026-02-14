@@ -382,6 +382,7 @@ dependencies = [
  "pirc-network",
  "pirc-protocol",
  "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "toml",

@@ -47,10 +47,7 @@ fn topic_msg(channel: &str) -> Message {
 }
 
 fn topic_msg_set(channel: &str, topic: &str) -> Message {
-    Message::new(
-        Command::Topic,
-        vec![channel.to_owned(), topic.to_owned()],
-    )
+    Message::new(Command::Topic, vec![channel.to_owned(), topic.to_owned()])
 }
 
 /// Helper: register a user and drain the welcome burst.
@@ -100,15 +97,38 @@ async fn topic_query_no_topic_returns_rpl_notopic() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Alice joins #general (creates it).
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     // Query topic.
-    handle_message(&topic_msg("#general"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &topic_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(RPL_NOTOPIC));
@@ -120,11 +140,26 @@ async fn topic_query_with_topic_returns_rpl_topic_and_whotime() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Alice joins #general.
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     // Set topic directly on the channel.
@@ -136,7 +171,15 @@ async fn topic_query_with_topic_returns_rpl_topic_and_whotime() {
     }
 
     // Query topic.
-    handle_message(&topic_msg("#general"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &topic_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(RPL_TOPIC));
@@ -155,14 +198,37 @@ async fn topic_set_broadcasts_to_channel() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Both join #general.
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#general"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -207,14 +273,37 @@ async fn topic_set_by_normal_user_without_topic_protected() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Alice joins (gets +o), Bob joins (gets Normal).
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#general"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -250,11 +339,26 @@ async fn topic_clear_with_empty_trailing() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Alice joins.
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     // Set a topic first.
@@ -308,14 +412,37 @@ async fn topic_protected_mode_denies_normal_user() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Alice joins (gets +o), Bob joins (gets Normal).
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#general"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -353,11 +480,26 @@ async fn topic_protected_mode_allows_operator() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Alice joins (gets +o).
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     while rx.try_recv().is_ok() {}
 
     // Set +t mode.
@@ -398,8 +540,15 @@ async fn topic_no_params_returns_err_needmoreparams() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let msg = Message::new(Command::Topic, vec![]);
     handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
@@ -413,10 +562,25 @@ async fn topic_nonexistent_channel_returns_err_nosuchchannel() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&topic_msg("#nonexistent"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &topic_msg("#nonexistent"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NOSUCHCHANNEL));
@@ -427,10 +591,25 @@ async fn topic_invalid_channel_name_returns_err_nosuchchannel() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&topic_msg("nochanprefix"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &topic_msg("nochanprefix"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NOSUCHCHANNEL));
@@ -452,11 +631,26 @@ async fn topic_not_on_channel_returns_err_notonchannel() {
             .insert(Nickname::new("Op").unwrap(), MemberStatus::Operator);
     }
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Alice tries to query topic on channel she's not in.
-    handle_message(&topic_msg("#general"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &topic_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NOTONCHANNEL));
@@ -478,8 +672,15 @@ async fn topic_set_not_on_channel_returns_err_notonchannel() {
             .insert(Nickname::new("Op").unwrap(), MemberStatus::Operator);
     }
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Alice tries to set topic on channel she's not in.
     handle_message(
@@ -501,14 +702,37 @@ async fn topic_protected_voiced_user_denied() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Alice joins (operator), Bob joins (normal).
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#general"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 

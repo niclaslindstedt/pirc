@@ -114,13 +114,7 @@ impl SignalHandler {
     pub fn drain(&self) {
         let mut buf = [0u8; 64];
         loop {
-            let n = unsafe {
-                libc::read(
-                    self.pipe_read,
-                    buf.as_mut_ptr().cast(),
-                    buf.len(),
-                )
-            };
+            let n = unsafe { libc::read(self.pipe_read, buf.as_mut_ptr().cast(), buf.len()) };
             if n <= 0 {
                 break;
             }
@@ -267,7 +261,10 @@ mod tests {
         let mut buf = [0u8; 1];
         let ret = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), 1) };
         // Should return -1 with EAGAIN/EWOULDBLOCK
-        assert_eq!(ret, -1, "non-blocking read from empty pipe should return -1");
+        assert_eq!(
+            ret, -1,
+            "non-blocking read from empty pipe should return -1"
+        );
         let err = std::io::Error::last_os_error();
         assert!(
             err.kind() == std::io::ErrorKind::WouldBlock,

@@ -24,7 +24,14 @@ pub fn handle_privmsg(
     channels: &Arc<ChannelRegistry>,
     sender: &mpsc::UnboundedSender<Message>,
 ) {
-    handle_message_command(msg, connection_id, registry, channels, sender, Command::Privmsg);
+    handle_message_command(
+        msg,
+        connection_id,
+        registry,
+        channels,
+        sender,
+        Command::Privmsg,
+    );
 }
 
 /// Handle the NOTICE command from a registered user.
@@ -38,7 +45,14 @@ pub fn handle_notice(
     channels: &Arc<ChannelRegistry>,
     sender: &mpsc::UnboundedSender<Message>,
 ) {
-    handle_message_command(msg, connection_id, registry, channels, sender, Command::Notice);
+    handle_message_command(
+        msg,
+        connection_id,
+        registry,
+        channels,
+        sender,
+        Command::Notice,
+    );
 }
 
 /// Shared implementation for PRIVMSG and NOTICE.
@@ -228,12 +242,7 @@ fn handle_user_message(
         // For PRIVMSG only: send RPL_AWAY if target is away.
         if *command == Command::Privmsg {
             if let Some(ref away_msg) = target_session.away_message {
-                send_numeric(
-                    sender,
-                    RPL_AWAY,
-                    &[nick_str, target],
-                    away_msg,
-                );
+                send_numeric(sender, RPL_AWAY, &[nick_str, target], away_msg);
             }
         }
     }

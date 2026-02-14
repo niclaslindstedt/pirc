@@ -142,10 +142,7 @@ mod tests {
 
     #[test]
     fn double_slash_alone() {
-        assert_eq!(
-            parse("//"),
-            ParsedInput::ChatMessage("/".to_owned())
-        );
+        assert_eq!(parse("//"), ParsedInput::ChatMessage("/".to_owned()));
     }
 
     #[test]
@@ -380,10 +377,7 @@ mod tests {
             parse("/part #channel Goodbye everyone!"),
             ParsedInput::Command {
                 name: "part".to_owned(),
-                args: vec![
-                    "#channel".to_owned(),
-                    "Goodbye everyone!".to_owned(),
-                ],
+                args: vec!["#channel".to_owned(), "Goodbye everyone!".to_owned(),],
             }
         );
     }
@@ -446,9 +440,6 @@ mod tests {
 
     #[test]
     fn split_args_trailing_whitespace() {
-        assert_eq!(
-            split_args("word   "),
-            vec!["word".to_owned()]
-        );
+        assert_eq!(split_args("word   "), vec!["word".to_owned()]);
     }
 }

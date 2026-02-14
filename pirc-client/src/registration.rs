@@ -39,7 +39,10 @@ pub enum RegistrationEvent {
     Info(String),
     /// A nick collision occurred; the contained [`Message`] is the NICK
     /// command to re-send with the next candidate nick.
-    NickRetry { new_nick: String, nick_message: Message },
+    NickRetry {
+        new_nick: String,
+        nick_message: Message,
+    },
     /// Erroneous nickname (432) — display the error, stay in Registering.
     NickError(String),
     /// The message is not registration-related; let the normal handler deal
@@ -97,10 +100,10 @@ impl RegistrationState {
         match msg.command {
             // RPL_WELCOME (001) — registration complete
             Command::Numeric(numeric::RPL_WELCOME) => {
-                let server_name = msg.prefix.as_ref().map_or_else(
-                    || String::new(),
-                    ToString::to_string,
-                );
+                let server_name = msg
+                    .prefix
+                    .as_ref()
+                    .map_or_else(|| String::new(), ToString::to_string);
 
                 // The server may confirm a different nick in param[0]
                 if let Some(confirmed_nick) = msg.params.first() {
@@ -138,7 +141,10 @@ impl RegistrationState {
             | Command::Numeric(numeric::ERR_NICKCOLLISION) => {
                 let new_nick = self.next_nick();
                 let nick_message = Message::new(Command::Nick, vec![new_nick.clone()]);
-                RegistrationEvent::NickRetry { new_nick, nick_message }
+                RegistrationEvent::NickRetry {
+                    new_nick,
+                    nick_message,
+                }
             }
 
             // ERR_ERRONEUSNICKNAME (432)
@@ -160,11 +166,7 @@ impl RegistrationState {
             self.current_nick = nick;
         } else {
             self.underscore_count += 1;
-            let nick = format!(
-                "{}{}",
-                self.primary_nick,
-                "_".repeat(self.underscore_count)
-            );
+            let nick = format!("{}{}", self.primary_nick, "_".repeat(self.underscore_count));
             self.current_nick = nick;
         }
         self.current_nick.clone()
@@ -334,11 +336,18 @@ mod tests {
         // First collision → alt1
         let msg = Message::new(
             Command::Numeric(433),
-            vec!["*".into(), "mynick".into(), "Nickname is already in use".into()],
+            vec![
+                "*".into(),
+                "mynick".into(),
+                "Nickname is already in use".into(),
+            ],
         );
         let event = reg.handle_message(&msg);
         match event {
-            RegistrationEvent::NickRetry { new_nick, nick_message } => {
+            RegistrationEvent::NickRetry {
+                new_nick,
+                nick_message,
+            } => {
                 assert_eq!(new_nick, "alt1");
                 assert_eq!(nick_message.params, vec!["alt1"]);
             }
@@ -397,7 +406,11 @@ mod tests {
         let mut reg = make_reg_no_alts();
         let msg = Message::new(
             Command::Numeric(433),
-            vec!["*".into(), "mynick".into(), "Nickname is already in use".into()],
+            vec![
+                "*".into(),
+                "mynick".into(),
+                "Nickname is already in use".into(),
+            ],
         );
         let event = reg.handle_message(&msg);
         match event {
@@ -436,10 +449,7 @@ mod tests {
     #[test]
     fn handle_privmsg_returns_unhandled() {
         let mut reg = make_reg();
-        let msg = Message::new(
-            Command::Privmsg,
-            vec!["#channel".into(), "hello".into()],
-        );
+        let msg = Message::new(Command::Privmsg, vec!["#channel".into(), "hello".into()]);
         assert_eq!(reg.handle_message(&msg), RegistrationEvent::Unhandled);
     }
 }

@@ -39,7 +39,15 @@ async fn nick_then_user_completes_registration() {
     let config = make_config();
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
-    handle_message(&nick_msg("Alice"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &nick_msg("Alice"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     assert!(state.nick.is_some());
     assert!(!state.registered);
 
@@ -92,7 +100,15 @@ async fn user_then_nick_completes_registration() {
     );
     assert!(!state.registered);
 
-    handle_message(&nick_msg("Bob"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &nick_msg("Bob"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     assert!(state.registered);
     assert_eq!(registry.connection_count(), 1);
 
@@ -165,7 +181,15 @@ async fn nick_in_use_returns_err() {
     let (tx2, mut rx2) = make_sender();
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
-    handle_message(&nick_msg("Alice"), 2, &registry, &channels, &tx2, &mut state, &config);
+    handle_message(
+        &nick_msg("Alice"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state,
+        &config,
+    );
 
     let reply = rx2.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NICKNAMEINUSE));
@@ -196,7 +220,15 @@ async fn user_after_registration_returns_err() {
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
     // Register first
-    handle_message(&nick_msg("Alice"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &nick_msg("Alice"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     handle_message(
         &user_msg("alice", "Alice"),
         1,
@@ -344,7 +376,15 @@ fn register_user(
 ) {
     let (tx, mut rx) = make_sender();
     let mut state = PreRegistrationState::new(hostname.to_owned());
-    handle_message(&nick_msg(nick), connection_id, registry, channels, &tx, &mut state, config);
+    handle_message(
+        &nick_msg(nick),
+        connection_id,
+        registry,
+        channels,
+        &tx,
+        &mut state,
+        config,
+    );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
         connection_id,
@@ -365,10 +405,25 @@ async fn nick_change_after_registration_succeeds() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&nick_msg("NewAlice"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &nick_msg("NewAlice"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Nick);
@@ -390,13 +445,28 @@ async fn nick_change_collision_returns_err() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (_tx2, _rx2, _state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Alice tries to change to Bob's nick
-    handle_message(&nick_msg("Bob"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &nick_msg("Bob"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NICKNAMEINUSE));
@@ -411,10 +481,25 @@ async fn nick_change_invalid_returns_err() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&nick_msg("123bad"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &nick_msg("123bad"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_ERRONEUSNICKNAME));
@@ -429,10 +514,25 @@ async fn nick_change_case_only_succeeds() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&nick_msg("ALICE"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &nick_msg("ALICE"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Nick);
@@ -454,8 +554,15 @@ async fn nick_change_no_param_returns_err() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let msg = Message::new(Command::Nick, vec![]);
     handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
@@ -469,10 +576,19 @@ async fn nick_change_prefix_has_correct_old_nick() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("OldNick", "theuser", 1, "10.0.0.5", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "OldNick", "theuser", 1, "10.0.0.5", &registry, &channels, &config,
+    );
 
-    handle_message(&nick_msg("NewNick"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &nick_msg("NewNick"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Nick);
@@ -561,13 +677,31 @@ async fn away_set_returns_rpl_nowaway() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&away_msg("Gone fishing"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &away_msg("Gone fishing"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_NOWAWAY));
+    assert_eq!(
+        reply.numeric_code(),
+        Some(pirc_protocol::numeric::RPL_NOWAWAY)
+    );
     assert!(reply.trailing().unwrap().contains("marked as being away"));
 
     // Verify session has away message
@@ -582,19 +716,48 @@ async fn away_clear_returns_rpl_unaway() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // First set away
-    handle_message(&away_msg("BRB"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &away_msg("BRB"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     let _ = rx.recv().await.unwrap(); // drain RPL_NOWAWAY
 
     // Now clear away
-    handle_message(&away_clear(), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &away_clear(),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UNAWAY));
-    assert!(reply.trailing().unwrap().contains("no longer marked as being away"));
+    assert_eq!(
+        reply.numeric_code(),
+        Some(pirc_protocol::numeric::RPL_UNAWAY)
+    );
+    assert!(reply
+        .trailing()
+        .unwrap()
+        .contains("no longer marked as being away"));
 
     // Verify session has no away message
     let nick = Nickname::new("Alice").unwrap();
@@ -608,15 +771,41 @@ async fn away_set_then_update_message() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&away_msg("First"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &away_msg("First"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     let _ = rx.recv().await.unwrap();
 
-    handle_message(&away_msg("Second"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &away_msg("Second"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_NOWAWAY));
+    assert_eq!(
+        reply.numeric_code(),
+        Some(pirc_protocol::numeric::RPL_NOWAWAY)
+    );
 
     let nick = Nickname::new("Alice").unwrap();
     let session = registry.get_by_nick(&nick).unwrap();
@@ -643,13 +832,31 @@ async fn mode_query_own_returns_rpl_umodeis() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&mode_query("Alice"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &mode_query("Alice"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
+    assert_eq!(
+        reply.numeric_code(),
+        Some(pirc_protocol::numeric::RPL_UMODEIS)
+    );
     assert_eq!(reply.params[1], "+"); // no modes set
 }
 
@@ -658,15 +865,33 @@ async fn mode_query_other_returns_err_usersdontmatch() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (_tx2, _rx2, _state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
-    handle_message(&mode_query("Bob"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &mode_query("Bob"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_USERSDONTMATCH));
+    assert_eq!(
+        reply.numeric_code(),
+        Some(pirc_protocol::numeric::ERR_USERSDONTMATCH)
+    );
 }
 
 #[tokio::test]
@@ -674,13 +899,31 @@ async fn mode_no_params_returns_err_needmoreparams() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&mode_no_params(), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &mode_no_params(),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NEEDMOREPARAMS));
+    assert_eq!(
+        reply.numeric_code(),
+        Some(pirc_protocol::numeric::ERR_NEEDMOREPARAMS)
+    );
 }
 
 #[tokio::test]
@@ -688,13 +931,31 @@ async fn mode_set_voiced_on_self() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&mode_set("Alice", "+v"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &mode_set("Alice", "+v"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
+    assert_eq!(
+        reply.numeric_code(),
+        Some(pirc_protocol::numeric::RPL_UMODEIS)
+    );
     assert_eq!(reply.params[1], "+v");
 
     // Verify mode was set
@@ -709,14 +970,32 @@ async fn mode_set_operator_self_ignored() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Trying +o should not self-promote
-    handle_message(&mode_set("Alice", "+o"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &mode_set("Alice", "+o"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
+    assert_eq!(
+        reply.numeric_code(),
+        Some(pirc_protocol::numeric::RPL_UMODEIS)
+    );
     assert_eq!(reply.params[1], "+"); // operator not added
 
     let nick = Nickname::new("Alice").unwrap();
@@ -730,8 +1009,15 @@ async fn mode_remove_operator() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Manually set operator
     {
@@ -741,10 +1027,21 @@ async fn mode_remove_operator() {
         s.modes.insert(UserMode::Operator);
     }
 
-    handle_message(&mode_set("Alice", "-o"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &mode_set("Alice", "-o"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
+    assert_eq!(
+        reply.numeric_code(),
+        Some(pirc_protocol::numeric::RPL_UMODEIS)
+    );
     assert_eq!(reply.params[1], "+"); // operator removed
 
     let nick = Nickname::new("Alice").unwrap();
@@ -758,17 +1055,38 @@ async fn mode_unknown_flag_returns_err() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&mode_set("Alice", "+x"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &mode_set("Alice", "+x"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_UMODEUNKNOWNFLAG));
+    assert_eq!(
+        reply.numeric_code(),
+        Some(pirc_protocol::numeric::ERR_UMODEUNKNOWNFLAG)
+    );
 
     // Also sends RPL_UMODEIS after unknown flag
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
+    assert_eq!(
+        reply.numeric_code(),
+        Some(pirc_protocol::numeric::RPL_UMODEIS)
+    );
 }
 
 #[tokio::test]
@@ -776,15 +1094,33 @@ async fn mode_set_other_returns_err_usersdontmatch() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (_tx2, _rx2, _state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
-    handle_message(&mode_set("Bob", "+v"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &mode_set("Bob", "+v"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_USERSDONTMATCH));
+    assert_eq!(
+        reply.numeric_code(),
+        Some(pirc_protocol::numeric::ERR_USERSDONTMATCH)
+    );
 }
 
 #[tokio::test]
@@ -792,14 +1128,32 @@ async fn mode_query_case_insensitive() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Query with different casing
-    handle_message(&mode_query("alice"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &mode_query("alice"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
+    assert_eq!(
+        reply.numeric_code(),
+        Some(pirc_protocol::numeric::RPL_UMODEIS)
+    );
 }
 
 #[tokio::test]
@@ -807,14 +1161,32 @@ async fn mode_combined_modestring() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Set +v then -v in one string
-    handle_message(&mode_set("Alice", "+v-v"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &mode_set("Alice", "+v-v"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_UMODEIS));
+    assert_eq!(
+        reply.numeric_code(),
+        Some(pirc_protocol::numeric::RPL_UMODEIS)
+    );
     assert_eq!(reply.params[1], "+"); // v was added then removed
 
     let nick = Nickname::new("Alice").unwrap();

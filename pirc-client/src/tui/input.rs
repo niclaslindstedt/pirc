@@ -121,10 +121,7 @@ impl InputReader {
                 revents: 0,
             },
             libc::pollfd {
-                fd: self
-                    .signal_handler
-                    .as_ref()
-                    .map_or(-1, |h| h.pipe_fd()),
+                fd: self.signal_handler.as_ref().map_or(-1, |h| h.pipe_fd()),
                 events: libc::POLLIN,
                 revents: 0,
             },
@@ -280,9 +277,9 @@ fn parse_csi_numbered(buf: &[u8]) -> KeyEvent {
         .copied()
         .take_while(|&b| b.is_ascii_digit())
         .collect();
-    let num: u16 = num_str
-        .iter()
-        .fold(0u16, |acc, &b| acc.saturating_mul(10).saturating_add((b - b'0') as u16));
+    let num: u16 = num_str.iter().fold(0u16, |acc, &b| {
+        acc.saturating_mul(10).saturating_add((b - b'0') as u16)
+    });
 
     match final_byte {
         b'~' => match num {
@@ -292,8 +289,8 @@ fn parse_csi_numbered(buf: &[u8]) -> KeyEvent {
             4 => KeyEvent::End,
             5 => KeyEvent::PageUp,
             6 => KeyEvent::PageDown,
-            7 => KeyEvent::Home,  // rxvt Home
-            8 => KeyEvent::End,   // rxvt End
+            7 => KeyEvent::Home, // rxvt Home
+            8 => KeyEvent::End,  // rxvt End
             _ => KeyEvent::Unknown(buf.to_vec()),
         },
         // Modified arrow/navigation keys: ESC [ 1 ; <mod> A/B/C/D/H/F
@@ -629,10 +626,7 @@ mod tests {
     #[test]
     fn test_utf8_3_byte() {
         // ☺ = 0xE2 0x98 0xBA
-        assert_eq!(
-            parse_key_event(&[0xE2, 0x98, 0xBA]),
-            KeyEvent::Char('☺')
-        );
+        assert_eq!(parse_key_event(&[0xE2, 0x98, 0xBA]), KeyEvent::Char('☺'));
     }
 
     #[test]
@@ -647,10 +641,7 @@ mod tests {
     #[test]
     fn test_utf8_incomplete_2_byte() {
         // Only first byte of a 2-byte sequence
-        assert_eq!(
-            parse_key_event(&[0xC3]),
-            KeyEvent::Unknown(vec![0xC3])
-        );
+        assert_eq!(parse_key_event(&[0xC3]), KeyEvent::Unknown(vec![0xC3]));
     }
 
     #[test]
@@ -739,10 +730,7 @@ mod tests {
     #[test]
     fn test_invalid_high_byte() {
         // 0xFF is not a valid UTF-8 start byte
-        assert_eq!(
-            parse_key_event(&[0xFF]),
-            KeyEvent::Unknown(vec![0xFF])
-        );
+        assert_eq!(parse_key_event(&[0xFF]), KeyEvent::Unknown(vec![0xFF]));
     }
 
     #[test]

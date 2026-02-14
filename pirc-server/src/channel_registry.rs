@@ -32,7 +32,9 @@ impl ChannelRegistry {
         // Use entry API to avoid TOCTOU race between get and insert.
         let entry = self.by_name.entry(name.clone());
         Arc::clone(
-            entry.or_insert_with(|| Arc::new(RwLock::new(Channel::new(name)))).value(),
+            entry
+                .or_insert_with(|| Arc::new(RwLock::new(Channel::new(name))))
+                .value(),
         )
     }
 
@@ -142,7 +144,9 @@ mod tests {
         let ch = registry.get_or_create(channel_name("#test"));
         {
             let mut ch_write = ch.write().unwrap();
-            ch_write.members.insert(nick("Alice"), MemberStatus::Operator);
+            ch_write
+                .members
+                .insert(nick("Alice"), MemberStatus::Operator);
         }
 
         // get_or_create with same name should return the same channel.

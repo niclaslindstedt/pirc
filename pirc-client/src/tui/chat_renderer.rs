@@ -48,7 +48,9 @@ const TIMESTAMP_WIDTH: usize = 8;
 
 /// Determine a deterministic color for a nick based on its hash.
 pub fn nick_color(nick: &str) -> Color {
-    let hash = nick.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
+    let hash = nick
+        .bytes()
+        .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
     NICK_COLORS[(hash as usize) % NICK_COLORS.len()]
 }
 
@@ -68,7 +70,13 @@ pub fn render_chat_area(
     nick_width: usize,
 ) {
     let default_style = Style::new();
-    buf.clear_region(region.x, region.y, region.width, region.height, default_style);
+    buf.clear_region(
+        region.x,
+        region.y,
+        region.width,
+        region.height,
+        default_style,
+    );
 
     if region.width == 0 || region.height == 0 {
         return;
@@ -301,11 +309,8 @@ fn format_line(
     }
 
     // First line: timestamp + prefix + content (up to content_width chars)
-    let first_line_chars: Vec<(char, Style)> = content_chars
-        .iter()
-        .take(content_width)
-        .cloned()
-        .collect();
+    let first_line_chars: Vec<(char, Style)> =
+        content_chars.iter().take(content_width).cloned().collect();
 
     let mut first_spans = vec![
         SpanData {
@@ -383,7 +388,13 @@ fn chars_to_spans(chars: &[(char, Style)]) -> Vec<SpanData> {
 }
 
 /// Render a single visual line into the buffer.
-fn render_visual_line(buf: &mut Buffer, start_col: u16, row: u16, max_width: usize, vline: &VisualLine) {
+fn render_visual_line(
+    buf: &mut Buffer,
+    start_col: u16,
+    row: u16,
+    max_width: usize,
+    vline: &VisualLine,
+) {
     let mut col = start_col as usize;
     let max_col = start_col as usize + max_width;
 
@@ -436,7 +447,9 @@ mod tests {
     }
 
     fn row_text(buf: &Buffer, row: u16, start: u16, width: u16) -> String {
-        (start..start + width).map(|col| buf.get(col, row).ch).collect()
+        (start..start + width)
+            .map(|col| buf.get(col, row).ch)
+            .collect()
     }
 
     fn cell_style(buf: &Buffer, col: u16, row: u16) -> Style {
@@ -456,14 +469,20 @@ mod tests {
     fn nick_color_different_nicks_vary() {
         // Different nicks should generally produce different colors
         // (not guaranteed but we check several)
-        let colors: Vec<Color> = ["alice", "bob", "charlie", "dave", "eve", "frank", "grace", "heidi"]
-            .iter()
-            .map(|n| nick_color(n))
-            .collect();
+        let colors: Vec<Color> = [
+            "alice", "bob", "charlie", "dave", "eve", "frank", "grace", "heidi",
+        ]
+        .iter()
+        .map(|n| nick_color(n))
+        .collect();
         // At least 3 distinct colors from 8 nicks
         let mut unique = colors.clone();
         unique.dedup();
-        assert!(unique.len() >= 3, "Expected at least 3 distinct colors, got {:?}", colors);
+        assert!(
+            unique.len() >= 3,
+            "Expected at least 3 distinct colors, got {:?}",
+            colors
+        );
     }
 
     #[test]
@@ -511,16 +530,30 @@ mod tests {
         assert_eq!(vlines.len(), 1);
         assert!(vlines[0].spans[1].text.contains("-->"));
         // Content should say "alice has joined"
-        let content_text: String = vlines[0].spans[2..].iter().map(|s| s.text.clone()).collect();
-        assert!(content_text.contains("alice has joined"), "Got: {}", content_text);
+        let content_text: String = vlines[0].spans[2..]
+            .iter()
+            .map(|s| s.text.clone())
+            .collect();
+        assert!(
+            content_text.contains("alice has joined"),
+            "Got: {}",
+            content_text
+        );
     }
 
     #[test]
     fn format_part_line_with_reason() {
         let line = make_line("alice", "bye!", LineType::Part);
         let vlines = format_line(&line, 8, 80, 60);
-        let content_text: String = vlines[0].spans[2..].iter().map(|s| s.text.clone()).collect();
-        assert!(content_text.contains("alice has left"), "Got: {}", content_text);
+        let content_text: String = vlines[0].spans[2..]
+            .iter()
+            .map(|s| s.text.clone())
+            .collect();
+        assert!(
+            content_text.contains("alice has left"),
+            "Got: {}",
+            content_text
+        );
         assert!(content_text.contains("(bye!)"), "Got: {}", content_text);
     }
 
@@ -528,18 +561,40 @@ mod tests {
     fn format_part_line_no_reason() {
         let line = make_line("alice", "", LineType::Part);
         let vlines = format_line(&line, 8, 80, 60);
-        let content_text: String = vlines[0].spans[2..].iter().map(|s| s.text.clone()).collect();
-        assert!(content_text.contains("alice has left"), "Got: {}", content_text);
-        assert!(!content_text.contains("("), "Should not have parens: {}", content_text);
+        let content_text: String = vlines[0].spans[2..]
+            .iter()
+            .map(|s| s.text.clone())
+            .collect();
+        assert!(
+            content_text.contains("alice has left"),
+            "Got: {}",
+            content_text
+        );
+        assert!(
+            !content_text.contains("("),
+            "Should not have parens: {}",
+            content_text
+        );
     }
 
     #[test]
     fn format_quit_line() {
         let line = make_line("bob", "connection reset", LineType::Quit);
         let vlines = format_line(&line, 8, 80, 60);
-        let content_text: String = vlines[0].spans[2..].iter().map(|s| s.text.clone()).collect();
-        assert!(content_text.contains("bob has quit"), "Got: {}", content_text);
-        assert!(content_text.contains("(connection reset)"), "Got: {}", content_text);
+        let content_text: String = vlines[0].spans[2..]
+            .iter()
+            .map(|s| s.text.clone())
+            .collect();
+        assert!(
+            content_text.contains("bob has quit"),
+            "Got: {}",
+            content_text
+        );
+        assert!(
+            content_text.contains("(connection reset)"),
+            "Got: {}",
+            content_text
+        );
     }
 
     #[test]
@@ -547,8 +602,15 @@ mod tests {
         let line = make_line("bob", "spam", LineType::Kick);
         let vlines = format_line(&line, 8, 80, 60);
         assert!(vlines[0].spans[1].text.contains("<<<"));
-        let content_text: String = vlines[0].spans[2..].iter().map(|s| s.text.clone()).collect();
-        assert!(content_text.contains("bob was kicked"), "Got: {}", content_text);
+        let content_text: String = vlines[0].spans[2..]
+            .iter()
+            .map(|s| s.text.clone())
+            .collect();
+        assert!(
+            content_text.contains("bob was kicked"),
+            "Got: {}",
+            content_text
+        );
         assert!(content_text.contains("(spam)"), "Got: {}", content_text);
     }
 
@@ -557,7 +619,10 @@ mod tests {
         let line = make_system_line("+o alice", LineType::Mode);
         let vlines = format_line(&line, 8, 80, 60);
         assert!(vlines[0].spans[1].text.contains("==="));
-        let content_text: String = vlines[0].spans[2..].iter().map(|s| s.text.clone()).collect();
+        let content_text: String = vlines[0].spans[2..]
+            .iter()
+            .map(|s| s.text.clone())
+            .collect();
         assert!(content_text.contains("+o alice"), "Got: {}", content_text);
         assert_eq!(vlines[0].spans[2].style, STYLE_MODE);
     }
@@ -566,8 +631,15 @@ mod tests {
     fn format_topic_line() {
         let line = make_system_line("Welcome to #rust!", LineType::Topic);
         let vlines = format_line(&line, 8, 80, 60);
-        let content_text: String = vlines[0].spans[2..].iter().map(|s| s.text.clone()).collect();
-        assert!(content_text.contains("topic: Welcome to #rust!"), "Got: {}", content_text);
+        let content_text: String = vlines[0].spans[2..]
+            .iter()
+            .map(|s| s.text.clone())
+            .collect();
+        assert!(
+            content_text.contains("topic: Welcome to #rust!"),
+            "Got: {}",
+            content_text
+        );
     }
 
     #[test]
@@ -594,7 +666,11 @@ mod tests {
         let long_content = "a".repeat(50);
         let line = make_line("alice", &long_content, LineType::Message);
         let vlines = format_line(&line, 8, 40, 22);
-        assert!(vlines.len() > 1, "Expected wrapping, got {} lines", vlines.len());
+        assert!(
+            vlines.len() > 1,
+            "Expected wrapping, got {} lines",
+            vlines.len()
+        );
         // First line has content_width=22 chars, rest wraps
     }
 
@@ -613,7 +689,10 @@ mod tests {
         // Second line should start with spaces (indent)
         if vlines.len() > 1 {
             let first_span = &vlines[1].spans[0];
-            assert!(first_span.text.chars().all(|c| c == ' '), "Continuation indent should be spaces");
+            assert!(
+                first_span.text.chars().all(|c| c == ' '),
+                "Continuation indent should be spaces"
+            );
         }
     }
 
@@ -640,7 +719,11 @@ mod tests {
         // Message should be on the last row (bottom-aligned)
         let last_row = 1 + 5 - 1; // row 5
         let text = row_text(&screen, last_row, 0, 60);
-        assert!(text.contains("[12:00]"), "Should have timestamp: '{}'", text);
+        assert!(
+            text.contains("[12:00]"),
+            "Should have timestamp: '{}'",
+            text
+        );
         assert!(text.contains("alice"), "Should have nick: '{}'", text);
         assert!(text.contains("hello"), "Should have content: '{}'", text);
     }
@@ -677,7 +760,11 @@ mod tests {
         // Bottom row should have the scroll indicator
         let bottom_row = 4;
         let text = row_text(&screen, bottom_row, 0, 60);
-        assert!(text.contains("more"), "Scroll indicator expected: '{}'", text);
+        assert!(
+            text.contains("more"),
+            "Scroll indicator expected: '{}'",
+            text
+        );
     }
 
     #[test]
@@ -693,7 +780,11 @@ mod tests {
         // No scroll indicator
         let bottom_row = 4;
         let text = row_text(&screen, bottom_row, 0, 60);
-        assert!(!text.contains("more"), "No scroll indicator expected: '{}'", text);
+        assert!(
+            !text.contains("more"),
+            "No scroll indicator expected: '{}'",
+            text
+        );
     }
 
     #[test]
@@ -726,7 +817,11 @@ mod tests {
 
         // Message should render within the region, not at (0,0)
         let text = row_text(&screen, 4, 5, 40);
-        assert!(text.contains("[12:00]"), "Should render in region: '{}'", text);
+        assert!(
+            text.contains("[12:00]"),
+            "Should render in region: '{}'",
+            text
+        );
         // Row 0 should be empty
         let r0 = row_text(&screen, 0, 0, 80);
         assert_eq!(r0.trim(), "");
@@ -803,7 +898,9 @@ mod tests {
             assert!(
                 text.contains(expected_prefix),
                 "LineType {:?} should have prefix '{}', got: '{}'",
-                lt, expected_prefix, text
+                lt,
+                expected_prefix,
+                text
             );
         }
     }
@@ -830,10 +927,7 @@ mod tests {
     fn chars_to_spans_two_styles() {
         let red = Style::new().fg(Color::Red);
         let blue = Style::new().fg(Color::Blue);
-        let chars = vec![
-            ('a', red), ('b', red),
-            ('c', blue), ('d', blue),
-        ];
+        let chars = vec![('a', red), ('b', red), ('c', blue), ('d', blue)];
         let spans = chars_to_spans(&chars);
         assert_eq!(spans.len(), 2);
         assert_eq!(spans[0].text, "ab");

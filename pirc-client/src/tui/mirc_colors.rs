@@ -23,17 +23,17 @@ pub fn mirc_to_color(index: u8) -> Option<Color> {
         2 => Some(Color::Blue),
         3 => Some(Color::Green),
         4 => Some(Color::Red),
-        5 => Some(Color::BrightRed),      // brown/dark red → BrightRed (maroon)
+        5 => Some(Color::BrightRed), // brown/dark red → BrightRed (maroon)
         6 => Some(Color::Magenta),
-        7 => Some(Color::Yellow),          // orange → Yellow
+        7 => Some(Color::Yellow), // orange → Yellow
         8 => Some(Color::BrightYellow),
         9 => Some(Color::BrightGreen),
         10 => Some(Color::Cyan),
         11 => Some(Color::BrightCyan),
         12 => Some(Color::BrightBlue),
         13 => Some(Color::BrightMagenta),
-        14 => Some(Color::BrightBlack),    // dark grey
-        15 => Some(Color::BrightWhite),    // light grey
+        14 => Some(Color::BrightBlack), // dark grey
+        15 => Some(Color::BrightWhite), // light grey
         _ => None,
     }
 }

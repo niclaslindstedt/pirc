@@ -38,9 +38,7 @@ const COMMAND_NAMES: &[&str] = &[
 ];
 
 /// Commands whose first argument is a channel name.
-const CHANNEL_ARG_COMMANDS: &[&str] = &[
-    "ban", "join", "kick", "mode", "names", "part", "topic",
-];
+const CHANNEL_ARG_COMMANDS: &[&str] = &["ban", "join", "kick", "mode", "names", "part", "topic"];
 
 /// Manages tab completion state across key presses.
 ///
@@ -251,9 +249,8 @@ impl TabCompleter {
         let suffix = self.completion_suffix(candidate);
 
         let completed = format!("{}{candidate}{suffix}{}", self.before, self.after);
-        let new_cursor = self.before.chars().count()
-            + candidate.chars().count()
-            + suffix.chars().count();
+        let new_cursor =
+            self.before.chars().count() + candidate.chars().count() + suffix.chars().count();
 
         (completed, new_cursor)
     }
@@ -315,10 +312,7 @@ fn determine_completion_kind(before: &str, word: &str) -> CompletionKind {
         // Count how many arguments have been completed before the current word.
         // `before` includes the command and any completed args. After stripping
         // the command name, count whitespace-separated tokens.
-        let after_cmd = rest
-            .get(cmd_name.len()..)
-            .unwrap_or("")
-            .trim_start();
+        let after_cmd = rest.get(cmd_name.len()..).unwrap_or("").trim_start();
 
         // If there are no completed args yet (after_cmd is empty or only
         // whitespace that led to the current word position) we're at arg #1.
@@ -328,9 +322,7 @@ fn determine_completion_kind(before: &str, word: &str) -> CompletionKind {
             after_cmd.split_whitespace().collect()
         };
 
-        if completed_args.is_empty()
-            && CHANNEL_ARG_COMMANDS.contains(&cmd_name.as_str())
-        {
+        if completed_args.is_empty() && CHANNEL_ARG_COMMANDS.contains(&cmd_name.as_str()) {
             return CompletionKind::Channel;
         }
     }
@@ -665,10 +657,7 @@ mod tests {
 
     #[test]
     fn kind_nick_default() {
-        assert_eq!(
-            determine_completion_kind("", "al"),
-            CompletionKind::Nick
-        );
+        assert_eq!(determine_completion_kind("", "al"), CompletionKind::Nick);
     }
 
     #[test]

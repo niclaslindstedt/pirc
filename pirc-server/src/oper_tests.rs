@@ -1,8 +1,6 @@
 use super::*;
 use crate::config::OperConfig;
-use pirc_protocol::numeric::{
-    ERR_NOOPERHOST, ERR_NOPRIVILEGES, ERR_PASSWDMISMATCH, RPL_YOUREOPER,
-};
+use pirc_protocol::numeric::{ERR_NOOPERHOST, ERR_NOPRIVILEGES, ERR_PASSWDMISMATCH, RPL_YOUREOPER};
 
 fn make_config() -> ServerConfig {
     ServerConfig::default()
@@ -50,7 +48,15 @@ fn register_user(
 ) {
     let (tx, mut rx) = make_sender();
     let mut state = PreRegistrationState::new(hostname.to_owned());
-    handle_message(&nick_msg(nick), connection_id, registry, channels, &tx, &mut state, config);
+    handle_message(
+        &nick_msg(nick),
+        connection_id,
+        registry,
+        channels,
+        &tx,
+        &mut state,
+        config,
+    );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
         connection_id,
@@ -86,10 +92,25 @@ async fn oper_success_grants_operator_mode() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = config_with_oper("admin", "secret", None);
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&oper_msg("admin", "secret"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &oper_msg("admin", "secret"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     // RPL_YOUREOPER (381)
     let reply = rx.recv().await.unwrap();
@@ -116,8 +137,15 @@ async fn oper_missing_params_returns_err() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = config_with_oper("admin", "secret", None);
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // No params
     let msg = Message::new(Command::Oper, vec![]);
@@ -132,8 +160,15 @@ async fn oper_one_param_returns_err() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = config_with_oper("admin", "secret", None);
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Only one param (name but no password)
     let msg = Message::new(Command::Oper, vec!["admin".to_owned()]);
@@ -150,8 +185,15 @@ async fn oper_wrong_password_returns_err() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = config_with_oper("admin", "secret", None);
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     handle_message(
         &oper_msg("admin", "wrongpassword"),
@@ -180,8 +222,15 @@ async fn oper_unknown_name_returns_err() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = config_with_oper("admin", "secret", None);
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     handle_message(
         &oper_msg("unknown", "secret"),
@@ -204,10 +253,25 @@ async fn oper_host_mask_matches() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = config_with_oper("admin", "secret", Some("127.0.0.*"));
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&oper_msg("admin", "secret"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &oper_msg("admin", "secret"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(RPL_YOUREOPER));
@@ -218,10 +282,25 @@ async fn oper_host_mask_mismatch_returns_err() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = config_with_oper("admin", "secret", Some("10.0.0.*"));
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&oper_msg("admin", "secret"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &oper_msg("admin", "secret"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NOOPERHOST));
@@ -238,10 +317,25 @@ async fn oper_host_mask_exact_match() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = config_with_oper("admin", "secret", Some("127.0.0.1"));
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&oper_msg("admin", "secret"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &oper_msg("admin", "secret"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(RPL_YOUREOPER));
@@ -254,10 +348,25 @@ async fn oper_no_operators_configured_returns_err() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config(); // no operators
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    handle_message(&oper_msg("admin", "secret"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &oper_msg("admin", "secret"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_PASSWDMISMATCH));
@@ -383,14 +492,31 @@ async fn kill_success_removes_target() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Admin", "admin", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Admin",
+        "admin",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     make_user_oper(&registry, "Admin");
 
-    let (_tx2, mut rx2, _state2) =
-        register_user("Victim", "victim", 2, "127.0.0.1", &registry, &channels, &config);
+    let (_tx2, mut rx2, _state2) = register_user(
+        "Victim",
+        "victim",
+        2,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
-    let kill = Message::new(Command::Kill, vec!["Victim".to_owned(), "Bad behavior".to_owned()]);
+    let kill = Message::new(
+        Command::Kill,
+        vec!["Victim".to_owned(), "Bad behavior".to_owned()],
+    );
     handle_message(&kill, 1, &registry, &channels, &tx, &mut state, &config);
 
     // Admin should not get any error.
@@ -415,8 +541,15 @@ async fn kill_non_oper_returns_err() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let (_tx2, _rx2, _state2) =
         register_user("Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config);
@@ -438,8 +571,15 @@ async fn kill_missing_params_returns_err() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Admin", "admin", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Admin",
+        "admin",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     make_user_oper(&registry, "Admin");
 
     let kill = Message::new(Command::Kill, vec![]);
@@ -455,8 +595,15 @@ async fn kill_unknown_target_returns_err() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Admin", "admin", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Admin",
+        "admin",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     make_user_oper(&registry, "Admin");
 
     let kill = Message::new(Command::Kill, vec!["Ghost".to_owned(), "reason".to_owned()]);
@@ -474,8 +621,15 @@ async fn die_success_returns_shutdown() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Admin", "admin", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Admin",
+        "admin",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     make_user_oper(&registry, "Admin");
 
     // Register another user to verify they receive the notice.
@@ -505,8 +659,15 @@ async fn die_non_oper_returns_err() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let die = Message::new(Command::Die, vec![]);
     let result = handle_message(&die, 1, &registry, &channels, &tx, &mut state, &config);
@@ -525,8 +686,15 @@ async fn restart_success_returns_shutdown() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Admin", "admin", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Admin",
+        "admin",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     make_user_oper(&registry, "Admin");
 
     let (_tx2, mut rx2, _state2) =
@@ -555,8 +723,15 @@ async fn restart_non_oper_returns_err() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let restart = Message::new(Command::Restart, vec![]);
     let result = handle_message(&restart, 1, &registry, &channels, &tx, &mut state, &config);
@@ -576,18 +751,39 @@ async fn wallops_success_sends_to_opers() {
     let config = make_config();
 
     // Register an operator.
-    let (tx, mut rx, mut state) =
-        register_user("Admin", "admin", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Admin",
+        "admin",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     make_user_oper(&registry, "Admin");
 
     // Register another operator.
-    let (_tx2, mut rx2, _state2) =
-        register_user("Oper2", "oper2", 2, "127.0.0.1", &registry, &channels, &config);
+    let (_tx2, mut rx2, _state2) = register_user(
+        "Oper2",
+        "oper2",
+        2,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     make_user_oper(&registry, "Oper2");
 
     // Register a non-operator.
-    let (_tx3, mut rx3, _state3) =
-        register_user("Regular", "regular", 3, "127.0.0.1", &registry, &channels, &config);
+    let (_tx3, mut rx3, _state3) = register_user(
+        "Regular",
+        "regular",
+        3,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let wallops = Message::new(Command::Wallops, vec!["Server maintenance soon".to_owned()]);
     handle_message(&wallops, 1, &registry, &channels, &tx, &mut state, &config);
@@ -614,8 +810,15 @@ async fn wallops_non_oper_returns_err() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let wallops = Message::new(Command::Wallops, vec!["Hello".to_owned()]);
     handle_message(&wallops, 1, &registry, &channels, &tx, &mut state, &config);
@@ -630,8 +833,15 @@ async fn wallops_missing_params_returns_err() {
     let channels = make_channels();
     let config = make_config();
 
-    let (tx, mut rx, mut state) =
-        register_user("Admin", "admin", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Admin",
+        "admin",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     make_user_oper(&registry, "Admin");
 
     let wallops = Message::new(Command::Wallops, vec![]);
@@ -650,15 +860,25 @@ async fn motd_command_returns_motd() {
     let mut config = make_config();
     config.motd.text = Some("Welcome to pirc!".to_owned());
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let motd = Message::new(Command::Motd, vec![]);
     handle_message(&motd, 1, &registry, &channels, &tx, &mut state, &config);
 
     // RPL_MOTDSTART
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_MOTDSTART));
+    assert_eq!(
+        reply.numeric_code(),
+        Some(pirc_protocol::numeric::RPL_MOTDSTART)
+    );
 
     // RPL_MOTD
     let reply = rx.recv().await.unwrap();
@@ -667,7 +887,10 @@ async fn motd_command_returns_motd() {
 
     // RPL_ENDOFMOTD
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::RPL_ENDOFMOTD));
+    assert_eq!(
+        reply.numeric_code(),
+        Some(pirc_protocol::numeric::RPL_ENDOFMOTD)
+    );
 }
 
 #[tokio::test]
@@ -676,8 +899,15 @@ async fn motd_command_no_motd_returns_err() {
     let channels = make_channels();
     let config = make_config(); // No MOTD configured
 
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let motd = Message::new(Command::Motd, vec![]);
     handle_message(&motd, 1, &registry, &channels, &tx, &mut state, &config);

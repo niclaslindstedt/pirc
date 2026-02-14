@@ -590,8 +590,12 @@ mod tests {
         assert_eq!(dirty.len(), 2);
 
         // Check that positions are correct
-        assert!(dirty.iter().any(|&(c, r, cell)| c == 3 && r == 2 && cell.ch == 'A'));
-        assert!(dirty.iter().any(|&(c, r, cell)| c == 7 && r == 4 && cell.ch == 'B'));
+        assert!(dirty
+            .iter()
+            .any(|&(c, r, cell)| c == 3 && r == 2 && cell.ch == 'A'));
+        assert!(dirty
+            .iter()
+            .any(|&(c, r, cell)| c == 7 && r == 4 && cell.ch == 'B'));
     }
 
     #[test]

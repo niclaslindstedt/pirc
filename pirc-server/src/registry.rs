@@ -80,7 +80,9 @@ impl UserRegistry {
     /// Look up a session by connection ID.
     pub fn get_by_connection(&self, connection_id: u64) -> Option<Arc<RwLock<UserSession>>> {
         let nick = self.by_connection.get(&connection_id)?;
-        self.by_nick.get(nick.value()).map(|r| Arc::clone(r.value()))
+        self.by_nick
+            .get(nick.value())
+            .map(|r| Arc::clone(r.value()))
     }
 
     /// Check whether a nickname is already in use without locking any session.

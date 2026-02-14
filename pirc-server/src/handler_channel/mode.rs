@@ -237,7 +237,9 @@ pub fn handle_channel_mode(
                     }
                 } else {
                     if let Some(&mask) = mode_params.get(param_idx) {
-                        channel.ban_list.retain(|b| !b.mask.eq_ignore_ascii_case(mask));
+                        channel
+                            .ban_list
+                            .retain(|b| !b.mask.eq_ignore_ascii_case(mask));
                         if last_dir != Some(adding) {
                             applied_modes.push('-');
                             last_dir = Some(adding);

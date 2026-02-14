@@ -14,7 +14,11 @@ use pirc_server::registry::UserRegistry;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
-async fn start_server() -> (SocketAddr, pirc_network::ShutdownController, Arc<UserRegistry>) {
+async fn start_server() -> (
+    SocketAddr,
+    pirc_network::ShutdownController,
+    Arc<UserRegistry>,
+) {
     let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let listener = Listener::bind(addr).await.unwrap();
     let local_addr = listener.local_addr().unwrap();
@@ -36,8 +40,15 @@ async fn start_server() -> (SocketAddr, pirc_network::ShutdownController, Arc<Us
                     let channels = Arc::clone(&conn_channels);
                     let config = Arc::clone(&config);
                     tokio::spawn(async move {
-                        handle_connection(connection, peer_addr, conn_shutdown, registry, channels, config)
-                            .await;
+                        handle_connection(
+                            connection,
+                            peer_addr,
+                            conn_shutdown,
+                            registry,
+                            channels,
+                            config,
+                        )
+                        .await;
                     });
                 }
                 Ok(None) => break,
@@ -64,8 +75,9 @@ async fn handle_connection(
     loop {
         match connection.recv_with_shutdown(&mut shutdown).await {
             Ok(Some(msg)) => {
-                let result =
-                    handler::handle_message(&msg, conn_id, &registry, &channels, &tx, &mut state, &config);
+                let result = handler::handle_message(
+                    &msg, conn_id, &registry, &channels, &tx, &mut state, &config,
+                );
                 while let Ok(out_msg) = rx.try_recv() {
                     if connection.send(out_msg).await.is_err() {
                         return;

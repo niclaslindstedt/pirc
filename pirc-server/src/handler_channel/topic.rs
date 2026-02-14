@@ -96,12 +96,7 @@ pub fn handle_topic(
         let channel = channel_arc.read().expect("channel lock poisoned");
         match &channel.topic {
             Some((text, who, timestamp)) => {
-                send_numeric(
-                    sender,
-                    RPL_TOPIC,
-                    &[&nick_str, chan_name.as_ref()],
-                    text,
-                );
+                send_numeric(sender, RPL_TOPIC, &[&nick_str, chan_name.as_ref()], text);
                 send_numeric(
                     sender,
                     RPL_TOPICWHOTIME,

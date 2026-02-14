@@ -343,10 +343,7 @@ mod tests {
             reply_name(ERR_ALREADYREGISTERED),
             Some("ERR_ALREADYREGISTERED")
         );
-        assert_eq!(
-            reply_name(ERR_PASSWDMISMATCH),
-            Some("ERR_PASSWDMISMATCH")
-        );
+        assert_eq!(reply_name(ERR_PASSWDMISMATCH), Some("ERR_PASSWDMISMATCH"));
         assert_eq!(
             reply_name(ERR_UMODEUNKNOWNFLAG),
             Some("ERR_UMODEUNKNOWNFLAG")
@@ -388,10 +385,7 @@ mod tests {
             reply_name(ERR_CHANOPRIVSNEEDED),
             Some("ERR_CHANOPRIVSNEEDED")
         );
-        assert_eq!(
-            reply_name(ERR_CANTKILLSERVER),
-            Some("ERR_CANTKILLSERVER")
-        );
+        assert_eq!(reply_name(ERR_CANTKILLSERVER), Some("ERR_CANTKILLSERVER"));
         assert_eq!(reply_name(ERR_NOOPERHOST), Some("ERR_NOOPERHOST"));
     }
 

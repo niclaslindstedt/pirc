@@ -209,9 +209,10 @@ impl ClientCommand {
                 };
                 Some(Message::new(Command::List, params))
             }
-            ClientCommand::Invite(nick, channel) => {
-                Some(Message::new(Command::Invite, vec![nick.clone(), channel.clone()]))
-            }
+            ClientCommand::Invite(nick, channel) => Some(Message::new(
+                Command::Invite,
+                vec![nick.clone(), channel.clone()],
+            )),
             ClientCommand::Names(channel) => {
                 let params = match channel {
                     Some(c) => vec![c.clone()],
@@ -221,40 +222,44 @@ impl ClientCommand {
             }
 
             // ── Messaging ──────────────────────────────────────
-            ClientCommand::Msg(target, message) => {
-                Some(Message::new(Command::Privmsg, vec![target.clone(), message.clone()]))
-            }
+            ClientCommand::Msg(target, message) => Some(Message::new(
+                Command::Privmsg,
+                vec![target.clone(), message.clone()],
+            )),
             ClientCommand::Query(nick, message) => {
                 // Query with message → send PRIVMSG to nick.
                 // Query without message → client-local (open query window).
-                message.as_ref().map(|msg| {
-                    Message::new(Command::Privmsg, vec![nick.clone(), msg.clone()])
-                })
+                message
+                    .as_ref()
+                    .map(|msg| Message::new(Command::Privmsg, vec![nick.clone(), msg.clone()]))
             }
             ClientCommand::Me(action) => {
                 // /me requires an active context (channel or query target).
                 let target = context?;
                 let ctcp_body = format!("\x01ACTION {action}\x01");
-                Some(Message::new(Command::Privmsg, vec![target.to_owned(), ctcp_body]))
+                Some(Message::new(
+                    Command::Privmsg,
+                    vec![target.to_owned(), ctcp_body],
+                ))
             }
-            ClientCommand::Notice(target, message) => {
-                Some(Message::new(Command::Notice, vec![target.clone(), message.clone()]))
-            }
+            ClientCommand::Notice(target, message) => Some(Message::new(
+                Command::Notice,
+                vec![target.clone(), message.clone()],
+            )),
             ClientCommand::Ctcp(target, command, args) => {
                 let ctcp_body = match args {
                     Some(a) => format!("\x01{command} {a}\x01"),
                     None => format!("\x01{command}\x01"),
                 };
-                Some(Message::new(Command::Privmsg, vec![target.clone(), ctcp_body]))
+                Some(Message::new(
+                    Command::Privmsg,
+                    vec![target.clone(), ctcp_body],
+                ))
             }
 
             // ── User ───────────────────────────────────────────
-            ClientCommand::Nick(nick) => {
-                Some(Message::new(Command::Nick, vec![nick.clone()]))
-            }
-            ClientCommand::Whois(nick) => {
-                Some(Message::new(Command::Whois, vec![nick.clone()]))
-            }
+            ClientCommand::Nick(nick) => Some(Message::new(Command::Nick, vec![nick.clone()])),
+            ClientCommand::Whois(nick) => Some(Message::new(Command::Whois, vec![nick.clone()])),
             ClientCommand::Away(reason) => {
                 let params = match reason {
                     Some(r) => vec![r.clone()],
@@ -278,9 +283,10 @@ impl ClientCommand {
                 }
                 Some(Message::new(Command::Kick, params))
             }
-            ClientCommand::Ban(channel, mask) => {
-                Some(Message::new(Command::Ban, vec![channel.clone(), mask.clone()]))
-            }
+            ClientCommand::Ban(channel, mask) => Some(Message::new(
+                Command::Ban,
+                vec![channel.clone(), mask.clone()],
+            )),
             ClientCommand::Mode(target, mode_string) => {
                 let mut params = vec![target.clone()];
                 if let Some(m) = mode_string {
@@ -290,12 +296,14 @@ impl ClientCommand {
             }
 
             // ── Operator ───────────────────────────────────────
-            ClientCommand::Oper(name, password) => {
-                Some(Message::new(Command::Oper, vec![name.clone(), password.clone()]))
-            }
-            ClientCommand::Kill(nick, reason) => {
-                Some(Message::new(Command::Kill, vec![nick.clone(), reason.clone()]))
-            }
+            ClientCommand::Oper(name, password) => Some(Message::new(
+                Command::Oper,
+                vec![name.clone(), password.clone()],
+            )),
+            ClientCommand::Kill(nick, reason) => Some(Message::new(
+                Command::Kill,
+                vec![nick.clone(), reason.clone()],
+            )),
             ClientCommand::Die(reason) => {
                 let params = match reason {
                     Some(r) => vec![r.clone()],
@@ -330,11 +338,17 @@ impl ClientCommand {
             }
             ClientCommand::InviteKey(args) => {
                 // invite-key maps to PIRC KEYEXCHANGE with args.
-                Some(Message::new(Command::Pirc(PircSubcommand::KeyExchange), args.clone()))
+                Some(Message::new(
+                    Command::Pirc(PircSubcommand::KeyExchange),
+                    args.clone(),
+                ))
             }
             ClientCommand::Network(args) => {
                 // /network maps to PIRC CAP with args.
-                Some(Message::new(Command::Pirc(PircSubcommand::Cap), args.clone()))
+                Some(Message::new(
+                    Command::Pirc(PircSubcommand::Cap),
+                    args.clone(),
+                ))
             }
 
             // ── Connection ──────────────────────────────────────

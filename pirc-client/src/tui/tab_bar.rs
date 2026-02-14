@@ -92,7 +92,11 @@ fn compute_visible_range(tabs: &[TabInfo], available: usize, active_idx: usize) 
     // Width of current visible range
     let width_of_range = |s: usize, e: usize| -> usize {
         let content: usize = tabs[s..e].iter().map(|t| t.display_text().len()).sum();
-        let seps = if e > s + 1 { (e - s - 1) * TAB_SEPARATOR.len() } else { 0 };
+        let seps = if e > s + 1 {
+            (e - s - 1) * TAB_SEPARATOR.len()
+        } else {
+            0
+        };
         let left_indicator = if s > 0 { OVERFLOW_LEFT.len() } else { 0 };
         let right_indicator = if e < n { OVERFLOW_RIGHT.len() } else { 0 };
         content + seps + left_indicator + right_indicator
@@ -135,7 +139,13 @@ fn compute_visible_range(tabs: &[TabInfo], available: usize, active_idx: usize) 
 /// indicators when tabs are hidden.
 pub fn render_tab_bar(buf: &mut Buffer, region: &Rect, tabs: &[TabInfo]) {
     // Clear the entire region first
-    buf.clear_region(region.x, region.y, region.width, region.height, STYLE_TAB_NORMAL);
+    buf.clear_region(
+        region.x,
+        region.y,
+        region.width,
+        region.height,
+        STYLE_TAB_NORMAL,
+    );
 
     if tabs.is_empty() || region.width == 0 || region.height == 0 {
         return;
@@ -156,13 +166,27 @@ pub fn render_tab_bar(buf: &mut Buffer, region: &Rect, tabs: &[TabInfo]) {
 
     // Draw left overflow indicator
     if show_left {
-        write_bounded(buf, &mut col, max_col, row, OVERFLOW_LEFT, STYLE_TAB_SEPARATOR);
+        write_bounded(
+            buf,
+            &mut col,
+            max_col,
+            row,
+            OVERFLOW_LEFT,
+            STYLE_TAB_SEPARATOR,
+        );
     }
 
     // Draw visible tabs
     for (i, tab) in tabs[start..end].iter().enumerate() {
         if i > 0 {
-            write_bounded(buf, &mut col, max_col, row, TAB_SEPARATOR, STYLE_TAB_SEPARATOR);
+            write_bounded(
+                buf,
+                &mut col,
+                max_col,
+                row,
+                TAB_SEPARATOR,
+                STYLE_TAB_SEPARATOR,
+            );
         }
         let text = tab.display_text();
         let style = tab.style();
@@ -171,13 +195,27 @@ pub fn render_tab_bar(buf: &mut Buffer, region: &Rect, tabs: &[TabInfo]) {
 
     // Draw right overflow indicator
     if show_right {
-        write_bounded(buf, &mut col, max_col, row, OVERFLOW_RIGHT, STYLE_TAB_SEPARATOR);
+        write_bounded(
+            buf,
+            &mut col,
+            max_col,
+            row,
+            OVERFLOW_RIGHT,
+            STYLE_TAB_SEPARATOR,
+        );
     }
 }
 
 /// Write text into the buffer at the current column, advancing `col`.
 /// Characters beyond `max_col` are silently dropped.
-fn write_bounded(buf: &mut Buffer, col: &mut usize, max_col: usize, row: u16, text: &str, style: Style) {
+fn write_bounded(
+    buf: &mut Buffer,
+    col: &mut usize,
+    max_col: usize,
+    row: u16,
+    text: &str,
+    style: Style,
+) {
     for ch in text.chars() {
         if *col >= max_col {
             break;
@@ -304,8 +342,18 @@ mod tests {
     #[test]
     fn total_width_two_tabs() {
         let tabs = [
-            TabInfo { label: "Status".into(), is_active: true, unread_count: 0, has_activity: false },
-            TabInfo { label: "#a".into(), is_active: false, unread_count: 0, has_activity: false },
+            TabInfo {
+                label: "Status".into(),
+                is_active: true,
+                unread_count: 0,
+                has_activity: false,
+            },
+            TabInfo {
+                label: "#a".into(),
+                is_active: false,
+                unread_count: 0,
+                has_activity: false,
+            },
         ];
         // "Status" + " | " + "#a" = 6 + 3 + 2 = 11
         assert_eq!(total_tabs_width(&tabs), 11);
@@ -313,9 +361,12 @@ mod tests {
 
     #[test]
     fn total_width_with_unread() {
-        let tabs = [
-            TabInfo { label: "#a".into(), is_active: false, unread_count: 3, has_activity: false },
-        ];
+        let tabs = [TabInfo {
+            label: "#a".into(),
+            is_active: false,
+            unread_count: 3,
+            has_activity: false,
+        }];
         // "#a [3]" = 6
         assert_eq!(total_tabs_width(&tabs), 6);
     }
@@ -325,8 +376,18 @@ mod tests {
     #[test]
     fn visible_range_all_fit() {
         let tabs = vec![
-            TabInfo { label: "Status".into(), is_active: true, unread_count: 0, has_activity: false },
-            TabInfo { label: "#a".into(), is_active: false, unread_count: 0, has_activity: false },
+            TabInfo {
+                label: "Status".into(),
+                is_active: true,
+                unread_count: 0,
+                has_activity: false,
+            },
+            TabInfo {
+                label: "#a".into(),
+                is_active: false,
+                unread_count: 0,
+                has_activity: false,
+            },
         ];
         let (start, end) = compute_visible_range(&tabs, 80, 0);
         assert_eq!((start, end), (0, 2));
@@ -419,8 +480,18 @@ mod tests {
         let mut buf = Buffer::new(80, 1);
         let region = Rect::new(0, 0, 80, 1);
         let tabs = [
-            TabInfo { label: "Status".into(), is_active: true, unread_count: 0, has_activity: false },
-            TabInfo { label: "#rust".into(), is_active: false, unread_count: 0, has_activity: false },
+            TabInfo {
+                label: "Status".into(),
+                is_active: true,
+                unread_count: 0,
+                has_activity: false,
+            },
+            TabInfo {
+                label: "#rust".into(),
+                is_active: false,
+                unread_count: 0,
+                has_activity: false,
+            },
         ];
         render_tab_bar(&mut buf, &region, &tabs);
 
@@ -440,8 +511,18 @@ mod tests {
         let mut buf = Buffer::new(80, 1);
         let region = Rect::new(0, 0, 80, 1);
         let tabs = [
-            TabInfo { label: "Status".into(), is_active: true, unread_count: 0, has_activity: false },
-            TabInfo { label: "#chat".into(), is_active: false, unread_count: 3, has_activity: false },
+            TabInfo {
+                label: "Status".into(),
+                is_active: true,
+                unread_count: 0,
+                has_activity: false,
+            },
+            TabInfo {
+                label: "#chat".into(),
+                is_active: false,
+                unread_count: 3,
+                has_activity: false,
+            },
         ];
         render_tab_bar(&mut buf, &region, &tabs);
 
@@ -458,8 +539,18 @@ mod tests {
         let mut buf = Buffer::new(80, 1);
         let region = Rect::new(0, 0, 80, 1);
         let tabs = [
-            TabInfo { label: "Status".into(), is_active: true, unread_count: 0, has_activity: false },
-            TabInfo { label: "#chat".into(), is_active: false, unread_count: 0, has_activity: true },
+            TabInfo {
+                label: "Status".into(),
+                is_active: true,
+                unread_count: 0,
+                has_activity: false,
+            },
+            TabInfo {
+                label: "#chat".into(),
+                is_active: false,
+                unread_count: 0,
+                has_activity: true,
+            },
         ];
         render_tab_bar(&mut buf, &region, &tabs);
 
@@ -482,7 +573,7 @@ mod tests {
         assert_eq!(buf.get(5, 2).ch, 'S');
         assert_eq!(buf.get(10, 2).ch, 's'); // last char of "Status"
         assert_eq!(buf.get(11, 2).ch, ' '); // after "Status"
-        // Nothing should be written to row 0
+                                            // Nothing should be written to row 0
         assert_eq!(buf.get(5, 0).ch, ' ');
         assert_eq!(cell_style(&buf, 5, 0), Style::new());
     }
@@ -504,11 +595,19 @@ mod tests {
 
         let text: String = row_text(&buf, 0, 0, 20);
         // Active tab (ch3) should be visible
-        assert!(text.contains("ch3"), "Active tab should be visible: '{}'", text);
+        assert!(
+            text.contains("ch3"),
+            "Active tab should be visible: '{}'",
+            text
+        );
         // Should have overflow indicator(s)
         let has_left = text.starts_with("< ");
         let has_right = text.trim_end().ends_with(">");
-        assert!(has_left || has_right, "Should have overflow indicators: '{}'", text);
+        assert!(
+            has_left || has_right,
+            "Should have overflow indicators: '{}'",
+            text
+        );
     }
 
     #[test]
@@ -527,8 +626,16 @@ mod tests {
 
         let text = row_text(&buf, 0, 0, 20);
         // Active tab chan0 should be at the beginning, no left indicator
-        assert!(text.starts_with("chan0"), "Should start with active tab: '{}'", text);
-        assert!(text.trim_end().ends_with(">"), "Should have right overflow: '{}'", text);
+        assert!(
+            text.starts_with("chan0"),
+            "Should start with active tab: '{}'",
+            text
+        );
+        assert!(
+            text.trim_end().ends_with(">"),
+            "Should have right overflow: '{}'",
+            text
+        );
     }
 
     #[test]
@@ -546,8 +653,16 @@ mod tests {
         render_tab_bar(&mut buf, &region, &tabs);
 
         let text = row_text(&buf, 0, 0, 20);
-        assert!(text.contains("chan9"), "Active tab should be visible: '{}'", text);
-        assert!(text.starts_with("< "), "Should have left overflow: '{}'", text);
+        assert!(
+            text.contains("chan9"),
+            "Active tab should be visible: '{}'",
+            text
+        );
+        assert!(
+            text.starts_with("< "),
+            "Should have left overflow: '{}'",
+            text
+        );
     }
 
     #[test]
@@ -579,12 +694,16 @@ mod tests {
         let mut buf = Buffer::new(80, 1);
         let region = Rect::new(0, 0, 0, 1);
         // Should not panic
-        render_tab_bar(&mut buf, &region, &[TabInfo {
-            label: "Status".into(),
-            is_active: true,
-            unread_count: 0,
-            has_activity: false,
-        }]);
+        render_tab_bar(
+            &mut buf,
+            &region,
+            &[TabInfo {
+                label: "Status".into(),
+                is_active: true,
+                unread_count: 0,
+                has_activity: false,
+            }],
+        );
     }
 
     #[test]
@@ -592,12 +711,16 @@ mod tests {
         let mut buf = Buffer::new(80, 1);
         let region = Rect::new(0, 0, 80, 0);
         // Should not panic
-        render_tab_bar(&mut buf, &region, &[TabInfo {
-            label: "Status".into(),
-            is_active: true,
-            unread_count: 0,
-            has_activity: false,
-        }]);
+        render_tab_bar(
+            &mut buf,
+            &region,
+            &[TabInfo {
+                label: "Status".into(),
+                is_active: true,
+                unread_count: 0,
+                has_activity: false,
+            }],
+        );
     }
 
     #[test]
@@ -623,9 +746,24 @@ mod tests {
         let mut buf = Buffer::new(80, 1);
         let region = Rect::new(0, 0, 80, 1);
         let tabs = [
-            TabInfo { label: "Status".into(), is_active: false, unread_count: 0, has_activity: false },
-            TabInfo { label: "#general".into(), is_active: true, unread_count: 0, has_activity: false },
-            TabInfo { label: "#rust".into(), is_active: false, unread_count: 2, has_activity: false },
+            TabInfo {
+                label: "Status".into(),
+                is_active: false,
+                unread_count: 0,
+                has_activity: false,
+            },
+            TabInfo {
+                label: "#general".into(),
+                is_active: true,
+                unread_count: 0,
+                has_activity: false,
+            },
+            TabInfo {
+                label: "#rust".into(),
+                is_active: false,
+                unread_count: 2,
+                has_activity: false,
+            },
         ];
         render_tab_bar(&mut buf, &region, &tabs);
 
@@ -640,8 +778,18 @@ mod tests {
         let mut buf = Buffer::new(80, 1);
         let region = Rect::new(0, 0, 80, 1);
         let tabs = [
-            TabInfo { label: "Status".into(), is_active: false, unread_count: 0, has_activity: false },
-            TabInfo { label: "#a".into(), is_active: false, unread_count: 0, has_activity: false },
+            TabInfo {
+                label: "Status".into(),
+                is_active: false,
+                unread_count: 0,
+                has_activity: false,
+            },
+            TabInfo {
+                label: "#a".into(),
+                is_active: false,
+                unread_count: 0,
+                has_activity: false,
+            },
         ];
         render_tab_bar(&mut buf, &region, &tabs);
 
@@ -657,9 +805,24 @@ mod tests {
         let mut buf = Buffer::new(12, 1);
         let region = Rect::new(0, 0, 12, 1);
         let tabs = [
-            TabInfo { label: "ab".into(), is_active: true, unread_count: 0, has_activity: false },
-            TabInfo { label: "cd".into(), is_active: false, unread_count: 0, has_activity: false },
-            TabInfo { label: "ef".into(), is_active: false, unread_count: 0, has_activity: false },
+            TabInfo {
+                label: "ab".into(),
+                is_active: true,
+                unread_count: 0,
+                has_activity: false,
+            },
+            TabInfo {
+                label: "cd".into(),
+                is_active: false,
+                unread_count: 0,
+                has_activity: false,
+            },
+            TabInfo {
+                label: "ef".into(),
+                is_active: false,
+                unread_count: 0,
+                has_activity: false,
+            },
         ];
         render_tab_bar(&mut buf, &region, &tabs);
 

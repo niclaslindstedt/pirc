@@ -40,17 +40,11 @@ fn join_msg(channels: &str) -> Message {
 }
 
 fn privmsg(target: &str, text: &str) -> Message {
-    Message::new(
-        Command::Privmsg,
-        vec![target.to_owned(), text.to_owned()],
-    )
+    Message::new(Command::Privmsg, vec![target.to_owned(), text.to_owned()])
 }
 
 fn notice(target: &str, text: &str) -> Message {
-    Message::new(
-        Command::Notice,
-        vec![target.to_owned(), text.to_owned()],
-    )
+    Message::new(Command::Notice, vec![target.to_owned(), text.to_owned()])
 }
 
 fn away_msg(text: &str) -> Message {
@@ -104,17 +98,55 @@ async fn privmsg_channel_delivered_to_members_except_sender() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
-    let (tx3, mut rx3, mut state3) =
-        register_user("Charlie", "charlie", 3, "127.0.0.3", &registry, &channels, &config);
+    let (tx3, mut rx3, mut state3) = register_user(
+        "Charlie",
+        "charlie",
+        3,
+        "127.0.0.3",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // All three join #general.
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#general"), 2, &registry, &channels, &tx2, &mut state2, &config);
-    handle_message(&join_msg("#general"), 3, &registry, &channels, &tx3, &mut state3, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        3,
+        &registry,
+        &channels,
+        &tx3,
+        &mut state3,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
     while rx3.try_recv().is_ok() {}
@@ -157,13 +189,36 @@ async fn notice_channel_delivered_to_members_except_sender() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
-    handle_message(&join_msg("#general"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#general"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#general"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#general"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -195,13 +250,36 @@ async fn privmsg_moderated_channel_normal_user_blocked() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
-    handle_message(&join_msg("#moderated"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#moderated"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#moderated"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#moderated"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -236,13 +314,36 @@ async fn privmsg_moderated_channel_voiced_user_allowed() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
-    handle_message(&join_msg("#moderated"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#moderated"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#moderated"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#moderated"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -252,7 +353,9 @@ async fn privmsg_moderated_channel_voiced_user_allowed() {
         let channel_arc = channels.get(&chan_name).unwrap();
         let mut channel = channel_arc.write().unwrap();
         channel.modes.insert(ChannelMode::Moderated);
-        channel.members.insert(Nickname::new("Bob").unwrap(), MemberStatus::Voiced);
+        channel
+            .members
+            .insert(Nickname::new("Bob").unwrap(), MemberStatus::Voiced);
     }
 
     // Bob (voiced) sends a message — should succeed.
@@ -277,13 +380,36 @@ async fn privmsg_moderated_channel_operator_allowed() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
-    handle_message(&join_msg("#moderated"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#moderated"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#moderated"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#moderated"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -319,13 +445,28 @@ async fn privmsg_no_external_messages_blocks_non_member() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Alice joins, Bob does NOT join.
-    handle_message(&join_msg("#private"), 1, &registry, &channels, &tx1, &mut state1, &config);
+    handle_message(
+        &join_msg("#private"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
 
     // Set +n on channel.
@@ -359,13 +500,36 @@ async fn privmsg_no_external_messages_allows_member() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
-    handle_message(&join_msg("#private"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#private"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#private"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#private"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 
@@ -399,13 +563,28 @@ async fn privmsg_without_no_external_allows_non_member() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, _rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
     // Alice joins, Bob does NOT join. Channel has NO +n mode.
-    handle_message(&join_msg("#open"), 1, &registry, &channels, &tx1, &mut state1, &config);
+    handle_message(
+        &join_msg("#open"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
 
     // Bob (not a member) sends to a channel without +n — should succeed.
@@ -432,8 +611,15 @@ async fn privmsg_user_to_user_delivered() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (_tx2, mut rx2, _state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
@@ -467,8 +653,15 @@ async fn notice_user_to_user_delivered() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (_tx2, mut rx2, _state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
@@ -500,8 +693,15 @@ async fn privmsg_nonexistent_user_returns_err_nosuchnick() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     handle_message(
         &privmsg("Nobody", "Hello?"),
@@ -522,8 +722,15 @@ async fn notice_nonexistent_user_returns_err_nosuchnick() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     handle_message(
         &notice("Nobody", "Notice?"),
@@ -546,8 +753,15 @@ async fn privmsg_nonexistent_channel_returns_err_cannotsendtochan() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     handle_message(
         &privmsg("#nonexistent", "Hello?"),
@@ -570,8 +784,15 @@ async fn privmsg_no_params_returns_err_needmoreparams() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let msg = Message::new(Command::Privmsg, vec![]);
     handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
@@ -585,8 +806,15 @@ async fn privmsg_one_param_returns_err_needmoreparams() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let msg = Message::new(Command::Privmsg, vec!["Bob".to_owned()]);
     handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
@@ -602,8 +830,15 @@ async fn privmsg_to_away_user_sends_rpl_away() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
@@ -648,8 +883,15 @@ async fn notice_to_away_user_does_not_send_rpl_away() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
 
@@ -692,16 +934,46 @@ async fn privmsg_moderated_and_no_external_both_enforced() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx1, mut rx1, mut state1) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx1, mut rx1, mut state1) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
     let (tx2, mut rx2, mut state2) =
         register_user("Bob", "bob", 2, "127.0.0.2", &registry, &channels, &config);
-    let (tx3, mut rx3, mut state3) =
-        register_user("Charlie", "charlie", 3, "127.0.0.3", &registry, &channels, &config);
+    let (tx3, mut rx3, mut state3) = register_user(
+        "Charlie",
+        "charlie",
+        3,
+        "127.0.0.3",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Alice and Bob join.
-    handle_message(&join_msg("#strict"), 1, &registry, &channels, &tx1, &mut state1, &config);
-    handle_message(&join_msg("#strict"), 2, &registry, &channels, &tx2, &mut state2, &config);
+    handle_message(
+        &join_msg("#strict"),
+        1,
+        &registry,
+        &channels,
+        &tx1,
+        &mut state1,
+        &config,
+    );
+    handle_message(
+        &join_msg("#strict"),
+        2,
+        &registry,
+        &channels,
+        &tx2,
+        &mut state2,
+        &config,
+    );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
 

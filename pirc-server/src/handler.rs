@@ -1,13 +1,13 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use pirc_common::{Nickname, UserError};
 use pirc_common::UserMode;
+use pirc_common::{Nickname, UserError};
 use pirc_protocol::numeric::{
-    ERR_ALREADYREGISTERED, ERR_ERRONEUSNICKNAME, ERR_NEEDMOREPARAMS, ERR_NICKNAMEINUSE,
-    ERR_NOMOTD, ERR_NONICKNAMEGIVEN, ERR_NOSUCHNICK, ERR_UMODEUNKNOWNFLAG, ERR_USERSDONTMATCH,
-    RPL_AWAY, RPL_CREATED, RPL_ENDOFWHOIS, RPL_NOWAWAY, RPL_UMODEIS, RPL_UNAWAY, RPL_WELCOME,
-    RPL_WHOISOPERATOR, RPL_WHOISIDLE, RPL_WHOISSERVER, RPL_WHOISUSER, RPL_YOURHOST,
+    ERR_ALREADYREGISTERED, ERR_ERRONEUSNICKNAME, ERR_NEEDMOREPARAMS, ERR_NICKNAMEINUSE, ERR_NOMOTD,
+    ERR_NONICKNAMEGIVEN, ERR_NOSUCHNICK, ERR_UMODEUNKNOWNFLAG, ERR_USERSDONTMATCH, RPL_AWAY,
+    RPL_CREATED, RPL_ENDOFWHOIS, RPL_NOWAWAY, RPL_UMODEIS, RPL_UNAWAY, RPL_WELCOME, RPL_WHOISIDLE,
+    RPL_WHOISOPERATOR, RPL_WHOISSERVER, RPL_WHOISUSER, RPL_YOURHOST,
 };
 use pirc_protocol::{Command, Message, Prefix};
 use tokio::sync::mpsc;
@@ -16,7 +16,11 @@ use tracing::warn;
 
 use crate::channel_registry::ChannelRegistry;
 use crate::config::ServerConfig;
-use crate::handler_channel::{handle_ban, handle_channel_mode, handle_invite, handle_join, handle_kick, handle_list, handle_names, handle_notice, handle_part, handle_privmsg, handle_topic, remove_user_from_all_channels};
+use crate::handler_channel::{
+    handle_ban, handle_channel_mode, handle_invite, handle_join, handle_kick, handle_list,
+    handle_names, handle_notice, handle_part, handle_privmsg, handle_topic,
+    remove_user_from_all_channels,
+};
 use crate::handler_oper::{handle_die, handle_kill, handle_oper, handle_restart, handle_wallops};
 #[allow(unused_imports)] // Re-exported for test submodules that use `super::*`
 pub(crate) use crate::handler_oper::{host_matches_mask, is_oper};
@@ -99,7 +103,11 @@ pub fn handle_message(
             Command::Away => handle_away(msg, connection_id, registry, sender),
             Command::Mode => {
                 // Route to channel or user mode handler based on target.
-                if msg.params.first().is_some_and(|t| t.starts_with('#') || t.starts_with('&')) {
+                if msg
+                    .params
+                    .first()
+                    .is_some_and(|t| t.starts_with('#') || t.starts_with('&'))
+                {
                     handle_channel_mode(msg, connection_id, registry, channels, sender)
                 } else {
                     handle_user_mode(msg, connection_id, registry, sender)
@@ -338,7 +346,13 @@ fn handle_whois(
     send_numeric(
         sender,
         RPL_WHOISUSER,
-        &[&requestor_nick, &nick, &target.username, &target.hostname, "*"],
+        &[
+            &requestor_nick,
+            &nick,
+            &target.username,
+            &target.hostname,
+            "*",
+        ],
         &target.realname,
     );
 
@@ -524,12 +538,7 @@ fn handle_user_mode(
     }
 
     if unknown {
-        send_numeric(
-            sender,
-            ERR_UMODEUNKNOWNFLAG,
-            &[&nick],
-            "Unknown MODE flag",
-        );
+        send_numeric(sender, ERR_UMODEUNKNOWNFLAG, &[&nick], "Unknown MODE flag");
     }
 
     // Confirm current modes after changes.

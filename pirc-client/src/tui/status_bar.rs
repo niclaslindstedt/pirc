@@ -254,7 +254,10 @@ mod tests {
         let mut info = basic_info();
         info.topic = Some("Welcome to general".to_string());
         let text = render_to_string(80, &info);
-        assert!(text.contains("(+Welcome to general)"), "should contain topic: {text}");
+        assert!(
+            text.contains("(+Welcome to general)"),
+            "should contain topic: {text}"
+        );
     }
 
     #[test]
@@ -262,7 +265,10 @@ mod tests {
         let mut info = basic_info();
         info.topic = Some("This is a very long topic that should be truncated".to_string());
         let text = render_to_string(40, &info);
-        assert!(text.contains("..."), "long topic should be truncated with ellipsis: {text}");
+        assert!(
+            text.contains("..."),
+            "long topic should be truncated with ellipsis: {text}"
+        );
     }
 
     #[test]
@@ -270,7 +276,10 @@ mod tests {
         let mut info = basic_info();
         info.user_count = Some(42);
         let text = render_to_string(60, &info);
-        assert!(text.contains("[42 users]"), "should show user count: {text}");
+        assert!(
+            text.contains("[42 users]"),
+            "should show user count: {text}"
+        );
     }
 
     #[test]
@@ -280,7 +289,10 @@ mod tests {
         info.buffer_label = "Status".to_string();
         info.user_count = Some(10);
         let text = render_to_string(60, &info);
-        assert!(!text.contains("users"), "status buffer should not show user count: {text}");
+        assert!(
+            !text.contains("users"),
+            "status buffer should not show user count: {text}"
+        );
     }
 
     #[test]
@@ -290,7 +302,10 @@ mod tests {
         info.buffer_label = "bob".to_string();
         info.user_count = Some(2);
         let text = render_to_string(60, &info);
-        assert!(!text.contains("users"), "query buffer should not show user count: {text}");
+        assert!(
+            !text.contains("users"),
+            "query buffer should not show user count: {text}"
+        );
     }
 
     #[test]
@@ -298,7 +313,10 @@ mod tests {
         let mut info = basic_info();
         info.away = true;
         let text = render_to_string(60, &info);
-        assert!(text.contains("[away]"), "should show away indicator: {text}");
+        assert!(
+            text.contains("[away]"),
+            "should show away indicator: {text}"
+        );
     }
 
     #[test]
@@ -310,10 +328,7 @@ mod tests {
         render_status_bar(&mut buf, &region, &info);
         // Find the 'a' in "[away]".
         for col in 0..60 {
-            if buf.get(col, 0).ch == 'a'
-                && col + 1 < 60
-                && buf.get(col + 1, 0).ch == 'w'
-            {
+            if buf.get(col, 0).ch == 'a' && col + 1 < 60 && buf.get(col + 1, 0).ch == 'w' {
                 let cell = buf.get(col, 0);
                 assert!(cell.style.bold, "away should be bold");
                 assert_eq!(cell.style.fg, Some(Color::Red), "away should be red");
@@ -326,7 +341,10 @@ mod tests {
     fn test_not_away_hides_indicator() {
         let info = basic_info(); // away = false
         let text = render_to_string(60, &info);
-        assert!(!text.contains("[away]"), "should not show away when not away: {text}");
+        assert!(
+            !text.contains("[away]"),
+            "should not show away when not away: {text}"
+        );
     }
 
     #[test]
@@ -341,7 +359,10 @@ mod tests {
     fn test_no_lag_hides_indicator() {
         let info = basic_info(); // lag = None
         let text = render_to_string(60, &info);
-        assert!(!text.contains("lag"), "should not show lag when None: {text}");
+        assert!(
+            !text.contains("lag"),
+            "should not show lag when None: {text}"
+        );
     }
 
     #[test]
@@ -349,14 +370,20 @@ mod tests {
         let mut info = basic_info();
         info.scroll_info = Some("Scrolled: +42".to_string());
         let text = render_to_string(60, &info);
-        assert!(text.contains("[Scrolled: +42]"), "should show scroll info: {text}");
+        assert!(
+            text.contains("[Scrolled: +42]"),
+            "should show scroll info: {text}"
+        );
     }
 
     #[test]
     fn test_no_scroll_hides_indicator() {
         let info = basic_info(); // scroll_info = None
         let text = render_to_string(60, &info);
-        assert!(!text.contains("Scrolled"), "should not show scroll info: {text}");
+        assert!(
+            !text.contains("Scrolled"),
+            "should not show scroll info: {text}"
+        );
     }
 
     #[test]
@@ -368,7 +395,10 @@ mod tests {
         let text = render_to_string(80, &info);
         assert!(text.contains("[away]"), "should contain away: {text}");
         assert!(text.contains("[lag: 100ms]"), "should contain lag: {text}");
-        assert!(text.contains("[Scrolled: +10]"), "should contain scroll: {text}");
+        assert!(
+            text.contains("[Scrolled: +10]"),
+            "should contain scroll: {text}"
+        );
     }
 
     #[test]
@@ -385,7 +415,10 @@ mod tests {
         // The right side should NOT be adjacent to the left side.
         let left_end = text.find('#').unwrap() + "#general".len();
         let right_start = text.find("[lag:").unwrap();
-        assert!(right_start > left_end, "right should be separated from left");
+        assert!(
+            right_start > left_end,
+            "right should be separated from left"
+        );
     }
 
     #[test]
@@ -450,7 +483,10 @@ mod tests {
         let mut info = basic_info();
         info.topic = Some(String::new());
         let text = render_to_string(60, &info);
-        assert!(!text.contains("(+"), "empty topic should not be shown: {text}");
+        assert!(
+            !text.contains("(+"),
+            "empty topic should not be shown: {text}"
+        );
     }
 
     #[test]

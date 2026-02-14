@@ -78,8 +78,15 @@ async fn quit_with_message_sends_error_and_removes_user() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     assert_eq!(registry.connection_count(), 1);
 
@@ -131,7 +138,15 @@ async fn quit_pre_registration_returns_quit() {
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
     // Send NICK but not USER (not registered yet)
-    handle_message(&nick_msg("Alice"), 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(
+        &nick_msg("Alice"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+    );
     assert!(!state.registered);
 
     let quit = Message::new(Command::Quit, vec![]);
@@ -145,8 +160,15 @@ async fn quit_sets_registered_false() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, _rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, _rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     assert!(state.registered);
 
@@ -164,8 +186,15 @@ async fn ping_returns_pong_with_token() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let ping = Message::new(Command::Ping, vec!["mytoken123".to_owned()]);
     let result = handle_message(&ping, 1, &registry, &channels, &tx, &mut state, &config);
@@ -204,8 +233,15 @@ async fn pong_is_absorbed_silently() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, mut rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let pong = Message::new(Command::Pong, vec!["pircd".to_owned()]);
     let result = handle_message(&pong, 1, &registry, &channels, &tx, &mut state, &config);
@@ -238,8 +274,15 @@ async fn idle_time_updated_on_regular_command() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, _rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, _rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Wait a small amount to ensure time passes.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -252,7 +295,10 @@ async fn idle_time_updated_on_regular_command() {
     let session_arc = registry.get_by_connection(1).unwrap();
     let session = session_arc.read().unwrap();
     let idle_secs = session.last_active.elapsed().as_millis();
-    assert!(idle_secs < 50, "idle time should be very small after activity");
+    assert!(
+        idle_secs < 50,
+        "idle time should be very small after activity"
+    );
 }
 
 #[tokio::test]
@@ -260,8 +306,15 @@ async fn idle_time_not_updated_on_ping() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, _rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, _rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     // Record last_active right after registration.
     let initial_last_active = {
@@ -287,8 +340,15 @@ async fn idle_time_not_updated_on_pong() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, _rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, _rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let initial_last_active = {
         let session_arc = registry.get_by_connection(1).unwrap();
@@ -314,8 +374,15 @@ async fn regular_commands_return_continue() {
     let registry = Arc::new(UserRegistry::new());
     let channels = make_channels();
     let config = make_config();
-    let (tx, _rx, mut state) =
-        register_user("Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config);
+    let (tx, _rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
 
     let whois = Message::new(Command::Whois, vec!["Alice".to_owned()]);
     let result = handle_message(&whois, 1, &registry, &channels, &tx, &mut state, &config);
