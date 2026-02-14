@@ -85,50 +85,10 @@ impl MessageBuffer {
     ///
     /// With `scroll_offset == 0`, returns the last `visible_lines` messages.
     /// With a positive offset, the window shifts upward into history.
-    pub fn messages_in_view(&self, visible_lines: usize) -> &[BufferLine] {
-        let len = self.messages.len();
-        if len == 0 || visible_lines == 0 {
-            return &[];
-        }
-
-        let (slices_a, slices_b) = self.messages.as_slices();
-
-        // End index: how far from the end we start (scroll_offset moves us up)
-        let end = len.saturating_sub(self.scroll_offset);
-        let start = end.saturating_sub(visible_lines);
-
-        // We need to return a contiguous slice. Since VecDeque stores data in
-        // two contiguous slices, we can use make_contiguous or work with the
-        // slices directly. For a read-only view, we'll compute which slice(s)
-        // our range falls into.
-        let total_a = slices_a.len();
-
-        if end <= total_a {
-            // Entirely within first slice
-            &slices_a[start..end]
-        } else if start >= total_a {
-            // Entirely within second slice
-            &slices_b[start - total_a..end - total_a]
-        } else {
-            // Range spans both slices — we can't return a single &[BufferLine].
-            // To handle this, we need to make the deque contiguous first.
-            // Since this is a read-only operation and we can't mutate self here,
-            // we return the portion from the second slice only (newer messages).
-            // This is a pragmatic trade-off — the caller gets at most the
-            // messages from the second contiguous region.
-            //
-            // For a better API, see messages_in_view_mut which can call
-            // make_contiguous first.
-            &slices_b[..end - total_a]
-        }
-    }
-
-    /// Return the messages visible in a view of the given height.
     ///
-    /// This variant takes `&mut self` so it can call `make_contiguous` on the
-    /// internal `VecDeque`, guaranteeing the returned slice covers the full
-    /// requested range.
-    pub fn messages_in_view_mut(&mut self, visible_lines: usize) -> &[BufferLine] {
+    /// Calls `make_contiguous` on the internal `VecDeque` to guarantee a
+    /// correct contiguous slice is returned regardless of ring buffer layout.
+    pub fn messages_in_view(&mut self, visible_lines: usize) -> &[BufferLine] {
         let len = self.messages.len();
         if len == 0 || visible_lines == 0 {
             return &[];
@@ -303,7 +263,7 @@ mod tests {
         assert_eq!(buf.len(), 3);
 
         // "first" should be gone
-        let view = buf.messages_in_view_mut(10);
+        let view = buf.messages_in_view(10);
         assert_eq!(view[0].content, "second");
         assert_eq!(view[1].content, "third");
         assert_eq!(view[2].content, "fourth");
@@ -318,7 +278,7 @@ mod tests {
         buf.push_message(make_line("d"));
         assert_eq!(buf.len(), 2);
 
-        let view = buf.messages_in_view_mut(10);
+        let view = buf.messages_in_view(10);
         assert_eq!(view[0].content, "c");
         assert_eq!(view[1].content, "d");
     }
@@ -330,7 +290,7 @@ mod tests {
         buf.push_message(make_line("b"));
         assert_eq!(buf.len(), 1);
 
-        let view = buf.messages_in_view_mut(10);
+        let view = buf.messages_in_view(10);
         assert_eq!(view[0].content, "b");
     }
 
@@ -338,7 +298,7 @@ mod tests {
 
     #[test]
     fn view_empty_buffer() {
-        let buf = MessageBuffer::new(10);
+        let mut buf = MessageBuffer::new(10);
         assert!(buf.messages_in_view(5).is_empty());
     }
 
@@ -356,7 +316,7 @@ mod tests {
             buf.push_message(make_line(&format!("msg{i}")));
         }
 
-        let view = buf.messages_in_view_mut(3);
+        let view = buf.messages_in_view(3);
         assert_eq!(view.len(), 3);
         assert_eq!(view[0].content, "msg7");
         assert_eq!(view[1].content, "msg8");
@@ -368,7 +328,7 @@ mod tests {
         let mut buf = MessageBuffer::new(100);
         buf.push_message(make_line("only"));
 
-        let view = buf.messages_in_view_mut(10);
+        let view = buf.messages_in_view(10);
         assert_eq!(view.len(), 1);
         assert_eq!(view[0].content, "only");
     }
@@ -381,7 +341,7 @@ mod tests {
         }
         buf.scroll_up(3);
 
-        let view = buf.messages_in_view_mut(4);
+        let view = buf.messages_in_view(4);
         assert_eq!(view.len(), 4);
         // offset=3: end=10-3=7, start=7-4=3 → messages 3,4,5,6
         assert_eq!(view[0].content, "msg3");
@@ -398,7 +358,7 @@ mod tests {
         }
         buf.scroll_up(100); // scroll way past top
 
-        let view = buf.messages_in_view_mut(3);
+        let view = buf.messages_in_view(3);
         // max offset = 4, end = 5-4 = 1, start = 0 → just msg0
         assert_eq!(view.len(), 1);
         assert_eq!(view[0].content, "msg0");
@@ -482,7 +442,7 @@ mod tests {
         buf.push_message(make_line("msg5"));
         assert_eq!(buf.scroll_offset, 2);
 
-        let view = buf.messages_in_view_mut(10);
+        let view = buf.messages_in_view(10);
         assert_eq!(view[0].content, "msg1");
     }
 
@@ -651,27 +611,48 @@ mod tests {
         }
         assert_eq!(buf.len(), 100);
 
-        let view = buf.messages_in_view_mut(3);
+        let view = buf.messages_in_view(3);
         assert_eq!(view[0].content, "msg197");
         assert_eq!(view[1].content, "msg198");
         assert_eq!(view[2].content, "msg199");
     }
 
-    // --- Immutable messages_in_view for contiguous buffers ---
+    // --- messages_in_view with split VecDeque ---
 
     #[test]
-    fn immutable_view_works_for_fresh_buffer() {
-        let mut buf = MessageBuffer::new(100);
-        for i in 0..5 {
+    fn view_handles_split_vecdeque_after_eviction() {
+        // Use a small capacity to force evictions and ring buffer wrapping.
+        let mut buf = MessageBuffer::new(4);
+
+        // Fill to capacity: [msg0, msg1, msg2, msg3]
+        for i in 0..4 {
             buf.push_message(make_line(&format!("msg{i}")));
         }
 
-        // Fresh buffer (no evictions) should be contiguous
+        // Push 2 more to cause evictions and potential ring wrap:
+        // After: [msg2, msg3, msg4, msg5]
+        buf.push_message(make_line("msg4"));
+        buf.push_message(make_line("msg5"));
+        assert_eq!(buf.len(), 4);
+
+        // Scroll up so the view window spans a range that would have
+        // crossed the VecDeque's internal slice boundary.
+        buf.scroll_up(1);
+        // end = 4-1 = 3, start = 3-3 = 0 → messages [msg2, msg3, msg4]
         let view = buf.messages_in_view(3);
         assert_eq!(view.len(), 3);
         assert_eq!(view[0].content, "msg2");
         assert_eq!(view[1].content, "msg3");
         assert_eq!(view[2].content, "msg4");
+
+        // Also verify full view at bottom works
+        buf.scroll_to_bottom();
+        let view = buf.messages_in_view(4);
+        assert_eq!(view.len(), 4);
+        assert_eq!(view[0].content, "msg2");
+        assert_eq!(view[1].content, "msg3");
+        assert_eq!(view[2].content, "msg4");
+        assert_eq!(view[3].content, "msg5");
     }
 
     // --- Combined operations ---
@@ -701,7 +682,7 @@ mod tests {
 
         // Scroll up
         buf.scroll_up(2);
-        let view = buf.messages_in_view_mut(3);
+        let view = buf.messages_in_view(3);
         assert_eq!(view.len(), 3);
         assert_eq!(view[0].content, "Welcome to #rust!");
         assert_eq!(view[1].content, "alice has joined");
