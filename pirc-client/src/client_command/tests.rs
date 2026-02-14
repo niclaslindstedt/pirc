@@ -1458,3 +1458,31 @@ fn to_message_no_prefix() {
     let msg = cmd.to_message(None).unwrap();
     assert!(msg.prefix.is_none());
 }
+
+// ── Connection commands ───────────────────────────────────
+
+#[test]
+fn reconnect_parses() {
+    assert_eq!(
+        ClientCommand::from_parsed("reconnect", &[]),
+        Ok(ClientCommand::Reconnect)
+    );
+}
+
+#[test]
+fn disconnect_parses() {
+    assert_eq!(
+        ClientCommand::from_parsed("disconnect", &[]),
+        Ok(ClientCommand::Disconnect)
+    );
+}
+
+#[test]
+fn reconnect_to_message_is_none() {
+    assert!(ClientCommand::Reconnect.to_message(None).is_none());
+}
+
+#[test]
+fn disconnect_to_message_is_none() {
+    assert!(ClientCommand::Disconnect.to_message(None).is_none());
+}

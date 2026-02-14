@@ -89,6 +89,11 @@ impl ConnectionManager {
         self.auto_reconnect
     }
 
+    /// Enable or disable auto-reconnect.
+    pub fn set_auto_reconnect(&mut self, enabled: bool) {
+        self.auto_reconnect = enabled;
+    }
+
     /// Attempt a state transition. Returns an error if the transition is invalid.
     pub fn transition(&mut self, new_state: ConnectionState) -> Result<(), TransitionError> {
         if Self::is_valid_transition(&self.state, &new_state) {
@@ -240,6 +245,16 @@ mod tests {
         let mut mgr = ConnectionManager::new(&config_with_nick("old"));
         mgr.set_nick("new".into());
         assert_eq!(mgr.nick(), "new");
+    }
+
+    #[test]
+    fn set_auto_reconnect() {
+        let mut mgr = ConnectionManager::new(&default_config());
+        assert!(mgr.auto_reconnect());
+        mgr.set_auto_reconnect(false);
+        assert!(!mgr.auto_reconnect());
+        mgr.set_auto_reconnect(true);
+        assert!(mgr.auto_reconnect());
     }
 
     // ── Valid transitions ────────────────────────────────────────

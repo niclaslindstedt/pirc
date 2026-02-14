@@ -274,6 +274,17 @@ impl BufferManager {
         }
     }
 
+    /// Return channel names for all open channel buffers.
+    pub fn channel_names(&self) -> Vec<String> {
+        self.buffers
+            .iter()
+            .filter_map(|e| match &e.id {
+                BufferId::Channel(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Find the index of a buffer by its ID.
     pub fn find_index(&self, id: &BufferId) -> Option<usize> {
         self.buffers.iter().position(|e| e.id == *id)
@@ -811,5 +822,26 @@ mod tests {
 
         mgr.close(&BufferId::Channel("#a".into()));
         assert_eq!(*mgr.active_id(), BufferId::Status);
+    }
+
+    // --- Channel names ---
+
+    #[test]
+    fn channel_names_empty_initially() {
+        let mgr = BufferManager::new(100);
+        assert!(mgr.channel_names().is_empty());
+    }
+
+    #[test]
+    fn channel_names_returns_only_channels() {
+        let mut mgr = BufferManager::new(100);
+        mgr.open(BufferId::Channel("#rust".into()));
+        mgr.open(BufferId::Channel("#pirc".into()));
+        mgr.open(BufferId::Query("alice".into()));
+
+        let names = mgr.channel_names();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"#rust".to_string()));
+        assert!(names.contains(&"#pirc".to_string()));
     }
 }

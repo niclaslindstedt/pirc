@@ -7,7 +7,7 @@ use pirc_network::{Connection, Connector, ShutdownController, ShutdownSignal};
 use pirc_protocol::{Command, Message};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::client_command::ClientCommand;
 use crate::config::ClientConfig;
@@ -36,6 +36,12 @@ const KEEPALIVE_IDLE_THRESHOLD: Duration = Duration::from_secs(60);
 /// consider the connection dead.
 const PONG_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Maximum delay between reconnection attempts.
+const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(60);
+
+/// Multiplicative factor for exponential backoff.
+const BACKOFF_FACTOR: f64 = 2.0;
+
 /// Central coordinator for the pirc client.
 ///
 /// Owns the TUI state (view coordinator + renderer), the network connection
@@ -56,6 +62,12 @@ pub struct App {
     ping_sent_at: Option<Instant>,
     /// Measured server lag in milliseconds.
     lag_ms: Option<u32>,
+    /// When to attempt the next reconnection (if reconnecting).
+    reconnect_at: Option<Instant>,
+    /// Current reconnect attempt number (1-indexed).
+    reconnect_attempt: u32,
+    /// Channels to rejoin after a successful reconnect.
+    channels_to_rejoin: Vec<String>,
 }
 
 impl App {
@@ -83,6 +95,9 @@ impl App {
             last_message_received: None,
             ping_sent_at: None,
             lag_ms: None,
+            reconnect_at: None,
+            reconnect_attempt: 0,
+            channels_to_rejoin: Vec::new(),
         }
     }
 
@@ -189,6 +204,16 @@ impl App {
                 // Keepalive timer
                 _ = keepalive_interval.tick() => {
                     self.handle_keepalive_tick().await;
+                    self.render(&mut renderer)?;
+                }
+                // Reconnect timer
+                _ = async {
+                    match self.reconnect_at {
+                        Some(deadline) => tokio::time::sleep_until(deadline).await,
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {
+                    self.attempt_reconnect().await;
                     self.render(&mut renderer)?;
                 }
             }
@@ -323,6 +348,18 @@ impl App {
             return;
         }
 
+        // Handle /reconnect
+        if matches!(cmd, ClientCommand::Reconnect) {
+            self.handle_reconnect_command().await;
+            return;
+        }
+
+        // Handle /disconnect
+        if matches!(cmd, ClientCommand::Disconnect) {
+            self.handle_disconnect_command().await;
+            return;
+        }
+
         // Determine context (current channel name) for to_message
         let context = self.current_channel_context();
         if let Some(msg) = cmd.to_message(context.as_deref()) {
@@ -333,6 +370,72 @@ impl App {
             } else {
                 self.push_status("Not connected");
             }
+        }
+    }
+
+    /// Handle the `/reconnect` command — manually trigger a reconnection.
+    async fn handle_reconnect_command(&mut self) {
+        if self.connection_mgr.is_connected() {
+            self.push_status("Already connected");
+            return;
+        }
+
+        // Cancel any pending reconnect timer
+        self.reconnect_at = None;
+        self.reconnect_attempt = 0;
+
+        // If we're in a Reconnecting state, transition to Disconnected first
+        if matches!(
+            self.connection_mgr.state(),
+            ConnectionState::Reconnecting { .. }
+        ) {
+            let _ = self
+                .connection_mgr
+                .transition(ConnectionState::Disconnected);
+        }
+
+        // Re-enable auto-reconnect and start fresh
+        self.connection_mgr.set_auto_reconnect(true);
+        self.push_status("Manual reconnect requested...");
+        self.schedule_reconnect(1);
+    }
+
+    /// Handle the `/disconnect` command — disconnect and disable auto-reconnect.
+    async fn handle_disconnect_command(&mut self) {
+        // Disable auto-reconnect
+        self.connection_mgr.set_auto_reconnect(false);
+
+        // Cancel any pending reconnect
+        self.reconnect_at = None;
+        self.reconnect_attempt = 0;
+
+        if self.connection.is_some() || self.connection_mgr.is_connected() {
+            // Send QUIT if connected
+            if let Some(ref mut conn) = self.connection {
+                let quit_msg = Message::new(Command::Quit, vec!["Disconnected".to_string()]);
+                let _ = conn.send(quit_msg).await;
+            }
+            self.connection = None;
+            self.registration = None;
+            self.registration_deadline = None;
+            self.last_message_received = None;
+            self.ping_sent_at = None;
+            self.lag_ms = None;
+            self.view.set_lag(None);
+            let _ = self
+                .connection_mgr
+                .transition(ConnectionState::Disconnected);
+            self.push_status("Disconnected (auto-reconnect disabled)");
+        } else if matches!(
+            self.connection_mgr.state(),
+            ConnectionState::Reconnecting { .. }
+        ) {
+            let _ = self
+                .connection_mgr
+                .transition(ConnectionState::Disconnected);
+            self.push_status("Reconnect cancelled (auto-reconnect disabled)");
+        } else {
+            self.push_status("Not connected (auto-reconnect disabled)");
         }
     }
 
@@ -427,11 +530,16 @@ impl App {
                     self.connection_mgr.set_nick(nick.clone());
                     self.view.set_nick(nick);
 
-                    // Clear registration state and timeout
+                    // Clear registration state, timeout, and reconnect state
                     self.registration = None;
                     self.registration_deadline = None;
+                    self.reconnect_at = None;
+                    self.reconnect_attempt = 0;
 
                     self.push_status(&message);
+
+                    // Rejoin channels if this was a reconnect
+                    self.rejoin_channels().await;
                     return;
                 }
                 RegistrationEvent::Info(text) => {
@@ -537,7 +645,24 @@ impl App {
     }
 
     /// Handle a disconnection event.
+    ///
+    /// Clears connection state and, if auto-reconnect is enabled, schedules
+    /// a reconnection attempt with exponential backoff. If a reconnect
+    /// sequence is already in progress, continues from the current attempt.
     fn handle_disconnect(&mut self, reason: &str) {
+        // Capture channels before clearing state (for auto-rejoin)
+        if self.channels_to_rejoin.is_empty() {
+            self.channels_to_rejoin = self.view.buffers().channel_names();
+        }
+
+        // Determine the next reconnect attempt: if we're already reconnecting,
+        // continue the sequence; otherwise start fresh.
+        let next_attempt = if self.reconnect_attempt > 0 {
+            self.reconnect_attempt + 1
+        } else {
+            1
+        };
+
         self.connection = None;
         self.registration = None;
         self.registration_deadline = None;
@@ -549,6 +674,132 @@ impl App {
             .connection_mgr
             .transition(ConnectionState::Disconnected);
         self.push_status(reason);
+
+        // Schedule auto-reconnect if enabled
+        if self.connection_mgr.auto_reconnect() {
+            self.schedule_reconnect(next_attempt);
+        }
+    }
+
+    /// Schedule a reconnection attempt after an exponential backoff delay.
+    fn schedule_reconnect(&mut self, attempt: u32) {
+        let base = self.config.server.reconnect_delay_secs as f64;
+        let delay_secs = base * BACKOFF_FACTOR.powi((attempt as i32) - 1);
+        let delay = Duration::from_secs_f64(delay_secs).min(MAX_RECONNECT_DELAY);
+
+        self.reconnect_attempt = attempt;
+        let _ = self
+            .connection_mgr
+            .transition(ConnectionState::Reconnecting { attempt });
+        self.reconnect_at = Some(Instant::now() + delay);
+
+        self.push_status(&format!(
+            "Reconnecting in {}s... (attempt {attempt})",
+            delay.as_secs()
+        ));
+        info!(attempt, delay_secs = delay.as_secs(), "scheduling reconnect");
+    }
+
+    /// Attempt to reconnect to the server.
+    async fn attempt_reconnect(&mut self) {
+        self.reconnect_at = None;
+        let attempt = self.reconnect_attempt;
+
+        self.push_status(&format!("Reconnecting... (attempt {attempt})"));
+
+        // Transition Reconnecting → Connecting
+        if self
+            .connection_mgr
+            .transition(ConnectionState::Connecting)
+            .is_err()
+        {
+            return;
+        }
+
+        let addr_str = self.connection_mgr.server_addr().to_string();
+        let addr = match addr_str.to_socket_addrs() {
+            Ok(mut addrs) => {
+                if let Some(a) = addrs.next() {
+                    a
+                } else {
+                    let _ = self
+                        .connection_mgr
+                        .transition(ConnectionState::Disconnected);
+                    self.push_status(&format!("Could not resolve {addr_str}"));
+                    self.schedule_reconnect(attempt + 1);
+                    return;
+                }
+            }
+            Err(e) => {
+                let _ = self
+                    .connection_mgr
+                    .transition(ConnectionState::Disconnected);
+                self.push_status(&format!("Could not resolve {addr_str}: {e}"));
+                self.schedule_reconnect(attempt + 1);
+                return;
+            }
+        };
+
+        let connector = Connector::new();
+        match connector.connect(addr).await {
+            Ok(conn) => {
+                self.connection = Some(conn);
+
+                if self
+                    .connection_mgr
+                    .transition(ConnectionState::Registering)
+                    .is_err()
+                {
+                    return;
+                }
+
+                let nick = self.connection_mgr.nick().to_string();
+                let username = nick.clone();
+                let realname = self
+                    .config
+                    .identity
+                    .realname
+                    .clone()
+                    .unwrap_or_else(|| nick.clone());
+                let alt_nicks = self.config.identity.alt_nicks.clone();
+
+                let reg = RegistrationState::new(nick, alt_nicks, username, realname);
+                self.send_registration_messages(&reg).await;
+                self.registration = Some(reg);
+                self.registration_deadline = Some(Instant::now() + REGISTRATION_TIMEOUT);
+
+                self.push_status(&format!("Connected to {addr_str}, registering..."));
+                info!(attempt, "reconnected, registering");
+            }
+            Err(e) => {
+                let _ = self
+                    .connection_mgr
+                    .transition(ConnectionState::Disconnected);
+                self.push_status(&format!("Reconnect failed: {e}"));
+                self.schedule_reconnect(attempt + 1);
+            }
+        }
+    }
+
+    /// Rejoin channels that were open before the disconnect.
+    async fn rejoin_channels(&mut self) {
+        let channels = std::mem::take(&mut self.channels_to_rejoin);
+        if channels.is_empty() {
+            return;
+        }
+
+        for channel in &channels {
+            let msg = Message::new(Command::Join, vec![channel.clone()]);
+            if let Some(ref mut conn) = self.connection {
+                if let Err(e) = conn.send(msg).await {
+                    warn!(%e, channel, "failed to rejoin channel");
+                }
+            }
+        }
+        self.push_status(&format!(
+            "Rejoining {} channel(s)...",
+            channels.len()
+        ));
     }
 
     /// Push a status message to the status buffer.

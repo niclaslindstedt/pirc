@@ -97,6 +97,12 @@ pub enum ClientCommand {
     /// `/network [args…]`
     Network(Vec<String>),
 
+    // ── Connection ────────────────────────────────────────────
+    /// `/reconnect` — manually trigger a reconnect.
+    Reconnect,
+    /// `/disconnect` — disconnect without auto-reconnect.
+    Disconnect,
+
     // ── Meta ───────────────────────────────────────────────────
     /// `/help [topic]`
     Help(Option<String>),
@@ -153,6 +159,10 @@ impl ClientCommand {
             "cluster" => parse_cluster(args),
             "invite-key" => Ok(ClientCommand::InviteKey(args.to_vec())),
             "network" => Ok(ClientCommand::Network(args.to_vec())),
+
+            // ── Connection ──────────────────────────────────────
+            "reconnect" => Ok(ClientCommand::Reconnect),
+            "disconnect" => Ok(ClientCommand::Disconnect),
 
             // ── Meta ───────────────────────────────────────────
             "help" => Ok(ClientCommand::Help(args.first().cloned())),
@@ -326,6 +336,9 @@ impl ClientCommand {
                 // /network maps to PIRC CAP with args.
                 Some(Message::new(Command::Pirc(PircSubcommand::Cap), args.clone()))
             }
+
+            // ── Connection ──────────────────────────────────────
+            ClientCommand::Reconnect | ClientCommand::Disconnect => None,
 
             // ── Meta ───────────────────────────────────────────
             ClientCommand::Help(_) => None,
