@@ -2,6 +2,7 @@ pub mod election;
 pub mod file_storage;
 pub mod log;
 pub mod node;
+pub mod replication;
 pub mod rpc;
 pub mod state;
 pub mod storage;

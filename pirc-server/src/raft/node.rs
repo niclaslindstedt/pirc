@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use tokio::sync::mpsc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use super::election::{compute_election_timeout, is_log_up_to_date, ElectionTracker};
 use super::log::RaftLog;
@@ -17,17 +17,17 @@ use super::types::{LogIndex, NodeId, RaftConfig, RaftState, Term};
 /// Outbound messages are sent via an `mpsc::UnboundedSender`. The caller is
 /// responsible for delivering them over the network.
 pub struct RaftNode<T: Send + Sync, S: RaftStorage<T>> {
-    config: RaftConfig,
+    pub(crate) config: RaftConfig,
     pub(crate) state: RaftState,
     pub(crate) current_term: Term,
-    voted_for: Option<NodeId>,
+    pub(crate) voted_for: Option<NodeId>,
     pub(crate) log: RaftLog<T>,
-    volatile: VolatileState,
-    leader_state: Option<LeaderState>,
-    current_leader: Option<NodeId>,
-    election_tracker: ElectionTracker,
+    pub(crate) volatile: VolatileState,
+    pub(crate) leader_state: Option<LeaderState>,
+    pub(crate) current_leader: Option<NodeId>,
+    pub(crate) election_tracker: ElectionTracker,
     pub(crate) storage: S,
-    outbound: mpsc::UnboundedSender<(NodeId, RaftMessage<T>)>,
+    pub(crate) outbound: mpsc::UnboundedSender<(NodeId, RaftMessage<T>)>,
 }
 
 impl<T, S> RaftNode<T, S>
@@ -315,34 +315,12 @@ where
         self.send_heartbeats();
     }
 
-    /// Send heartbeat (empty `AppendEntries`) to all peers.
+    /// Send heartbeat/replication `AppendEntries` to all peers.
+    ///
+    /// Each peer receives entries starting from their `next_index`,
+    /// which acts as a heartbeat when there are no pending entries.
     pub fn send_heartbeats(&self) {
-        if self.state != RaftState::Leader {
-            warn!(
-                node = %self.config.node_id,
-                state = %self.state,
-                "send_heartbeats called but not leader"
-            );
-            return;
-        }
-
-        for &peer in &self.config.peers {
-            let prev_log_index = self.log.last_index();
-            let prev_log_term = self.log.last_term();
-
-            let heartbeat = AppendEntries {
-                term: self.current_term,
-                leader_id: self.config.node_id,
-                prev_log_index,
-                prev_log_term,
-                entries: vec![],
-                leader_commit: self.volatile.commit_index,
-            };
-
-            let _ = self
-                .outbound
-                .send((peer, RaftMessage::AppendEntries(heartbeat)));
-        }
+        self.send_append_entries_to_all();
     }
 
     /// Handle an incoming `AppendEntries` RPC.
@@ -420,6 +398,9 @@ where
                 }
             }
         }
+
+        // Check if we can advance the commit index after updating match_index.
+        self.advance_commit_index();
 
         Ok(())
     }
