@@ -17,6 +17,7 @@ pub mod scrollback_search;
 pub mod tab_completion;
 mod terminal;
 pub mod input_handler;
+pub mod view_coordinator;
 
 pub use input::{InputReader, KeyEvent};
 pub use input_handler::{InputAction, InputHandler};
@@ -32,3 +33,4 @@ pub use chat_renderer::{render_chat_area, nick_color};
 pub use scrollback_search::{SearchState, SearchDirection, render_search_bar};
 pub use status_bar::{StatusBarInfo, render_status_bar};
 pub use terminal::{RawModeGuard, TerminalSize, terminal_size};
+pub use view_coordinator::{ViewAction, ViewCoordinator};

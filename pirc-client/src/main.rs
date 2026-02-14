@@ -2,6 +2,8 @@ pub mod client_command;
 pub mod command_parser;
 mod config;
 #[allow(dead_code, unused_imports)]
+mod connection_state;
+#[allow(dead_code, unused_imports)]
 mod tui;
 
 use config::ClientConfig;
