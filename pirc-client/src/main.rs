@@ -1,3 +1,4 @@
+pub mod command_parser;
 mod config;
 #[allow(dead_code, unused_imports)]
 mod tui;
