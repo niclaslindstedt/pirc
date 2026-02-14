@@ -3,6 +3,7 @@ pub mod client_command;
 pub mod command_parser;
 mod config;
 mod connection_state;
+mod message_handler;
 mod registration;
 mod tui;
 

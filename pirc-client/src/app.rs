@@ -12,8 +12,10 @@ use tracing::warn;
 use crate::client_command::ClientCommand;
 use crate::config::ClientConfig;
 use crate::connection_state::{ConnectionManager, ConnectionState};
+use crate::message_handler::{self, HandlerAction};
 use crate::registration::{RegistrationEvent, RegistrationState};
 use crate::tui::buffer::Buffer;
+use crate::tui::buffer_manager::BufferId;
 use crate::tui::input::KeyEvent;
 use crate::tui::message_buffer::{BufferLine, LineType};
 use crate::tui::renderer::Renderer;
@@ -352,8 +354,7 @@ impl App {
     ///
     /// During registration (Registering state), messages are first routed
     /// through the [`RegistrationState`] handler. Once registered, or for
-    /// unhandled messages, the default handler displays them in the status
-    /// buffer. Full message routing (T110) will refine this further.
+    /// unhandled messages, the message router dispatches to the correct buffer.
     async fn handle_server_message(&mut self, msg: &Message) {
         // During registration, let the registration handler process the message first.
         if self.registration.is_some() {
@@ -400,19 +401,36 @@ impl App {
                     return;
                 }
                 RegistrationEvent::Unhandled => {
-                    // Fall through to default handling below
+                    // Fall through to message routing below
                 }
             }
         }
 
-        // Default: display the raw message in the status buffer
-        let content = format!("{msg}");
-        self.view.push_status_message(BufferLine {
-            timestamp: current_timestamp(&self.config.ui.timestamp_format),
-            sender: None,
-            content,
-            line_type: LineType::System,
-        });
+        // Route the message to the appropriate buffer(s).
+        let ts = current_timestamp(&self.config.ui.timestamp_format);
+        let our_nick = self.connection_mgr.nick().to_string();
+        let actions = message_handler::route_message(msg, &our_nick, &ts);
+
+        if actions.is_empty() {
+            // Unhandled command — ignore silently (PING/PONG, etc.)
+            return;
+        }
+
+        for action in actions {
+            match action {
+                HandlerAction::PushLine { target, line } => {
+                    self.view.push_message(&target, line);
+                }
+                HandlerAction::OpenChannel(name) => {
+                    // Ensure the channel buffer exists (don't switch to it)
+                    self.view.buffers_mut().ensure_open(BufferId::Channel(name));
+                }
+                HandlerAction::UpdateNick(new_nick) => {
+                    self.connection_mgr.set_nick(new_nick.clone());
+                    self.view.set_nick(new_nick);
+                }
+            }
+        }
     }
 
     /// Handle a disconnection event.
@@ -792,7 +810,7 @@ mod tests {
     }
 
     #[test]
-    fn handle_server_message_generic() {
+    fn handle_server_message_ping_ignored() {
         let config = ClientConfig::default();
         let mut app = App::new(config);
 
@@ -821,7 +839,82 @@ mod tests {
             .unwrap()
             .len();
 
-        assert_eq!(new_count, initial_count + 1);
+        // PING is transport-level and should not produce buffer output
+        assert_eq!(new_count, initial_count);
+    }
+
+    #[test]
+    fn handle_server_message_privmsg_to_channel() {
+        let config = ClientConfig::default();
+        let mut app = App::new(config);
+
+        let msg = Message::with_prefix(
+            pirc_protocol::Prefix::user("alice", "alice", "host.com"),
+            pirc_protocol::Command::Privmsg,
+            vec!["#test".into(), "hello world".into()],
+        );
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(app.handle_server_message(&msg));
+
+        // Channel buffer should have been created and contain the message
+        let buf = app
+            .view
+            .buffers()
+            .get(&crate::tui::buffer_manager::BufferId::Channel("#test".into()))
+            .expect("channel buffer should exist");
+        assert_eq!(buf.len(), 1);
+    }
+
+    #[test]
+    fn handle_server_message_privmsg_query() {
+        let mut config = ClientConfig::default();
+        config.identity.nick = Some("mynick".into());
+        let mut app = App::new(config);
+
+        let msg = Message::with_prefix(
+            pirc_protocol::Prefix::user("bob", "bob", "host.com"),
+            pirc_protocol::Command::Privmsg,
+            vec!["mynick".into(), "hey there".into()],
+        );
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(app.handle_server_message(&msg));
+
+        // Query buffer should have been auto-created
+        let buf = app
+            .view
+            .buffers()
+            .get(&crate::tui::buffer_manager::BufferId::Query("bob".into()))
+            .expect("query buffer should exist");
+        assert_eq!(buf.len(), 1);
+    }
+
+    #[test]
+    fn handle_server_message_nick_change_updates_state() {
+        let mut config = ClientConfig::default();
+        config.identity.nick = Some("oldnick".into());
+        let mut app = App::new(config);
+
+        let msg = Message::with_prefix(
+            pirc_protocol::Prefix::user("oldnick", "oldnick", "host.com"),
+            pirc_protocol::Command::Nick,
+            vec!["newnick".into()],
+        );
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(app.handle_server_message(&msg));
+
+        assert_eq!(app.connection_mgr.nick(), "newnick");
     }
 
     #[test]

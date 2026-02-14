@@ -76,6 +76,22 @@ impl BufferManager {
         &mut self.buffers[index].messages
     }
 
+    /// Ensure a buffer exists without switching to it.
+    /// If the buffer already exists, this is a no-op.
+    /// Returns `true` if the buffer was newly created.
+    pub fn ensure_open(&mut self, id: BufferId) -> bool {
+        if self.find_index(&id).is_some() {
+            return false;
+        }
+        let label = id.to_string();
+        self.buffers.push(BufferEntry {
+            id,
+            messages: MessageBuffer::new(self.default_scrollback),
+            label,
+        });
+        true
+    }
+
     /// Close a buffer. Cannot close the Status buffer.
     /// If the active buffer is closed, switches to the nearest neighbor.
     /// Returns `true` if the buffer was found and closed.
