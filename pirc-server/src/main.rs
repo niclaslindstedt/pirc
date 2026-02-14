@@ -5,16 +5,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pirc_network::connection::AsyncTransport;
-use pirc_network::{Connection, Listener, ShutdownController, ShutdownSignal};
+use pirc_network::{Connection, Connector, Listener, ShutdownController, ShutdownSignal};
 use pirc_protocol::{Command, Message};
 use pirc_server::channel_registry::ChannelRegistry;
-use pirc_server::config::ServerConfig;
+use pirc_server::cluster::{ClusterService, InviteKeyStore};
+use pirc_server::config::{ClusterStartupMode, ServerConfig};
 use pirc_server::handler::{self, HandleResult, PreRegistrationState};
-use pirc_server::raft::transport::{PeerConnections, PeerMap, PeerUpdater};
-use pirc_server::raft::{FileStorage, NullStateMachine, RaftBuilder, RaftHandle};
+use pirc_server::raft::rpc::RaftMessage;
+use pirc_server::raft::transport::{PeerConnections, PeerMap, PeerUpdater, SharedPeerMap};
+use pirc_server::raft::{FileStorage, NodeId, NullStateMachine, RaftBuilder, RaftHandle};
 use pirc_server::registry::UserRegistry;
-use tokio::sync::{mpsc, Mutex};
-use tracing::{error, info, warn};
+use tokio::sync::{mpsc, Mutex, RwLock};
+use tracing::{debug, error, info, warn};
 
 fn parse_config_path() -> Option<PathBuf> {
     let args: Vec<String> = std::env::args().collect();
@@ -30,6 +32,18 @@ fn parse_config_path() -> Option<PathBuf> {
         i += 1;
     }
     None
+}
+
+/// Aggregated cluster state returned by [`init_raft_cluster`].
+///
+/// All fields are held alive for the lifetime of the server. Some are accessed
+/// later by command handlers (T139) or during shutdown.
+#[allow(dead_code)]
+struct ClusterState {
+    raft_handle: Arc<RaftHandle<String>>,
+    cluster_service: Arc<ClusterService>,
+    _raft_shutdown: pirc_server::raft::ShutdownSender,
+    _task_handles: Vec<tokio::task::JoinHandle<()>>,
 }
 
 #[tokio::main]
@@ -89,17 +103,9 @@ async fn main() {
     let channels = Arc::new(ChannelRegistry::new());
 
     // Raft cluster initialization
-    let mut _raft_shutdown: Option<pirc_server::raft::ShutdownSender> = None;
-    let mut _raft_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
-    let mut _peer_updater: Option<PeerUpdater> = None;
-    let raft_handle: Option<Arc<RaftHandle<String>>> = if config.cluster.enabled {
+    let _cluster_state: Option<ClusterState> = if config.cluster.enabled {
         match init_raft_cluster(&config, &shutdown_signal).await {
-            Ok((handle, raft_shutdown_sender, handles, peer_updater)) => {
-                _raft_shutdown = Some(raft_shutdown_sender);
-                _raft_handles = handles;
-                _peer_updater = Some(peer_updater);
-                Some(Arc::new(handle))
-            }
+            Ok(state) => Some(state),
             Err(e) => {
                 error!("failed to initialize raft cluster: {e}");
                 process::exit(1);
@@ -108,8 +114,6 @@ async fn main() {
     } else {
         None
     };
-    let _ = &raft_handle; // suppress unused warning when cluster is disabled
-    let _ = &_peer_updater; // suppress unused warning when cluster is disabled
 
     let config = Arc::new(config);
 
@@ -258,35 +262,42 @@ async fn handle_connection(
 
 /// Initialize the Raft consensus engine when clustering is enabled.
 ///
-/// Sets up file storage, builds the Raft driver and handle, spawns the driver
-/// task, creates the transport bridge (outbound sender + peer listener), and
-/// returns the handle, shutdown sender, and a [`PeerUpdater`] for adding peers
-/// at runtime.
+/// Supports three startup modes:
+/// - **Bootstrap**: single-node cluster as master, ready to accept joins.
+/// - **Join**: connect to an existing cluster node, send `CLUSTER JOIN`, configure from `WELCOME`.
+/// - **Rejoin**: restart with existing Raft state and static peer config.
+///
+/// Returns a [`ClusterState`] with the Raft handle, cluster service, and
+/// background task handles.
 async fn init_raft_cluster(
     config: &ServerConfig,
     shutdown_signal: &ShutdownSignal,
-) -> Result<
-    (
-        RaftHandle<String>,
-        pirc_server::raft::ShutdownSender,
-        Vec<tokio::task::JoinHandle<()>>,
-        PeerUpdater,
-    ),
-    Box<dyn std::error::Error>,
-> {
-    use tokio::sync::RwLock;
+) -> Result<ClusterState, Box<dyn std::error::Error>> {
+    let mode = config.cluster.startup_mode();
+    info!(?mode, "cluster startup mode");
 
+    match mode {
+        ClusterStartupMode::Bootstrap => init_bootstrap(config, shutdown_signal).await,
+        ClusterStartupMode::Join => init_join(config, shutdown_signal).await,
+        ClusterStartupMode::Rejoin => init_rejoin(config, shutdown_signal).await,
+    }
+}
+
+/// Bootstrap a new single-node cluster as master.
+async fn init_bootstrap(
+    config: &ServerConfig,
+    shutdown_signal: &ShutdownSignal,
+) -> Result<ClusterState, Box<dyn std::error::Error>> {
     let raft_config = config
         .cluster
-        .to_raft_config()
-        .ok_or("cluster enabled but raft config could not be built")?;
+        .to_bootstrap_raft_config()
+        .ok_or("bootstrap mode requires cluster.node_id")?;
 
+    let node_id = raft_config.node_id;
     let data_dir = config.cluster.raft_data_dir();
-    info!(?data_dir, node_id = %raft_config.node_id, "initializing raft cluster");
+    info!(?data_dir, %node_id, "bootstrapping new cluster");
 
-    // Ensure data directory exists.
     std::fs::create_dir_all(&data_dir)?;
-
     let storage = FileStorage::new(&data_dir).await?;
 
     let (mut driver, handle, shutdown_sender, inbound_tx, outbound_rx) =
@@ -297,9 +308,223 @@ async fn init_raft_cluster(
             .build()
             .await?;
 
+    let handle = Arc::new(handle);
     let mut handles = Vec::new();
 
-    // Parse peer addresses for the transport layer.
+    // Empty peer map — single-node bootstrap has no peers initially.
+    let peer_map = PeerMap::new(vec![]);
+    let shared_peer_map: SharedPeerMap = Arc::new(RwLock::new(peer_map.clone()));
+    let peer_conns = Arc::new(Mutex::new(PeerConnections::new(peer_map)));
+
+    let outbound_handle = pirc_server::raft::transport::spawn_outbound_transport(
+        outbound_rx,
+        Arc::clone(&peer_conns),
+    );
+    handles.push(outbound_handle);
+
+    let peer_updater = PeerUpdater::new(Arc::clone(&shared_peer_map), Arc::clone(&peer_conns));
+
+    // Bind the cluster port listener for Raft messages and CLUSTER JOIN requests.
+    if let Some(raft_port) = config.cluster.raft_port {
+        let listen_addr = cluster_listen_addr(config, raft_port);
+        let listener = Listener::bind(listen_addr).await?;
+        info!(%listen_addr, "cluster port listener bound (bootstrap)");
+
+        let listener_handle = spawn_cluster_listener(
+            listener,
+            inbound_tx,
+            Arc::clone(&shared_peer_map),
+            shutdown_signal.clone(),
+        );
+        handles.push(listener_handle);
+    }
+
+    // Spawn the Raft driver.
+    let driver_handle = tokio::spawn(async move {
+        driver.run().await;
+    });
+    handles.push(driver_handle);
+
+    // Create the invite key store and cluster service.
+    let invite_keys = Arc::new(Mutex::new(InviteKeyStore::new()));
+    let self_addr = cluster_self_addr(config);
+    let cluster_service = Arc::new(ClusterService::new(
+        Arc::clone(&invite_keys),
+        Arc::clone(&handle),
+        peer_updater,
+        Arc::clone(&shared_peer_map),
+        node_id,
+        self_addr,
+        node_id.as_u64() + 1000, // start assigning IDs above our own
+    ));
+
+    info!("cluster bootstrapped as master");
+    Ok(ClusterState {
+        raft_handle: handle,
+        cluster_service,
+        _raft_shutdown: shutdown_sender,
+        _task_handles: handles,
+    })
+}
+
+/// Join an existing cluster using an invite key.
+async fn init_join(
+    config: &ServerConfig,
+    shutdown_signal: &ShutdownSignal,
+) -> Result<ClusterState, Box<dyn std::error::Error>> {
+    let invite_key = config
+        .cluster
+        .invite_key
+        .as_ref()
+        .ok_or("join mode requires cluster.invite_key")?;
+    let join_address: SocketAddr = config
+        .cluster
+        .join_address
+        .as_ref()
+        .ok_or("join mode requires cluster.join_address")?
+        .parse()
+        .map_err(|e| format!("invalid cluster.join_address: {e}"))?;
+
+    info!(%join_address, "joining existing cluster");
+
+    // Connect to the existing cluster node and send CLUSTER JOIN.
+    let connector = Connector::new();
+    let mut connection = connector.connect(join_address).await?;
+
+    let join_msg = ClusterService::build_join_message(invite_key);
+    connection.send(join_msg).await?;
+
+    // Wait for CLUSTER WELCOME response.
+    let response = connection
+        .recv()
+        .await?
+        .ok_or("connection closed before receiving welcome")?;
+
+    let (assigned_id, topology) = ClusterService::parse_welcome_message(&response)
+        .map_err(|e| format!("failed to parse welcome: {e}"))?;
+
+    info!(%assigned_id, peers = topology.peers.len(), "received cluster welcome");
+
+    // Build Raft config with the assigned node ID and peers from the topology.
+    let peer_map_entries: Vec<_> = topology
+        .peers
+        .iter()
+        .filter(|p| NodeId::new(p.id) != assigned_id)
+        .map(|p| (NodeId::new(p.id), p.addr))
+        .collect();
+    let peer_ids: Vec<NodeId> = peer_map_entries.iter().map(|(id, _)| *id).collect();
+
+    let raft_config = pirc_server::raft::RaftConfig {
+        election_timeout_min: Duration::from_millis(
+            config.cluster.election_timeout_min_ms.unwrap_or(150),
+        ),
+        election_timeout_max: Duration::from_millis(
+            config.cluster.election_timeout_max_ms.unwrap_or(300),
+        ),
+        heartbeat_interval: Duration::from_millis(
+            config.cluster.heartbeat_interval_ms.unwrap_or(50),
+        ),
+        node_id: assigned_id,
+        peers: peer_ids,
+        ..pirc_server::raft::RaftConfig::default()
+    };
+
+    let data_dir = config.cluster.raft_data_dir();
+    std::fs::create_dir_all(&data_dir)?;
+    let storage = FileStorage::new(&data_dir).await?;
+
+    let (mut driver, handle, shutdown_sender, inbound_tx, outbound_rx) =
+        RaftBuilder::<String, FileStorage, NullStateMachine>::new()
+            .config(raft_config)
+            .storage(storage)
+            .state_machine(NullStateMachine)
+            .build()
+            .await?;
+
+    let handle = Arc::new(handle);
+    let mut handles = Vec::new();
+
+    let peer_map = PeerMap::new(peer_map_entries);
+    let shared_peer_map: SharedPeerMap = Arc::new(RwLock::new(peer_map.clone()));
+    let peer_conns = Arc::new(Mutex::new(PeerConnections::new(peer_map)));
+
+    let outbound_handle = pirc_server::raft::transport::spawn_outbound_transport(
+        outbound_rx,
+        Arc::clone(&peer_conns),
+    );
+    handles.push(outbound_handle);
+
+    let peer_updater = PeerUpdater::new(Arc::clone(&shared_peer_map), Arc::clone(&peer_conns));
+
+    // Bind cluster port listener.
+    if let Some(raft_port) = config.cluster.raft_port {
+        let listen_addr = cluster_listen_addr(config, raft_port);
+        let listener = Listener::bind(listen_addr).await?;
+        info!(%listen_addr, "cluster port listener bound (join)");
+
+        let listener_handle = spawn_cluster_listener(
+            listener,
+            inbound_tx,
+            Arc::clone(&shared_peer_map),
+            shutdown_signal.clone(),
+        );
+        handles.push(listener_handle);
+    }
+
+    let driver_handle = tokio::spawn(async move {
+        driver.run().await;
+    });
+    handles.push(driver_handle);
+
+    let invite_keys = Arc::new(Mutex::new(InviteKeyStore::new()));
+    let self_addr = cluster_self_addr(config);
+    let cluster_service = Arc::new(ClusterService::new(
+        Arc::clone(&invite_keys),
+        Arc::clone(&handle),
+        peer_updater,
+        Arc::clone(&shared_peer_map),
+        assigned_id,
+        self_addr,
+        assigned_id.as_u64() + 1000,
+    ));
+
+    info!("joined cluster successfully");
+    Ok(ClusterState {
+        raft_handle: handle,
+        cluster_service,
+        _raft_shutdown: shutdown_sender,
+        _task_handles: handles,
+    })
+}
+
+/// Rejoin with existing persisted Raft state and static peer config.
+async fn init_rejoin(
+    config: &ServerConfig,
+    shutdown_signal: &ShutdownSignal,
+) -> Result<ClusterState, Box<dyn std::error::Error>> {
+    let raft_config = config
+        .cluster
+        .to_raft_config()
+        .ok_or("rejoin mode requires cluster.node_id")?;
+
+    let node_id = raft_config.node_id;
+    let data_dir = config.cluster.raft_data_dir();
+    info!(?data_dir, %node_id, "rejoining cluster with persisted state");
+
+    std::fs::create_dir_all(&data_dir)?;
+    let storage = FileStorage::new(&data_dir).await?;
+
+    let (mut driver, handle, shutdown_sender, inbound_tx, outbound_rx) =
+        RaftBuilder::<String, FileStorage, NullStateMachine>::new()
+            .config(raft_config)
+            .storage(storage)
+            .state_machine(NullStateMachine)
+            .build()
+            .await?;
+
+    let handle = Arc::new(handle);
+    let mut handles = Vec::new();
+
     let peer_entries = config.cluster.parse_peers();
     let peer_map_entries: Vec<_> = peer_entries
         .iter()
@@ -312,55 +537,180 @@ async fn init_raft_cluster(
         })
         .collect();
     let peer_map = PeerMap::new(peer_map_entries);
-
-    // Create shared peer map for both the listener and the peer updater.
-    let shared_peer_map = Arc::new(RwLock::new(peer_map.clone()));
-
-    // Spawn the outbound transport task.
+    let shared_peer_map: SharedPeerMap = Arc::new(RwLock::new(peer_map.clone()));
     let peer_conns = Arc::new(Mutex::new(PeerConnections::new(peer_map)));
+
     let outbound_handle = pirc_server::raft::transport::spawn_outbound_transport(
         outbound_rx,
         Arc::clone(&peer_conns),
     );
     handles.push(outbound_handle);
 
-    // Create the peer updater handle for runtime peer management.
     let peer_updater = PeerUpdater::new(Arc::clone(&shared_peer_map), Arc::clone(&peer_conns));
 
-    // Spawn the peer listener if a raft_port is configured.
     if let Some(raft_port) = config.cluster.raft_port {
-        let listen_addr: SocketAddr =
-            format!("{}:{raft_port}", config.network.bind_address)
-                .parse()
-                .unwrap_or_else(|_| {
-                    format!("0.0.0.0:{raft_port}").parse().unwrap()
-                });
+        let listen_addr = cluster_listen_addr(config, raft_port);
+        let listener = Listener::bind(listen_addr).await?;
+        info!(%listen_addr, "cluster port listener bound (rejoin)");
 
-        match Listener::bind(listen_addr).await {
-            Ok(listener) => {
-                info!(%listen_addr, "raft peer listener bound");
-                let listener_handle =
-                    pirc_server::raft::transport::spawn_peer_listener::<String>(
-                        listener,
-                        inbound_tx,
-                        Arc::clone(&shared_peer_map),
-                        shutdown_signal.clone(),
-                    );
-                handles.push(listener_handle);
-            }
-            Err(e) => {
-                error!(%listen_addr, error = %e, "failed to bind raft peer listener");
-                return Err(Box::new(e));
-            }
-        }
+        let listener_handle = spawn_cluster_listener(
+            listener,
+            inbound_tx,
+            Arc::clone(&shared_peer_map),
+            shutdown_signal.clone(),
+        );
+        handles.push(listener_handle);
     }
 
-    // Spawn the Raft driver task.
     let driver_handle = tokio::spawn(async move {
         driver.run().await;
     });
     handles.push(driver_handle);
 
-    info!("raft cluster initialized");
-    Ok((handle, shutdown_sender, handles, peer_updater))
+    let invite_keys = Arc::new(Mutex::new(InviteKeyStore::new()));
+    let self_addr = cluster_self_addr(config);
+    let cluster_service = Arc::new(ClusterService::new(
+        Arc::clone(&invite_keys),
+        Arc::clone(&handle),
+        peer_updater,
+        Arc::clone(&shared_peer_map),
+        node_id,
+        self_addr,
+        node_id.as_u64() + 1000,
+    ));
+
+    info!("cluster rejoin initialized");
+    Ok(ClusterState {
+        raft_handle: handle,
+        cluster_service,
+        _raft_shutdown: shutdown_sender,
+        _task_handles: handles,
+    })
+}
+
+/// Compute the listen address for the cluster port.
+fn cluster_listen_addr(config: &ServerConfig, raft_port: u16) -> SocketAddr {
+    format!("{}:{raft_port}", config.network.bind_address)
+        .parse()
+        .unwrap_or_else(|_| format!("0.0.0.0:{raft_port}").parse().unwrap())
+}
+
+/// Compute this server's cluster-facing address for inclusion in topology.
+fn cluster_self_addr(config: &ServerConfig) -> SocketAddr {
+    let port = config.cluster.raft_port.unwrap_or(config.network.port);
+    format!("{}:{port}", config.network.bind_address)
+        .parse()
+        .unwrap_or_else(|_| format!("0.0.0.0:{port}").parse().unwrap())
+}
+
+/// Spawn a cluster port listener that dispatches between Raft messages and
+/// `CLUSTER JOIN` requests.
+///
+/// Incoming connections are read for their first message. If it's a
+/// `CLUSTER JOIN`, the join protocol is handled inline. Otherwise, the
+/// connection is treated as a Raft peer and forwarded to the inbound channel.
+fn spawn_cluster_listener(
+    listener: Listener,
+    inbound_tx: mpsc::UnboundedSender<(NodeId, RaftMessage<String>)>,
+    shared_peer_map: SharedPeerMap,
+    mut shutdown: ShutdownSignal,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        info!("cluster port listener started");
+        loop {
+            match listener.accept_with_shutdown(&mut shutdown).await {
+                Ok(Some((connection, peer_addr))) => {
+                    let inbound_tx = inbound_tx.clone();
+                    let shared_peer_map = Arc::clone(&shared_peer_map);
+                    tokio::spawn(async move {
+                        handle_cluster_connection(
+                            connection,
+                            peer_addr,
+                            inbound_tx,
+                            shared_peer_map,
+                        )
+                        .await;
+                    });
+                }
+                Ok(None) => {
+                    info!("cluster port listener shutting down");
+                    break;
+                }
+                Err(e) => {
+                    warn!(error = %e, "failed to accept cluster connection");
+                }
+            }
+        }
+    })
+}
+
+/// Handle a single connection on the cluster port.
+///
+/// Reads the first message to determine whether this is a Raft peer or a
+/// `CLUSTER JOIN` request, then dispatches accordingly.
+async fn handle_cluster_connection(
+    mut connection: Connection,
+    peer_addr: SocketAddr,
+    inbound_tx: mpsc::UnboundedSender<(NodeId, RaftMessage<String>)>,
+    shared_peer_map: SharedPeerMap,
+) {
+    // Read the first message to determine connection type.
+    let first_msg = match connection.recv().await {
+        Ok(Some(msg)) => msg,
+        Ok(None) => {
+            debug!(%peer_addr, "cluster connection closed before first message");
+            return;
+        }
+        Err(e) => {
+            warn!(%peer_addr, error = %e, "error reading first cluster message");
+            return;
+        }
+    };
+
+    // Try to parse as a Raft message first (most common case).
+    if let Ok(raft_msg) = RaftMessage::<String>::from_protocol_message(&first_msg) {
+        // Identify the peer by looking up IP in the shared peer map.
+        let node_id = {
+            let map = shared_peer_map.read().await;
+            let found = map
+                .node_ids()
+                .find(|id| map.get(*id).is_some_and(|addr| addr.ip() == peer_addr.ip()));
+            found
+        };
+        let node_id = node_id.unwrap_or_else(|| {
+            warn!(%peer_addr, "raft message from unknown peer IP");
+            NodeId::new(u64::from(match peer_addr.ip() {
+                std::net::IpAddr::V4(ip) => u32::from(ip),
+                std::net::IpAddr::V6(_) => 0,
+            }))
+        });
+
+        // Forward the first message, then continue as a regular inbound handler.
+        if inbound_tx.send((node_id, raft_msg)).is_err() {
+            return;
+        }
+        pirc_server::raft::transport::spawn_inbound_handler::<String>(
+            node_id,
+            connection,
+            inbound_tx,
+        );
+        return;
+    }
+
+    // Not a Raft message — check if it's a CLUSTER JOIN.
+    if ClusterService::parse_join_message(&first_msg).is_ok() {
+        debug!(%peer_addr, "received CLUSTER JOIN on cluster port");
+        // The actual join handling requires the ClusterService, which is not
+        // available here directly. For now, log and close — the full join
+        // handling will be wired in T139 (command handlers).
+        let error_msg = ClusterService::build_error_message(
+            &pirc_server::cluster::JoinError::Protocol {
+                reason: "join protocol not yet handled on this listener".into(),
+            },
+        );
+        let _ = connection.send(error_msg).await;
+        return;
+    }
+
+    warn!(%peer_addr, command = ?first_msg.command, "unknown message on cluster port");
 }

@@ -105,8 +105,20 @@ impl ServerConfig {
         }
 
         if self.cluster.enabled && self.cluster.node_id.is_none() {
+            // In join mode the node ID is assigned by the leader, so it's optional.
+            if self.cluster.startup_mode() != ClusterStartupMode::Join {
+                return Err(PircError::ConfigError {
+                    message: "cluster.node_id must be set when cluster is enabled (unless joining)"
+                        .into(),
+                });
+            }
+        }
+
+        if self.cluster.invite_key.is_some() != self.cluster.join_address.is_some() {
             return Err(PircError::ConfigError {
-                message: "cluster.node_id must be set when cluster is enabled".into(),
+                message:
+                    "cluster.invite_key and cluster.join_address must both be set or both be unset"
+                        .into(),
             });
         }
 
@@ -196,6 +208,12 @@ pub struct ClusterConfig {
     pub election_timeout_min_ms: Option<u64>,
     pub election_timeout_max_ms: Option<u64>,
     pub heartbeat_interval_ms: Option<u64>,
+    /// Start as a new single-node cluster master when `true`.
+    pub bootstrap: Option<bool>,
+    /// Invite key to present when joining an existing cluster.
+    pub invite_key: Option<String>,
+    /// Address of an existing cluster node to join (e.g. `host:port`).
+    pub join_address: Option<String>,
 }
 
 /// Peer address entry parsed from the cluster config.
@@ -207,7 +225,33 @@ pub struct PeerEntry {
     pub address: String,
 }
 
+/// The mode in which the cluster should start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClusterStartupMode {
+    /// Bootstrap a new single-node cluster as master.
+    Bootstrap,
+    /// Join an existing cluster using an invite key.
+    Join,
+    /// Rejoin with existing persisted state and peer config.
+    Rejoin,
+}
+
 impl ClusterConfig {
+    /// Determine the startup mode based on the configured fields.
+    ///
+    /// - `bootstrap = true` → [`ClusterStartupMode::Bootstrap`]
+    /// - `invite_key` + `join_address` set → [`ClusterStartupMode::Join`]
+    /// - Otherwise (has existing data dir) → [`ClusterStartupMode::Rejoin`]
+    pub fn startup_mode(&self) -> ClusterStartupMode {
+        if self.bootstrap.unwrap_or(false) {
+            return ClusterStartupMode::Bootstrap;
+        }
+        if self.invite_key.is_some() && self.join_address.is_some() {
+            return ClusterStartupMode::Join;
+        }
+        ClusterStartupMode::Rejoin
+    }
+
     /// Parse the node ID string into a [`ServerId`].
     ///
     /// Uses a simple hash of the string to produce a stable u64 identifier.
@@ -241,7 +285,8 @@ impl ClusterConfig {
 
     /// Build a [`RaftConfig`] from this cluster configuration.
     ///
-    /// Returns `None` if clustering is not enabled or the node ID is not set.
+    /// Returns `None` if clustering is not enabled or the node ID is not set
+    /// (unless in join mode, where the node ID will be assigned by the leader).
     pub fn to_raft_config(&self) -> Option<RaftConfig> {
         if !self.enabled {
             return None;
@@ -259,6 +304,29 @@ impl ClusterConfig {
             heartbeat_interval: Duration::from_millis(self.heartbeat_interval_ms.unwrap_or(50)),
             node_id,
             peers,
+            ..RaftConfig::default()
+        })
+    }
+
+    /// Build a [`RaftConfig`] for bootstrap mode (single-node, no peers).
+    ///
+    /// Returns `None` if clustering is not enabled or the node ID is not set.
+    pub fn to_bootstrap_raft_config(&self) -> Option<RaftConfig> {
+        if !self.enabled {
+            return None;
+        }
+        let node_id = self.parse_node_id()?;
+
+        Some(RaftConfig {
+            election_timeout_min: Duration::from_millis(
+                self.election_timeout_min_ms.unwrap_or(150),
+            ),
+            election_timeout_max: Duration::from_millis(
+                self.election_timeout_max_ms.unwrap_or(300),
+            ),
+            heartbeat_interval: Duration::from_millis(self.heartbeat_interval_ms.unwrap_or(50)),
+            node_id,
+            peers: vec![],
             ..RaftConfig::default()
         })
     }
@@ -448,7 +516,9 @@ bind_address = "127.0.0.1"
         config.cluster.enabled = true;
         config.cluster.node_id = None;
         let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("cluster.node_id must be set"));
+        assert!(err
+            .to_string()
+            .contains("cluster.node_id must be set when cluster is enabled"));
     }
 
     #[test]
@@ -509,6 +579,9 @@ bind_address = "127.0.0.1"
         assert!(cluster.election_timeout_min_ms.is_none());
         assert!(cluster.election_timeout_max_ms.is_none());
         assert!(cluster.heartbeat_interval_ms.is_none());
+        assert!(cluster.bootstrap.is_none());
+        assert!(cluster.invite_key.is_none());
+        assert!(cluster.join_address.is_none());
     }
 
     #[test]
@@ -568,6 +641,9 @@ bind_address = "127.0.0.1"
                 election_timeout_min_ms: Some(200),
                 election_timeout_max_ms: Some(400),
                 heartbeat_interval_ms: Some(75),
+                bootstrap: Some(true),
+                invite_key: None,
+                join_address: None,
             },
             motd: MotdConfig {
                 path: Some(String::from("/etc/pirc/motd.txt")),
@@ -754,5 +830,99 @@ port = 6697
         let id1 = super::string_to_server_id("node-1");
         let id2 = super::string_to_server_id("node-2");
         assert_ne!(id1, id2);
+    }
+
+    // ---- Startup mode tests ----
+
+    #[test]
+    fn startup_mode_bootstrap() {
+        let cluster = ClusterConfig {
+            enabled: true,
+            node_id: Some("node-1".into()),
+            bootstrap: Some(true),
+            ..ClusterConfig::default()
+        };
+        assert_eq!(cluster.startup_mode(), ClusterStartupMode::Bootstrap);
+    }
+
+    #[test]
+    fn startup_mode_join() {
+        let cluster = ClusterConfig {
+            enabled: true,
+            invite_key: Some("some-key".into()),
+            join_address: Some("10.0.0.1:7000".into()),
+            ..ClusterConfig::default()
+        };
+        assert_eq!(cluster.startup_mode(), ClusterStartupMode::Join);
+    }
+
+    #[test]
+    fn startup_mode_rejoin_default() {
+        let cluster = ClusterConfig {
+            enabled: true,
+            node_id: Some("node-1".into()),
+            ..ClusterConfig::default()
+        };
+        assert_eq!(cluster.startup_mode(), ClusterStartupMode::Rejoin);
+    }
+
+    #[test]
+    fn startup_mode_bootstrap_takes_priority_over_join() {
+        let cluster = ClusterConfig {
+            enabled: true,
+            node_id: Some("node-1".into()),
+            bootstrap: Some(true),
+            invite_key: Some("key".into()),
+            join_address: Some("10.0.0.1:7000".into()),
+            ..ClusterConfig::default()
+        };
+        assert_eq!(cluster.startup_mode(), ClusterStartupMode::Bootstrap);
+    }
+
+    #[test]
+    fn validate_invite_key_without_join_address() {
+        let mut config = ServerConfig::default();
+        config.cluster.enabled = true;
+        config.cluster.node_id = Some("node-1".into());
+        config.cluster.invite_key = Some("key".into());
+        let err = config.validate().unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("invite_key and cluster.join_address must both be set"));
+    }
+
+    #[test]
+    fn validate_join_address_without_invite_key() {
+        let mut config = ServerConfig::default();
+        config.cluster.enabled = true;
+        config.cluster.node_id = Some("node-1".into());
+        config.cluster.join_address = Some("10.0.0.1:7000".into());
+        let err = config.validate().unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("invite_key and cluster.join_address must both be set"));
+    }
+
+    #[test]
+    fn validate_join_mode_without_node_id() {
+        let mut config = ServerConfig::default();
+        config.cluster.enabled = true;
+        config.cluster.invite_key = Some("key".into());
+        config.cluster.join_address = Some("10.0.0.1:7000".into());
+        // In join mode, node_id is optional (assigned by leader)
+        config.validate().expect("join mode without node_id should be valid");
+    }
+
+    #[test]
+    fn bootstrap_raft_config_has_no_peers() {
+        let cluster = ClusterConfig {
+            enabled: true,
+            node_id: Some("node-1".into()),
+            bootstrap: Some(true),
+            peers: vec!["node-2@10.0.0.2:7000".into()],
+            ..ClusterConfig::default()
+        };
+        let raft = cluster.to_bootstrap_raft_config().unwrap();
+        assert!(raft.peers.is_empty());
     }
 }
