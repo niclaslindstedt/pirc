@@ -179,6 +179,11 @@ impl MessageBuffer {
     pub fn capacity(&self) -> usize {
         self.capacity
     }
+
+    /// Iterate over all lines in the buffer (oldest to newest).
+    pub fn iter_lines(&self) -> impl Iterator<Item = &BufferLine> {
+        self.messages.iter()
+    }
 }
 
 #[cfg(test)]
