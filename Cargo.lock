@@ -311,6 +311,7 @@ dependencies = [
  "pirc-scripting",
  "serde",
  "tempfile",
+ "thiserror",
  "toml",
 ]
 

@@ -20,6 +20,7 @@ pirc-crypto = { path = "../pirc-crypto" }
 pirc-scripting = { path = "../pirc-scripting" }
 pirc-plugin = { path = "../pirc-plugin" }
 serde = { version = "1", features = ["derive"] }
+thiserror = "2"
 toml = "0.8"
 libc = "0.2"
 

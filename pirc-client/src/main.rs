@@ -1,3 +1,4 @@
+pub mod client_command;
 pub mod command_parser;
 mod config;
 #[allow(dead_code, unused_imports)]
