@@ -1,11 +1,11 @@
+mod app;
 pub mod client_command;
 pub mod command_parser;
 mod config;
-#[allow(dead_code, unused_imports)]
 mod connection_state;
-#[allow(dead_code, unused_imports)]
 mod tui;
 
+use app::App;
 use config::ClientConfig;
 use std::path::PathBuf;
 use std::process;
@@ -26,7 +26,8 @@ fn parse_config_path() -> Option<PathBuf> {
     None
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let config_path = parse_config_path();
 
     let config = match ClientConfig::load(config_path.as_deref()) {
@@ -42,10 +43,10 @@ fn main() {
         process::exit(1);
     }
 
-    let nick_display = config.identity.nick.as_deref().unwrap_or("<auto>");
+    let app = App::new(config);
 
-    println!(
-        "pirc connecting to {}:{} as {}",
-        config.server.address, config.server.port, nick_display
-    );
+    if let Err(e) = app.run().await {
+        eprintln!("error: {e}");
+        process::exit(1);
+    }
 }

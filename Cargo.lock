@@ -306,13 +306,16 @@ dependencies = [
  "libc",
  "pirc-common",
  "pirc-crypto",
+ "pirc-network",
  "pirc-plugin",
  "pirc-protocol",
  "pirc-scripting",
  "serde",
  "tempfile",
  "thiserror",
+ "tokio",
  "toml",
+ "tracing",
 ]
 
 [[package]]
