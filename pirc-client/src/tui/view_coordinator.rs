@@ -40,6 +40,7 @@ pub struct ViewCoordinator {
     width: u16,
     height: u16,
     nick: String,
+    lag: Option<u32>,
 }
 
 impl ViewCoordinator {
@@ -54,6 +55,7 @@ impl ViewCoordinator {
             width,
             height,
             nick: "pirc_user".to_string(),
+            lag: None,
         }
     }
 
@@ -67,6 +69,11 @@ impl ViewCoordinator {
     /// Set the current nick for status bar display.
     pub fn set_nick(&mut self, nick: String) {
         self.nick = nick;
+    }
+
+    /// Set the current server lag for status bar display.
+    pub fn set_lag(&mut self, lag: Option<u32>) {
+        self.lag = lag;
     }
 
     /// Return a reference to the buffer manager.
@@ -228,7 +235,7 @@ impl ViewCoordinator {
             buffer_id: active_id,
             topic: None,
             user_count: None,
-            lag: None,
+            lag: self.lag,
             away: false,
             scroll_info: None,
         };
@@ -573,6 +580,33 @@ mod tests {
         let mut vc = ViewCoordinator::new(80, 24, 100);
         vc.set_nick("testuser".into());
         assert_eq!(vc.nick, "testuser");
+    }
+
+    #[test]
+    fn set_lag_updates() {
+        let mut vc = ViewCoordinator::new(80, 24, 100);
+        assert_eq!(vc.lag, None);
+        vc.set_lag(Some(42));
+        assert_eq!(vc.lag, Some(42));
+        vc.set_lag(None);
+        assert_eq!(vc.lag, None);
+    }
+
+    #[test]
+    fn render_with_lag_shows_in_status_bar() {
+        let mut vc = ViewCoordinator::new(80, 24, 100);
+        vc.set_lag(Some(42));
+        let mut buf = Buffer::new(80, 24);
+        vc.render(&mut buf);
+        // Verify the lag indicator appears in the rendered output.
+        // The status bar is at a specific row — extract that row's text.
+        let layout = vc.layout.unwrap();
+        let row = layout.status_bar.y;
+        let text: String = (0..80).map(|col| buf.get(col, row).ch).collect();
+        assert!(
+            text.contains("lag: 42ms"),
+            "status bar should contain lag indicator: {text}"
+        );
     }
 
     // ── Rendering ────────────────────────────────────────────────

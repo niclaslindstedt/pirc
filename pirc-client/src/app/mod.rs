@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use pirc_network::connection::AsyncTransport;
 use pirc_network::{Connection, Connector, ShutdownController, ShutdownSignal};
-use pirc_protocol::Message;
+use pirc_protocol::{Command, Message};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::warn;
@@ -26,6 +26,16 @@ use crate::tui::{terminal_size, InputReader, RawModeGuard, SignalHandler};
 /// the connection is dropped.
 const REGISTRATION_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How often to check if we need to send a keepalive PING (seconds).
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+
+/// If no message is received from the server within this duration, send a PING.
+const KEEPALIVE_IDLE_THRESHOLD: Duration = Duration::from_secs(60);
+
+/// If no PONG is received within this duration after sending a PING,
+/// consider the connection dead.
+const PONG_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// Central coordinator for the pirc client.
 ///
 /// Owns the TUI state (view coordinator + renderer), the network connection
@@ -40,6 +50,12 @@ pub struct App {
     registration_deadline: Option<Instant>,
     shutdown_controller: ShutdownController,
     _shutdown_signal: ShutdownSignal,
+    /// When we last received any message from the server.
+    last_message_received: Option<Instant>,
+    /// When we sent a client keepalive PING (for lag measurement).
+    ping_sent_at: Option<Instant>,
+    /// Measured server lag in milliseconds.
+    lag_ms: Option<u32>,
 }
 
 impl App {
@@ -64,6 +80,9 @@ impl App {
             registration_deadline: None,
             shutdown_controller,
             _shutdown_signal: shutdown_signal,
+            last_message_received: None,
+            ping_sent_at: None,
+            lag_ms: None,
         }
     }
 
@@ -115,6 +134,10 @@ impl App {
         self.initiate_connection().await;
         self.render(&mut renderer)?;
 
+        // Keepalive timer
+        let mut keepalive_interval = tokio::time::interval(KEEPALIVE_INTERVAL);
+        keepalive_interval.tick().await; // consume the immediate first tick
+
         // Main event loop
         loop {
             tokio::select! {
@@ -138,6 +161,7 @@ impl App {
                 } => {
                     match msg {
                         Ok(Some(msg)) => {
+                            self.last_message_received = Some(Instant::now());
                             self.handle_server_message(&msg).await;
                             self.render(&mut renderer)?;
                         }
@@ -160,6 +184,11 @@ impl App {
                     }
                 } => {
                     self.handle_disconnect("Registration timed out (no RPL_WELCOME within 30s)");
+                    self.render(&mut renderer)?;
+                }
+                // Keepalive timer
+                _ = keepalive_interval.tick() => {
+                    self.handle_keepalive_tick().await;
                     self.render(&mut renderer)?;
                 }
             }
@@ -356,6 +385,30 @@ impl App {
     /// through the [`RegistrationState`] handler. Once registered, or for
     /// unhandled messages, the message router dispatches to the correct buffer.
     async fn handle_server_message(&mut self, msg: &Message) {
+        // Handle PING at the transport level — respond with PONG immediately.
+        if msg.command == Command::Ping {
+            let token = msg.params.first().cloned().unwrap_or_default();
+            let pong = Message::new(Command::Pong, vec![token]);
+            if let Some(ref mut conn) = self.connection {
+                if let Err(e) = conn.send(pong).await {
+                    warn!("Failed to send PONG: {e}");
+                }
+            }
+            return;
+        }
+
+        // Handle PONG — measure lag from our keepalive PINGs.
+        if msg.command == Command::Pong {
+            if let Some(sent_at) = self.ping_sent_at.take() {
+                let lag = sent_at.elapsed();
+                #[allow(clippy::cast_possible_truncation)]
+                let lag_ms = lag.as_millis().min(u32::MAX as u128) as u32;
+                self.lag_ms = Some(lag_ms);
+                self.view.set_lag(Some(lag_ms));
+            }
+            return;
+        }
+
         // During registration, let the registration handler process the message first.
         if self.registration.is_some() {
             let event = self.registration.as_mut().unwrap().handle_message(msg);
@@ -433,11 +486,65 @@ impl App {
         }
     }
 
+    /// Handle the keepalive timer tick.
+    ///
+    /// If connected and idle for longer than `KEEPALIVE_IDLE_THRESHOLD`, sends
+    /// a PING. If a PING was already sent and no PONG received within
+    /// `PONG_TIMEOUT`, triggers a disconnect.
+    async fn handle_keepalive_tick(&mut self) {
+        if !self.connection_mgr.is_connected() {
+            return;
+        }
+
+        // Check for PONG timeout — if we sent a PING and haven't received a
+        // PONG within the timeout window, consider the connection dead.
+        if let Some(sent_at) = self.ping_sent_at {
+            if sent_at.elapsed() >= PONG_TIMEOUT {
+                self.handle_disconnect("Connection timed out (no PONG received)");
+                return;
+            }
+        }
+
+        // If we already have an outstanding PING, don't send another.
+        if self.ping_sent_at.is_some() {
+            return;
+        }
+
+        // Only send a keepalive PING if we've been idle long enough.
+        let idle = self
+            .last_message_received
+            .map_or(true, |t| t.elapsed() >= KEEPALIVE_IDLE_THRESHOLD);
+        if !idle {
+            return;
+        }
+
+        // Send a client keepalive PING.
+        let token = format!(
+            "pirc-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        );
+        let ping = Message::new(Command::Ping, vec![token]);
+        if let Some(ref mut conn) = self.connection {
+            if let Err(e) = conn.send(ping).await {
+                warn!("Failed to send keepalive PING: {e}");
+                return;
+            }
+            self.ping_sent_at = Some(Instant::now());
+        }
+    }
+
     /// Handle a disconnection event.
     fn handle_disconnect(&mut self, reason: &str) {
         self.connection = None;
         self.registration = None;
         self.registration_deadline = None;
+        self.last_message_received = None;
+        self.ping_sent_at = None;
+        self.lag_ms = None;
+        self.view.set_lag(None);
         let _ = self
             .connection_mgr
             .transition(ConnectionState::Disconnected);
@@ -530,427 +637,4 @@ fn current_timestamp(format: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::ClientConfig;
-
-    #[test]
-    fn app_new_creates_with_defaults() {
-        let config = ClientConfig::default();
-        let app = App::new(config);
-        assert!(app.connection.is_none());
-        assert!(!app.connection_mgr.is_connected());
-    }
-
-    #[test]
-    fn app_new_uses_config_nick() {
-        let mut config = ClientConfig::default();
-        config.identity.nick = Some("testuser".to_string());
-        let app = App::new(config);
-        assert_eq!(app.connection_mgr.nick(), "testuser");
-    }
-
-    #[test]
-    fn current_timestamp_formats_hm() {
-        let ts = current_timestamp("%H:%M");
-        assert!(ts.contains(':'), "timestamp should contain a colon: {ts}");
-        assert_eq!(ts.len(), 5, "HH:MM should be 5 chars: {ts}");
-    }
-
-    #[test]
-    fn current_timestamp_fallback() {
-        let ts = current_timestamp("custom");
-        // Should be epoch seconds since format doesn't match
-        assert!(ts.parse::<u64>().is_ok());
-    }
-
-    #[test]
-    fn handle_disconnect_clears_connection() {
-        let mut config = ClientConfig::default();
-        config.identity.nick = Some("user".to_string());
-        let mut app = App::new(config);
-
-        // Manually force into Connecting then Registering states
-        app.connection_mgr
-            .transition(ConnectionState::Connecting)
-            .unwrap();
-        app.connection_mgr
-            .transition(ConnectionState::Registering)
-            .unwrap();
-        app.connection_mgr
-            .transition(ConnectionState::Connected {
-                server_name: "test".into(),
-            })
-            .unwrap();
-
-        app.handle_disconnect("test disconnect");
-        assert!(app.connection.is_none());
-        assert!(!app.connection_mgr.is_connected());
-    }
-
-    #[test]
-    fn push_status_adds_to_status_buffer() {
-        let config = ClientConfig::default();
-        let mut app = App::new(config);
-        app.push_status("hello world");
-        assert!(app.view.buffers().get(&crate::tui::buffer_manager::BufferId::Status).unwrap().len() > 0);
-    }
-
-    #[test]
-    fn dispatch_quit_returns_true() {
-        let config = ClientConfig::default();
-        let mut app = App::new(config);
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let result = rt.block_on(app.dispatch_view_action(ViewAction::Quit));
-        assert!(result);
-    }
-
-    #[test]
-    fn dispatch_none_returns_false() {
-        let config = ClientConfig::default();
-        let mut app = App::new(config);
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let result = rt.block_on(app.dispatch_view_action(ViewAction::None));
-        assert!(!result);
-    }
-
-    #[test]
-    fn dispatch_redraw_returns_false() {
-        let config = ClientConfig::default();
-        let mut app = App::new(config);
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let result = rt.block_on(app.dispatch_view_action(ViewAction::Redraw));
-        assert!(!result);
-    }
-
-    #[test]
-    fn dispatch_command_error_returns_false() {
-        let config = ClientConfig::default();
-        let mut app = App::new(config);
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let err = crate::client_command::CommandError::MissingArgument {
-            command: "join".into(),
-            argument: "channel".into(),
-        };
-        let result = rt.block_on(app.dispatch_view_action(ViewAction::CommandError(err)));
-        assert!(!result);
-    }
-
-    #[test]
-    fn handle_server_message_rpl_welcome() {
-        let mut config = ClientConfig::default();
-        config.identity.nick = Some("testuser".to_string());
-        let mut app = App::new(config);
-
-        // Must be in Registering state to transition to Connected
-        app.connection_mgr
-            .transition(ConnectionState::Connecting)
-            .unwrap();
-        app.connection_mgr
-            .transition(ConnectionState::Registering)
-            .unwrap();
-
-        // Set up registration state (as initiate_connection would)
-        app.registration = Some(RegistrationState::new(
-            "testuser".into(),
-            vec![],
-            "testuser".into(),
-            "testuser".into(),
-        ));
-        app.registration_deadline = Some(Instant::now() + REGISTRATION_TIMEOUT);
-
-        let msg = Message::with_prefix(
-            pirc_protocol::Prefix::Server("irc.test.net".into()),
-            pirc_protocol::Command::Numeric(1),
-            vec![
-                "testuser".into(),
-                "Welcome to the test network!".into(),
-            ],
-        );
-
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(app.handle_server_message(&msg));
-        assert!(app.connection_mgr.is_connected());
-        assert_eq!(app.connection_mgr.server_name(), Some("irc.test.net"));
-        assert!(app.registration.is_none());
-        assert!(app.registration_deadline.is_none());
-    }
-
-    #[test]
-    fn handle_server_message_rpl_welcome_updates_nick() {
-        let mut config = ClientConfig::default();
-        config.identity.nick = Some("mynick".to_string());
-        let mut app = App::new(config);
-
-        app.connection_mgr
-            .transition(ConnectionState::Connecting)
-            .unwrap();
-        app.connection_mgr
-            .transition(ConnectionState::Registering)
-            .unwrap();
-
-        app.registration = Some(RegistrationState::new(
-            "mynick".into(),
-            vec![],
-            "mynick".into(),
-            "mynick".into(),
-        ));
-
-        let msg = Message::with_prefix(
-            pirc_protocol::Prefix::Server("irc.test.net".into()),
-            pirc_protocol::Command::Numeric(1),
-            vec![
-                "servernick".into(),
-                "Welcome!".into(),
-            ],
-        );
-
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(app.handle_server_message(&msg));
-        assert_eq!(app.connection_mgr.nick(), "servernick");
-    }
-
-    #[test]
-    fn handle_server_message_info_numerics() {
-        let mut config = ClientConfig::default();
-        config.identity.nick = Some("user".to_string());
-        let mut app = App::new(config);
-
-        app.connection_mgr
-            .transition(ConnectionState::Connecting)
-            .unwrap();
-        app.connection_mgr
-            .transition(ConnectionState::Registering)
-            .unwrap();
-        app.registration = Some(RegistrationState::new(
-            "user".into(), vec![], "user".into(), "user".into(),
-        ));
-
-        let initial_count = app
-            .view
-            .buffers()
-            .get(&crate::tui::buffer_manager::BufferId::Status)
-            .unwrap()
-            .len();
-
-        let msg = Message::new(
-            pirc_protocol::Command::Numeric(2),
-            vec!["user".into(), "Your host is irc.test.net".into()],
-        );
-
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(app.handle_server_message(&msg));
-
-        let new_count = app
-            .view
-            .buffers()
-            .get(&crate::tui::buffer_manager::BufferId::Status)
-            .unwrap()
-            .len();
-        assert_eq!(new_count, initial_count + 1);
-    }
-
-    #[test]
-    fn handle_server_message_nick_in_use() {
-        let mut config = ClientConfig::default();
-        config.identity.nick = Some("mynick".to_string());
-        config.identity.alt_nicks = vec!["alt1".into()];
-        let mut app = App::new(config);
-
-        app.connection_mgr
-            .transition(ConnectionState::Connecting)
-            .unwrap();
-        app.connection_mgr
-            .transition(ConnectionState::Registering)
-            .unwrap();
-        app.registration = Some(RegistrationState::new(
-            "mynick".into(),
-            vec!["alt1".into()],
-            "mynick".into(),
-            "mynick".into(),
-        ));
-
-        let msg = Message::new(
-            pirc_protocol::Command::Numeric(433),
-            vec!["*".into(), "mynick".into(), "Nickname is already in use".into()],
-        );
-
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(app.handle_server_message(&msg));
-
-        // Nick should have been updated to alt1
-        assert_eq!(app.connection_mgr.nick(), "alt1");
-        // Still registering
-        assert!(!app.connection_mgr.is_connected());
-        assert!(app.registration.is_some());
-    }
-
-    #[test]
-    fn handle_server_message_ping_ignored() {
-        let config = ClientConfig::default();
-        let mut app = App::new(config);
-
-        let msg = Message::new(
-            pirc_protocol::Command::Ping,
-            vec!["server".into()],
-        );
-
-        let initial_count = app
-            .view
-            .buffers()
-            .get(&crate::tui::buffer_manager::BufferId::Status)
-            .unwrap()
-            .len();
-
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(app.handle_server_message(&msg));
-
-        let new_count = app
-            .view
-            .buffers()
-            .get(&crate::tui::buffer_manager::BufferId::Status)
-            .unwrap()
-            .len();
-
-        // PING is transport-level and should not produce buffer output
-        assert_eq!(new_count, initial_count);
-    }
-
-    #[test]
-    fn handle_server_message_privmsg_to_channel() {
-        let config = ClientConfig::default();
-        let mut app = App::new(config);
-
-        let msg = Message::with_prefix(
-            pirc_protocol::Prefix::user("alice", "alice", "host.com"),
-            pirc_protocol::Command::Privmsg,
-            vec!["#test".into(), "hello world".into()],
-        );
-
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(app.handle_server_message(&msg));
-
-        // Channel buffer should have been created and contain the message
-        let buf = app
-            .view
-            .buffers()
-            .get(&crate::tui::buffer_manager::BufferId::Channel("#test".into()))
-            .expect("channel buffer should exist");
-        assert_eq!(buf.len(), 1);
-    }
-
-    #[test]
-    fn handle_server_message_privmsg_query() {
-        let mut config = ClientConfig::default();
-        config.identity.nick = Some("mynick".into());
-        let mut app = App::new(config);
-
-        let msg = Message::with_prefix(
-            pirc_protocol::Prefix::user("bob", "bob", "host.com"),
-            pirc_protocol::Command::Privmsg,
-            vec!["mynick".into(), "hey there".into()],
-        );
-
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(app.handle_server_message(&msg));
-
-        // Query buffer should have been auto-created
-        let buf = app
-            .view
-            .buffers()
-            .get(&crate::tui::buffer_manager::BufferId::Query("bob".into()))
-            .expect("query buffer should exist");
-        assert_eq!(buf.len(), 1);
-    }
-
-    #[test]
-    fn handle_server_message_nick_change_updates_state() {
-        let mut config = ClientConfig::default();
-        config.identity.nick = Some("oldnick".into());
-        let mut app = App::new(config);
-
-        let msg = Message::with_prefix(
-            pirc_protocol::Prefix::user("oldnick", "oldnick", "host.com"),
-            pirc_protocol::Command::Nick,
-            vec!["newnick".into()],
-        );
-
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(app.handle_server_message(&msg));
-
-        assert_eq!(app.connection_mgr.nick(), "newnick");
-    }
-
-    #[test]
-    fn handle_disconnect_clears_registration() {
-        let mut config = ClientConfig::default();
-        config.identity.nick = Some("user".to_string());
-        let mut app = App::new(config);
-
-        app.connection_mgr
-            .transition(ConnectionState::Connecting)
-            .unwrap();
-        app.connection_mgr
-            .transition(ConnectionState::Registering)
-            .unwrap();
-        app.registration = Some(RegistrationState::new(
-            "user".into(), vec![], "user".into(), "user".into(),
-        ));
-        app.registration_deadline = Some(Instant::now() + REGISTRATION_TIMEOUT);
-
-        app.handle_disconnect("test disconnect");
-        assert!(app.registration.is_none());
-        assert!(app.registration_deadline.is_none());
-        assert!(app.connection.is_none());
-    }
-
-    #[test]
-    fn render_input_line_works() {
-        let mut config = ClientConfig::default();
-        config.identity.nick = Some("nick".to_string());
-        let app = App::new(config);
-
-        let mut buf = Buffer::new(80, 24);
-        app.render_input_line(&mut buf);
-
-        // Check that the prompt is rendered
-        let cell = buf.get(0, 23);
-        assert_eq!(cell.ch, '[');
-    }
-}
+mod tests;
