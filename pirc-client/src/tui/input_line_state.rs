@@ -199,6 +199,15 @@ impl InputLineState {
         self.scroll_offset
     }
 
+    /// Replace the entire buffer content and move cursor to end.
+    pub fn set_content(&mut self, text: &str) {
+        self.buf.clear();
+        self.buf.push_str(text);
+        self.cursor_char = self.buf.chars().count();
+        self.cursor_byte = self.buf.len();
+        self.scroll_offset = 0;
+    }
+
     /// Return `true` if the buffer is empty.
     pub fn is_empty(&self) -> bool {
         self.buf.is_empty()
