@@ -597,3 +597,206 @@ async fn raft_error_display() {
         "raft driver has shut down"
     );
 }
+
+// --- Membership change via RaftHandle tests ---
+
+use std::net::SocketAddr;
+
+use crate::raft::membership::{MembershipChange, MembershipError};
+
+#[tokio::test]
+async fn handle_membership_change_fails_when_not_leader() {
+    let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
+        .config(test_config(1, vec![2, 3]))
+        .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
+        .build()
+        .await
+        .unwrap();
+
+    tokio::spawn(async move {
+        driver.run().await;
+    });
+
+    // Give the driver a moment to start (node is Follower).
+    time::sleep(Duration::from_millis(10)).await;
+
+    let addr: SocketAddr = "10.0.0.4:7000".parse().unwrap();
+    let result = handle
+        .propose_membership_change(
+            MembershipChange::AddServer(NodeId::new(4), addr),
+            "noop".to_owned(),
+        )
+        .await;
+
+    assert!(result.is_err());
+    assert!(matches!(result.unwrap_err(), MembershipError::NotLeader));
+
+    shutdown.shutdown();
+}
+
+#[tokio::test]
+async fn handle_membership_change_solo_leader_success() {
+    // Solo node auto-elects. After becoming leader, it needs to commit an entry
+    // in the current term before membership changes are allowed.
+    let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
+        .config(test_config(1, vec![]))
+        .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
+        .build()
+        .await
+        .unwrap();
+
+    tokio::spawn(async move {
+        driver.run().await;
+    });
+
+    // Wait for solo node to become leader.
+    time::sleep(Duration::from_millis(250)).await;
+    assert!(handle.is_leader());
+
+    // First, commit an entry in the current term (required for membership changes).
+    handle.propose("setup".to_owned()).unwrap();
+    time::sleep(Duration::from_millis(50)).await;
+
+    // Now propose a membership change.
+    let addr: SocketAddr = "10.0.0.4:7000".parse().unwrap();
+    let result = handle
+        .propose_membership_change(
+            MembershipChange::AddServer(NodeId::new(4), addr),
+            "add-server-4".to_owned(),
+        )
+        .await;
+
+    assert!(result.is_ok());
+    let index = result.unwrap();
+    // Index 1 = the "setup" entry, index 2 = the membership change entry.
+    assert_eq!(index, LogIndex::new(2));
+
+    shutdown.shutdown();
+}
+
+#[tokio::test]
+async fn handle_membership_change_no_current_term_commit() {
+    // Leader that hasn't committed an entry in the current term should reject.
+    // Use a 3-node cluster so we can control when commits happen.
+    let (mut driver, handle, shutdown, inbound_tx, _outbound_rx) = RaftBuilder::new()
+        .config(test_config(1, vec![2, 3]))
+        .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
+        .build()
+        .await
+        .unwrap();
+
+    tokio::spawn(async move {
+        driver.run().await;
+    });
+
+    // Wait for election, then become leader.
+    time::sleep(Duration::from_millis(250)).await;
+    let term = handle.current_term();
+
+    inbound_tx
+        .send((
+            NodeId::new(2),
+            RaftMessage::RequestVoteResponse(RequestVoteResponse {
+                term,
+                vote_granted: true,
+            }),
+        ))
+        .unwrap();
+
+    time::sleep(Duration::from_millis(50)).await;
+    assert!(handle.is_leader());
+
+    // Propose membership change without any committed entry in current term.
+    let addr: SocketAddr = "10.0.0.5:7000".parse().unwrap();
+    let result = handle
+        .propose_membership_change(
+            MembershipChange::AddServer(NodeId::new(5), addr),
+            "noop".to_owned(),
+        )
+        .await;
+
+    assert!(result.is_err());
+    assert!(matches!(
+        result.unwrap_err(),
+        MembershipError::NoCurrentTermCommit
+    ));
+
+    shutdown.shutdown();
+}
+
+#[tokio::test]
+async fn handle_membership_change_already_member() {
+    // Solo leader tries to add a node that is already a member (itself).
+    let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
+        .config(test_config(1, vec![]))
+        .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
+        .build()
+        .await
+        .unwrap();
+
+    tokio::spawn(async move {
+        driver.run().await;
+    });
+
+    time::sleep(Duration::from_millis(250)).await;
+    assert!(handle.is_leader());
+
+    // Commit an entry first.
+    handle.propose("setup".to_owned()).unwrap();
+    time::sleep(Duration::from_millis(50)).await;
+
+    // Try to add node 1, which is already a member.
+    let addr: SocketAddr = "10.0.0.1:7000".parse().unwrap();
+    let result = handle
+        .propose_membership_change(
+            MembershipChange::AddServer(NodeId::new(1), addr),
+            "noop".to_owned(),
+        )
+        .await;
+
+    assert!(result.is_err());
+    assert!(matches!(
+        result.unwrap_err(),
+        MembershipError::AlreadyMember(_)
+    ));
+
+    shutdown.shutdown();
+}
+
+#[tokio::test]
+async fn handle_membership_change_driver_shutdown_returns_error() {
+    // If the driver shuts down, the membership proposal should fail.
+    let (_driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
+        .config(test_config(1, vec![]))
+        .storage(MemStorage::new())
+        .state_machine(NullStateMachine)
+        .build()
+        .await
+        .unwrap();
+
+    // Shut down without running the driver — the channel will close.
+    shutdown.shutdown();
+    drop(_driver);
+
+    let addr: SocketAddr = "10.0.0.4:7000".parse().unwrap();
+    let result = handle
+        .propose_membership_change(
+            MembershipChange::AddServer(NodeId::new(4), addr),
+            "noop".to_owned(),
+        )
+        .await;
+
+    assert!(result.is_err());
+    // When driver is dropped, membership_rx is dropped, so send fails.
+    assert!(matches!(result.unwrap_err(), MembershipError::NotLeader));
+}
+
+#[tokio::test]
+async fn raft_error_membership_variant_display() {
+    let err = RaftError::Membership(MembershipError::NotLeader);
+    assert_eq!(err.to_string(), "membership change failed: not the leader");
+}

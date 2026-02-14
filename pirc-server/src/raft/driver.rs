@@ -1,18 +1,29 @@
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{self, Instant};
 use tracing::{debug, info, warn};
 
+use super::membership::{MembershipChange, MembershipError};
 use super::node::RaftNode;
 use super::rpc::RaftMessage;
 use super::snapshot::StateMachine;
 use super::storage::RaftStorage;
 use super::types::{LogEntry, LogIndex, NodeId, RaftConfig, RaftState, Term};
 
+/// A membership change proposal sent from [`RaftHandle`] to [`RaftDriver`].
+///
+/// Includes a oneshot channel to notify the caller of the result.
+pub(crate) struct MembershipProposal<T> {
+    pub change: MembershipChange,
+    pub noop_command: T,
+    pub respond: oneshot::Sender<Result<LogIndex, MembershipError>>,
+}
+
 /// A handle for interacting with a running Raft node.
 ///
 /// Uses channels and watch to communicate with the driver loop.
 pub struct RaftHandle<T: Send + 'static> {
     proposal_tx: mpsc::UnboundedSender<T>,
+    membership_tx: mpsc::UnboundedSender<MembershipProposal<T>>,
     commit_rx: mpsc::UnboundedReceiver<LogEntry<T>>,
     state_rx: watch::Receiver<(RaftState, Term, Option<NodeId>)>,
 }
@@ -51,6 +62,32 @@ impl<T: Send + 'static> RaftHandle<T> {
         self.state_rx.borrow().0
     }
 
+    /// Propose a membership change to the Raft cluster.
+    ///
+    /// Sends the change to the driver loop, which applies it via
+    /// [`RaftNode::propose_membership_change`]. Returns the log index of
+    /// the membership entry on success, or a [`MembershipError`] on failure.
+    ///
+    /// The `noop_command` is the log entry payload that carries the
+    /// membership change (the actual membership metadata is tracked
+    /// internally by the Raft node).
+    pub async fn propose_membership_change(
+        &self,
+        change: MembershipChange,
+        noop_command: T,
+    ) -> Result<LogIndex, MembershipError> {
+        let (tx, rx) = oneshot::channel();
+        let proposal = MembershipProposal {
+            change,
+            noop_command,
+            respond: tx,
+        };
+        self.membership_tx
+            .send(proposal)
+            .map_err(|_| MembershipError::NotLeader)?;
+        rx.await.unwrap_or(Err(MembershipError::NotLeader))
+    }
+
     /// Take the commit receiver to consume committed log entries.
     ///
     /// This can only be called once; subsequent calls return an empty receiver.
@@ -67,6 +104,8 @@ pub enum RaftError {
     NotLeader,
     #[error("raft driver has shut down")]
     Shutdown,
+    #[error("membership change failed: {0}")]
+    Membership(#[from] MembershipError),
 }
 
 /// Signal used to request graceful shutdown of the driver loop.
@@ -119,6 +158,8 @@ where
     outbound_fwd: mpsc::UnboundedSender<(NodeId, RaftMessage<T>)>,
     /// Client proposals to be appended to the log.
     proposal_rx: mpsc::UnboundedReceiver<T>,
+    /// Membership change proposals from the handle.
+    membership_rx: mpsc::UnboundedReceiver<MembershipProposal<T>>,
     /// Sender for committed entries (consumed by the application).
     commit_tx: mpsc::UnboundedSender<LogEntry<T>>,
     /// Publishes state changes for external queries.
@@ -188,6 +229,11 @@ where
                 // Client proposal.
                 Some(command) = self.proposal_rx.recv() => {
                     self.handle_proposal(command);
+                }
+
+                // Membership change proposal.
+                Some(proposal) = self.membership_rx.recv() => {
+                    self.handle_membership_proposal(proposal);
                 }
 
                 // Shutdown signal.
@@ -371,6 +417,33 @@ where
         }
     }
 
+    fn handle_membership_proposal(&mut self, proposal: MembershipProposal<T>) {
+        let result = self
+            .node
+            .propose_membership_change(proposal.change, proposal.noop_command);
+
+        match &result {
+            Ok(index) => {
+                debug!(
+                    node = %self.node.node_id(),
+                    index = %index,
+                    "membership change proposed"
+                );
+                // Check if we can immediately commit (e.g. solo node).
+                self.node.advance_commit_index();
+            }
+            Err(e) => {
+                debug!(
+                    node = %self.node.node_id(),
+                    error = %e,
+                    "membership change proposal rejected"
+                );
+            }
+        }
+
+        let _ = proposal.respond.send(result);
+    }
+
     fn apply_committed_entries(&mut self) {
         let last_applied = self.node.volatile_state().last_applied;
         let commit_index = self.node.volatile_state().commit_index;
@@ -526,6 +599,7 @@ where
 
         let (inbound_tx, inbound_rx) = mpsc::unbounded_channel();
         let (proposal_tx, proposal_rx) = mpsc::unbounded_channel();
+        let (membership_tx, membership_rx) = mpsc::unbounded_channel();
         let (commit_tx, commit_rx) = mpsc::unbounded_channel();
         let (outbound_fwd, outbound_ext_rx) = mpsc::unbounded_channel();
         let (shutdown_sender, shutdown_signal) = shutdown_channel();
@@ -540,6 +614,7 @@ where
             outbound_rx,
             outbound_fwd,
             proposal_rx,
+            membership_rx,
             commit_tx,
             state_tx,
             shutdown: shutdown_signal,
@@ -548,6 +623,7 @@ where
 
         let handle = RaftHandle {
             proposal_tx,
+            membership_tx,
             commit_rx,
             state_rx,
         };
