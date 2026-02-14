@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -7,6 +9,8 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
 use pirc_common::{InviteKeyError, ServerId};
+
+const INVITE_KEYS_FILENAME: &str = "invite_keys.json";
 
 /// Default invite key validity period (24 hours).
 const DEFAULT_TTL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -164,6 +168,39 @@ impl InviteKeyStore {
             let consumed = record.single_use && record.used;
             !expired && !consumed
         });
+    }
+
+    /// Returns the file path for persisted invite keys within the given data directory.
+    pub fn file_path(data_dir: &Path) -> PathBuf {
+        data_dir.join(INVITE_KEYS_FILENAME)
+    }
+
+    /// Save all invite keys to `data_dir/invite_keys.json`.
+    pub fn save(&self, data_dir: &Path) -> io::Result<()> {
+        let path = Self::file_path(data_dir);
+        let records: Vec<&InviteKeyRecord> = self.keys.values().collect();
+        let json = serde_json::to_string_pretty(&records)
+            .map_err(io::Error::other)?;
+        std::fs::write(path, json)
+    }
+
+    /// Load invite keys from `data_dir/invite_keys.json`.
+    ///
+    /// Returns a new `InviteKeyStore` populated with the persisted keys.
+    /// Returns an empty store if the file does not exist.
+    pub fn load(data_dir: &Path) -> io::Result<Self> {
+        let path = Self::file_path(data_dir);
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+        let json = std::fs::read_to_string(path)?;
+        let records: Vec<InviteKeyRecord> = serde_json::from_str(&json)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let mut keys = HashMap::new();
+        for record in records {
+            keys.insert(record.key.as_str().to_owned(), record);
+        }
+        Ok(Self { keys })
     }
 }
 
@@ -497,5 +534,60 @@ mod tests {
     fn default_creates_empty_store() {
         let store = InviteKeyStore::default();
         assert!(store.list().is_empty());
+    }
+
+    // ---- Persistence: save / load ----
+
+    #[test]
+    fn save_and_load_roundtrip() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut store = InviteKeyStore::new();
+        let creator = ServerId::new(1);
+        let key1 = store.create(creator, None, true);
+        let key2 = store.create(creator, None, false);
+
+        store.save(dir.path()).expect("save");
+
+        let loaded = InviteKeyStore::load(dir.path()).expect("load");
+        assert_eq!(loaded.list().len(), 2);
+        assert!(loaded.get(key1.as_str()).is_some());
+        assert!(loaded.get(key2.as_str()).is_some());
+
+        let r1 = loaded.get(key1.as_str()).unwrap();
+        assert!(r1.single_use);
+        assert!(!r1.used);
+
+        let r2 = loaded.get(key2.as_str()).unwrap();
+        assert!(!r2.single_use);
+    }
+
+    #[test]
+    fn load_returns_empty_store_when_no_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let loaded = InviteKeyStore::load(dir.path()).expect("load");
+        assert!(loaded.list().is_empty());
+    }
+
+    #[test]
+    fn save_preserves_used_state() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut store = InviteKeyStore::new();
+        let key = store.create(ServerId::new(1), None, true);
+        store.validate(key.as_str()).unwrap();
+
+        store.save(dir.path()).expect("save");
+
+        let loaded = InviteKeyStore::load(dir.path()).expect("load");
+        let record = loaded.get(key.as_str()).unwrap();
+        assert!(record.used);
+    }
+
+    #[test]
+    fn file_path_uses_correct_filename() {
+        let dir = std::path::Path::new("/data/raft");
+        assert_eq!(
+            InviteKeyStore::file_path(dir),
+            std::path::PathBuf::from("/data/raft/invite_keys.json")
+        );
     }
 }

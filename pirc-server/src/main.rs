@@ -8,7 +8,7 @@ use pirc_network::connection::AsyncTransport;
 use pirc_network::{Connection, Connector, Listener, ShutdownController, ShutdownSignal};
 use pirc_protocol::{Command, Message};
 use pirc_server::channel_registry::ChannelRegistry;
-use pirc_server::cluster::{ClusterService, InviteKeyStore};
+use pirc_server::cluster::{ClusterService, InviteKeyStore, PersistedClusterState, PersistedPeer};
 use pirc_server::config::{ClusterStartupMode, ServerConfig};
 use pirc_server::handler::{self, HandleResult, PreRegistrationState};
 use pirc_server::raft::rpc::RaftMessage;
@@ -346,8 +346,9 @@ async fn init_bootstrap(
     handles.push(driver_handle);
 
     // Create the invite key store and cluster service.
-    let invite_keys = Arc::new(Mutex::new(InviteKeyStore::new()));
     let self_addr = cluster_self_addr(config);
+    let invite_keys = Arc::new(Mutex::new(InviteKeyStore::new()));
+    let next_node_id_start = node_id.as_u64() + 1000;
     let cluster_service = Arc::new(ClusterService::new(
         Arc::clone(&invite_keys),
         Arc::clone(&handle),
@@ -355,8 +356,13 @@ async fn init_bootstrap(
         Arc::clone(&shared_peer_map),
         node_id,
         self_addr,
-        node_id.as_u64() + 1000, // start assigning IDs above our own
+        next_node_id_start,
     ));
+
+    // Persist initial cluster state so we can rejoin later.
+    let persisted = PersistedClusterState::new_bootstrap(node_id, self_addr);
+    persisted.save(&data_dir)?;
+    info!("persisted initial cluster state");
 
     info!("cluster bootstrapped as master");
     Ok(ClusterState {
@@ -444,6 +450,15 @@ async fn init_join(
     let handle = Arc::new(handle);
     let mut handles = Vec::new();
 
+    // Build persisted peers before peer_map_entries is consumed.
+    let persisted_peers: Vec<PersistedPeer> = peer_map_entries
+        .iter()
+        .map(|(id, addr)| PersistedPeer {
+            id: *id,
+            addr: *addr,
+        })
+        .collect();
+
     let peer_map = PeerMap::new(peer_map_entries);
     let shared_peer_map: SharedPeerMap = Arc::new(RwLock::new(peer_map.clone()));
     let peer_conns = Arc::new(Mutex::new(PeerConnections::new(peer_map)));
@@ -476,8 +491,9 @@ async fn init_join(
     });
     handles.push(driver_handle);
 
-    let invite_keys = Arc::new(Mutex::new(InviteKeyStore::new()));
     let self_addr = cluster_self_addr(config);
+    let invite_keys = Arc::new(Mutex::new(InviteKeyStore::new()));
+    let next_node_id_start = assigned_id.as_u64() + 1000;
     let cluster_service = Arc::new(ClusterService::new(
         Arc::clone(&invite_keys),
         Arc::clone(&handle),
@@ -485,8 +501,13 @@ async fn init_join(
         Arc::clone(&shared_peer_map),
         assigned_id,
         self_addr,
-        assigned_id.as_u64() + 1000,
+        next_node_id_start,
     ));
+
+    // Persist cluster state so we can rejoin later without an invite key.
+    let persisted = PersistedClusterState::new_from_join(assigned_id, self_addr, persisted_peers);
+    persisted.save(&data_dir)?;
+    info!("persisted cluster state after join");
 
     info!("joined cluster successfully");
     Ok(ClusterState {
@@ -498,20 +519,76 @@ async fn init_join(
 }
 
 /// Rejoin with existing persisted Raft state and static peer config.
+///
+/// If a persisted `cluster_state.json` exists in the data directory, it is
+/// used for node ID and peer configuration instead of the static config file.
 async fn init_rejoin(
     config: &ServerConfig,
     shutdown_signal: &ShutdownSignal,
 ) -> Result<ClusterState, Box<dyn std::error::Error>> {
-    let raft_config = config
-        .cluster
-        .to_raft_config()
-        .ok_or("rejoin mode requires cluster.node_id")?;
-
-    let node_id = raft_config.node_id;
     let data_dir = config.cluster.raft_data_dir();
-    info!(?data_dir, %node_id, "rejoining cluster with persisted state");
-
     std::fs::create_dir_all(&data_dir)?;
+
+    // Try to load persisted cluster state first.
+    let persisted = PersistedClusterState::load(&data_dir)?;
+
+    let (node_id, self_addr, peer_map_entries, next_node_id_start) = if let Some(ref state) =
+        persisted
+    {
+        info!(
+            node_id = %state.node_id,
+            generation = state.generation,
+            peers = state.peers.len(),
+            "loaded persisted cluster state"
+        );
+        let entries: Vec<_> = state.peers.iter().map(|p| (p.id, p.addr)).collect();
+        (
+            state.node_id,
+            state.self_addr,
+            entries,
+            state.next_node_id,
+        )
+    } else {
+        info!("no persisted cluster state found, using config file");
+        let raft_cfg = config
+            .cluster
+            .to_raft_config()
+            .ok_or("rejoin mode requires cluster.node_id")?;
+        let nid = raft_cfg.node_id;
+        let peer_entries = config.cluster.parse_peers();
+        let entries: Vec<_> = peer_entries
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .address
+                    .parse::<SocketAddr>()
+                    .ok()
+                    .map(|addr| (entry.node_id, addr))
+            })
+            .collect();
+        let sa = cluster_self_addr(config);
+        (nid, sa, entries, nid.as_u64() + 1000)
+    };
+
+    info!(?data_dir, %node_id, "rejoining cluster");
+
+    // Build raft config with peer IDs.
+    let peer_ids: Vec<NodeId> = peer_map_entries.iter().map(|(id, _)| *id).collect();
+    let raft_config = pirc_server::raft::RaftConfig {
+        election_timeout_min: Duration::from_millis(
+            config.cluster.election_timeout_min_ms.unwrap_or(150),
+        ),
+        election_timeout_max: Duration::from_millis(
+            config.cluster.election_timeout_max_ms.unwrap_or(300),
+        ),
+        heartbeat_interval: Duration::from_millis(
+            config.cluster.heartbeat_interval_ms.unwrap_or(50),
+        ),
+        node_id,
+        peers: peer_ids,
+        ..pirc_server::raft::RaftConfig::default()
+    };
+
     let storage = FileStorage::new(&data_dir).await?;
 
     let (mut driver, handle, shutdown_sender, inbound_tx, outbound_rx) =
@@ -525,17 +602,6 @@ async fn init_rejoin(
     let handle = Arc::new(handle);
     let mut handles = Vec::new();
 
-    let peer_entries = config.cluster.parse_peers();
-    let peer_map_entries: Vec<_> = peer_entries
-        .iter()
-        .filter_map(|entry| {
-            entry
-                .address
-                .parse::<SocketAddr>()
-                .ok()
-                .map(|addr| (entry.node_id, addr))
-        })
-        .collect();
     let peer_map = PeerMap::new(peer_map_entries);
     let shared_peer_map: SharedPeerMap = Arc::new(RwLock::new(peer_map.clone()));
     let peer_conns = Arc::new(Mutex::new(PeerConnections::new(peer_map)));
@@ -567,8 +633,9 @@ async fn init_rejoin(
     });
     handles.push(driver_handle);
 
-    let invite_keys = Arc::new(Mutex::new(InviteKeyStore::new()));
-    let self_addr = cluster_self_addr(config);
+    // Load persisted invite keys if available.
+    let invite_store = InviteKeyStore::load(&data_dir).unwrap_or_default();
+    let invite_keys = Arc::new(Mutex::new(invite_store));
     let cluster_service = Arc::new(ClusterService::new(
         Arc::clone(&invite_keys),
         Arc::clone(&handle),
@@ -576,7 +643,7 @@ async fn init_rejoin(
         Arc::clone(&shared_peer_map),
         node_id,
         self_addr,
-        node_id.as_u64() + 1000,
+        next_node_id_start,
     ));
 
     info!("cluster rejoin initialized");
