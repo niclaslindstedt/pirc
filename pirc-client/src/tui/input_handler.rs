@@ -30,8 +30,8 @@ pub enum InputAction {
     ScrollUp,
     /// Scroll the message view down by one page.
     ScrollDown,
-    /// The user requested quit (Ctrl+C or `/quit`).
-    Quit,
+    /// The user requested quit (Ctrl+C or `/quit`), with an optional reason.
+    Quit(Option<String>),
     /// The terminal was resized to (cols, rows).
     Resize(u16, u16),
 }
@@ -189,7 +189,7 @@ impl InputHandler {
             KeyEvent::Ctrl('c') => {
                 self.completer.reset();
                 if self.line.is_empty() {
-                    InputAction::Quit
+                    InputAction::Quit(None)
                 } else {
                     self.line.clear();
                     self.history.reset_navigation();
@@ -233,8 +233,8 @@ impl InputHandler {
             ParsedInput::Command { name, args } => {
                 match ClientCommand::from_parsed(&name, &args) {
                     Ok(cmd) => {
-                        if matches!(cmd, ClientCommand::Quit(_)) {
-                            InputAction::Quit
+                        if let ClientCommand::Quit(reason) = cmd {
+                            InputAction::Quit(reason)
                         } else {
                             InputAction::Command(cmd)
                         }
@@ -399,7 +399,7 @@ mod tests {
         for ch in "/quit".chars() {
             h.handle_key(KeyEvent::Char(ch));
         }
-        assert_eq!(h.handle_key(KeyEvent::Enter), InputAction::Quit);
+        assert_eq!(h.handle_key(KeyEvent::Enter), InputAction::Quit(None));
     }
 
     #[test]
@@ -408,7 +408,10 @@ mod tests {
         for ch in "/quit goodbye".chars() {
             h.handle_key(KeyEvent::Char(ch));
         }
-        assert_eq!(h.handle_key(KeyEvent::Enter), InputAction::Quit);
+        assert_eq!(
+            h.handle_key(KeyEvent::Enter),
+            InputAction::Quit(Some("goodbye".to_string()))
+        );
     }
 
     #[test]
@@ -647,7 +650,7 @@ mod tests {
     #[test]
     fn ctrl_c_on_empty_line_quits() {
         let mut h = handler();
-        assert_eq!(h.handle_key(KeyEvent::Ctrl('c')), InputAction::Quit);
+        assert_eq!(h.handle_key(KeyEvent::Ctrl('c')), InputAction::Quit(None));
     }
 
     #[test]
@@ -899,7 +902,7 @@ mod tests {
         assert!(h.line().is_empty());
 
         // Now Ctrl+C on empty line quits.
-        assert_eq!(h.handle_key(KeyEvent::Ctrl('c')), InputAction::Quit);
+        assert_eq!(h.handle_key(KeyEvent::Ctrl('c')), InputAction::Quit(None));
     }
 
     #[test]

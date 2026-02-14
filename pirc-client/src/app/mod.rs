@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, Write};
 use std::net::ToSocketAddrs;
 use std::time::Duration;
 
@@ -110,6 +110,24 @@ impl App {
         // Enter raw mode (alternate screen, hide cursor)
         let _guard = RawModeGuard::enable()?;
 
+        // Install a panic hook that restores the terminal before printing
+        // the panic message. Without this, a panic leaves the terminal in
+        // raw mode with the alternate screen buffer active.
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            // Best-effort terminal restoration
+            let mut stdout = io::stdout().lock();
+            let _ = stdout.write_all(b"\x1b[?25h"); // show cursor
+            let _ = stdout.write_all(b"\x1b[?1049l"); // leave alternate screen
+            let _ = stdout.flush();
+
+            // Restore cooked mode — get the fd and reset termios.
+            // We can't easily access the saved termios here, but leaving
+            // the alternate screen is the most important part. The
+            // RawModeGuard's Drop will also run after the panic unwind.
+            default_hook(info);
+        }));
+
         // Create renderer
         let (width, height) = terminal_size().map_or((80, 24), |s| (s.cols, s.rows));
         let stdout = io::stdout();
@@ -164,6 +182,11 @@ impl App {
                     if should_quit {
                         break;
                     }
+                }
+                // External SIGINT (e.g. `kill -INT <pid>`) — clean quit
+                _ = tokio::signal::ctrl_c() => {
+                    self.handle_quit(None).await;
+                    break;
                 }
                 // Network recv
                 msg = async {
@@ -319,7 +342,10 @@ impl App {
     async fn dispatch_view_action(&mut self, action: ViewAction) -> bool {
         match action {
             ViewAction::None | ViewAction::Redraw => false,
-            ViewAction::Quit => true,
+            ViewAction::Quit(reason) => {
+                self.handle_quit(reason).await;
+                true
+            }
             ViewAction::Command(cmd) => {
                 self.handle_command(cmd).await;
                 false
@@ -335,19 +361,29 @@ impl App {
         }
     }
 
-    /// Handle a client command (e.g. /join, /quit, /nick).
-    async fn handle_command(&mut self, cmd: ClientCommand) {
-        // Quit is special
-        if matches!(cmd, ClientCommand::Quit(_)) {
-            // Send QUIT message if connected
-            if let Some(msg) = cmd.to_message(None) {
-                if let Some(ref mut conn) = self.connection {
-                    let _ = conn.send(msg).await;
-                }
-            }
-            return;
-        }
+    /// Handle the quit sequence: send QUIT to the server and disable auto-reconnect.
+    async fn handle_quit(&mut self, reason: Option<String>) {
+        // Disable auto-reconnect — this is an intentional quit.
+        self.connection_mgr.set_auto_reconnect(false);
+        self.reconnect_at = None;
+        self.reconnect_attempt = 0;
 
+        // Send QUIT message to the server if connected.
+        if let Some(ref mut conn) = self.connection {
+            let params = match reason {
+                Some(ref r) => vec![r.clone()],
+                None => vec!["pirc".to_string()],
+            };
+            let quit_msg = Message::new(Command::Quit, params);
+            let _ = conn.send(quit_msg).await;
+        }
+    }
+
+    /// Handle a client command (e.g. /join, /nick).
+    ///
+    /// Note: `/quit` is handled via `ViewAction::Quit` → `handle_quit()`,
+    /// not through this method.
+    async fn handle_command(&mut self, cmd: ClientCommand) {
         // Handle /reconnect
         if matches!(cmd, ClientCommand::Reconnect) {
             self.handle_reconnect_command().await;

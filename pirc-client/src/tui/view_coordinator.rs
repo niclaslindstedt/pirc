@@ -23,8 +23,8 @@ pub enum ViewAction {
     ChatMessage(String, BufferId),
     /// A command parse error to display.
     CommandError(CommandError),
-    /// The user requested quit.
-    Quit,
+    /// The user requested quit, with an optional reason for the QUIT message.
+    Quit(Option<String>),
 }
 
 /// Integrates all TUI subcomponents into a unified view layer.
@@ -106,7 +106,7 @@ impl ViewCoordinator {
         match action {
             InputAction::None => ViewAction::None,
             InputAction::Redraw => ViewAction::Redraw,
-            InputAction::Quit => ViewAction::Quit,
+            InputAction::Quit(reason) => ViewAction::Quit(reason),
             InputAction::ScrollUp => {
                 self.buffers.active_mut().scroll_up(10);
                 ViewAction::Redraw
@@ -332,8 +332,17 @@ mod tests {
     fn handle_quit_action() {
         let mut vc = ViewCoordinator::new(80, 24, 100);
         assert_eq!(
-            vc.handle_input_action(InputAction::Quit),
-            ViewAction::Quit
+            vc.handle_input_action(InputAction::Quit(None)),
+            ViewAction::Quit(None)
+        );
+    }
+
+    #[test]
+    fn handle_quit_action_with_reason() {
+        let mut vc = ViewCoordinator::new(80, 24, 100);
+        assert_eq!(
+            vc.handle_input_action(InputAction::Quit(Some("bye".into()))),
+            ViewAction::Quit(Some("bye".into()))
         );
     }
 

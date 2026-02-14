@@ -71,7 +71,7 @@ fn dispatch_quit_returns_true() {
         .enable_all()
         .build()
         .unwrap();
-    let result = rt.block_on(app.dispatch_view_action(ViewAction::Quit));
+    let result = rt.block_on(app.dispatch_view_action(ViewAction::Quit(None)));
     assert!(result);
 }
 
@@ -817,4 +817,69 @@ fn app_new_has_no_reconnect_state() {
     assert!(app.reconnect_at.is_none());
     assert_eq!(app.reconnect_attempt, 0);
     assert!(app.channels_to_rejoin.is_empty());
+}
+
+// ── Quit tests ───────────────────────────────────────────────
+
+#[test]
+fn dispatch_quit_with_reason_returns_true() {
+    let config = ClientConfig::default();
+    let mut app = App::new(config);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let result = rt.block_on(app.dispatch_view_action(ViewAction::Quit(Some("goodbye".into()))));
+    assert!(result);
+}
+
+#[test]
+fn handle_quit_disables_auto_reconnect() {
+    let mut config = ClientConfig::default();
+    config.identity.nick = Some("user".to_string());
+    config.server.auto_reconnect = true;
+    let mut app = App::new(config);
+
+    // Simulate being connected with a pending reconnect
+    app.reconnect_at = Some(Instant::now() + Duration::from_secs(30));
+    app.reconnect_attempt = 2;
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(app.handle_quit(None));
+
+    assert!(!app.connection_mgr.auto_reconnect());
+    assert!(app.reconnect_at.is_none());
+    assert_eq!(app.reconnect_attempt, 0);
+}
+
+#[test]
+fn handle_quit_no_connection_does_not_panic() {
+    let config = ClientConfig::default();
+    let mut app = App::new(config);
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    // Should not panic even without a connection
+    rt.block_on(app.handle_quit(Some("leaving".into())));
+    assert!(!app.connection_mgr.auto_reconnect());
+}
+
+#[test]
+fn dispatch_quit_none_returns_true_and_disables_reconnect() {
+    let mut config = ClientConfig::default();
+    config.server.auto_reconnect = true;
+    let mut app = App::new(config);
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let result = rt.block_on(app.dispatch_view_action(ViewAction::Quit(None)));
+    assert!(result);
+    assert!(!app.connection_mgr.auto_reconnect());
 }
