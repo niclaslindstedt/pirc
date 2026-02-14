@@ -306,3 +306,7 @@ where
 #[cfg(test)]
 #[path = "replication_tests.rs"]
 mod replication_tests;
+
+#[cfg(test)]
+#[path = "replication_snapshot_tests.rs"]
+mod replication_snapshot_tests;

@@ -631,3 +631,7 @@ where
 #[cfg(test)]
 #[path = "node_tests.rs"]
 mod node_tests;
+
+#[cfg(test)]
+#[path = "node_snapshot_tests.rs"]
+mod node_snapshot_tests;
