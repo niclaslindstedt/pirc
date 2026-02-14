@@ -15,5 +15,5 @@ pub mod config;
 pub mod error;
 pub mod types;
 
-pub use error::{ChannelError, PircError, RaftError, Result, UserError};
+pub use error::{ChannelError, InviteKeyError, PircError, RaftError, Result, UserError};
 pub use types::{ChannelMode, ChannelName, Nickname, ServerId, UserId, UserMode};

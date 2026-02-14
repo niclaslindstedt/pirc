@@ -53,6 +53,19 @@ pub enum UserError {
     NotFound { nick: String },
 }
 
+/// Errors related to invite key operations.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum InviteKeyError {
+    #[error("invite key not found")]
+    NotFound,
+    #[error("invite key expired")]
+    Expired,
+    #[error("invite key already used")]
+    AlreadyUsed,
+    #[error("invite key revoked")]
+    Revoked,
+}
+
 /// Top-level error type for the pirc system.
 #[derive(Debug, thiserror::Error)]
 pub enum PircError {
@@ -66,6 +79,8 @@ pub enum PircError {
     UserError(#[from] UserError),
     #[error(transparent)]
     RaftError(#[from] RaftError),
+    #[error(transparent)]
+    InviteKeyError(#[from] InviteKeyError),
     #[error("crypto error: {message}")]
     CryptoError { message: String },
     #[error("config error: {message}")]
@@ -212,6 +227,32 @@ mod tests {
         assert_eq!(err.to_string(), "raft not initialized");
     }
 
+    // ---- InviteKeyError construction ----
+
+    #[test]
+    fn invite_key_not_found() {
+        let err = InviteKeyError::NotFound;
+        assert_eq!(err.to_string(), "invite key not found");
+    }
+
+    #[test]
+    fn invite_key_expired() {
+        let err = InviteKeyError::Expired;
+        assert_eq!(err.to_string(), "invite key expired");
+    }
+
+    #[test]
+    fn invite_key_already_used() {
+        let err = InviteKeyError::AlreadyUsed;
+        assert_eq!(err.to_string(), "invite key already used");
+    }
+
+    #[test]
+    fn invite_key_revoked() {
+        let err = InviteKeyError::Revoked;
+        assert_eq!(err.to_string(), "invite key revoked");
+    }
+
     // ---- PircError construction ----
 
     #[test]
@@ -284,6 +325,14 @@ mod tests {
     }
 
     #[test]
+    fn invite_key_error_into_pirc_error() {
+        let key_err = InviteKeyError::Expired;
+        let pirc_err: PircError = key_err.into();
+        assert!(matches!(pirc_err, PircError::InviteKeyError(_)));
+        assert_eq!(pirc_err.to_string(), "invite key expired");
+    }
+
+    #[test]
     fn io_error_into_pirc_error() {
         let io_err = io::Error::new(io::ErrorKind::ConnectionRefused, "refused");
         let pirc_err: PircError = io_err.into();
@@ -304,6 +353,10 @@ mod tests {
 
     fn returns_pirc_result_from_raft() -> Result<()> {
         Err(RaftError::ElectionTimeout)?
+    }
+
+    fn returns_pirc_result_from_invite_key() -> Result<()> {
+        Err(InviteKeyError::NotFound)?
     }
 
     fn returns_pirc_result_from_io() -> Result<()> {
@@ -337,6 +390,16 @@ mod tests {
         assert!(matches!(
             result.unwrap_err(),
             PircError::RaftError(RaftError::ElectionTimeout)
+        ));
+    }
+
+    #[test]
+    fn question_mark_invite_key_error() {
+        let result = returns_pirc_result_from_invite_key();
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PircError::InviteKeyError(InviteKeyError::NotFound)
         ));
     }
 
@@ -393,6 +456,12 @@ mod tests {
         assert_eq!(err.to_string(), "not the leader");
     }
 
+    #[test]
+    fn invite_key_error_is_std_error() {
+        let err: Box<dyn std::error::Error> = Box::new(InviteKeyError::NotFound);
+        assert_eq!(err.to_string(), "invite key not found");
+    }
+
     // ---- Source chain ----
     //
     // With #[error(transparent)], source() delegates to the inner error's source().
@@ -420,5 +489,12 @@ mod tests {
         let user_err = UserError::NotOperator;
         let pirc_err = PircError::UserError(user_err);
         assert_eq!(pirc_err.to_string(), "not an operator");
+    }
+
+    #[test]
+    fn invite_key_error_transparent_display() {
+        let key_err = InviteKeyError::Revoked;
+        let pirc_err = PircError::InviteKeyError(key_err);
+        assert_eq!(pirc_err.to_string(), "invite key revoked");
     }
 }
