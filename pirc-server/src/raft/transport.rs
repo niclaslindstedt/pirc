@@ -68,6 +68,11 @@ impl PeerMap {
     pub fn node_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.peers.keys().copied()
     }
+
+    /// Returns all `(NodeId, SocketAddr)` entries.
+    pub fn entries(&self) -> impl Iterator<Item = (NodeId, SocketAddr)> + '_ {
+        self.peers.iter().map(|(&id, &addr)| (id, addr))
+    }
 }
 
 /// Manages TCP connections to Raft peer nodes.
