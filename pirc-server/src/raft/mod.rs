@@ -30,5 +30,5 @@ pub use snapshot::{
 };
 pub use state::{LeaderState, PersistentState, VolatileState};
 pub use storage::{RaftStorage, StorageError, StorageResult};
-pub use transport::{PeerConnections, PeerMap, TransportError};
+pub use transport::{PeerConnections, PeerMap, PeerUpdater, SharedPeerMap, TransportError};
 pub use types::{LogEntry, LogIndex, NodeId, RaftConfig, RaftState, Term};

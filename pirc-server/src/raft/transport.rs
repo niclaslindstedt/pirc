@@ -9,11 +9,17 @@ use std::sync::Arc;
 
 use pirc_network::connection::AsyncTransport;
 use pirc_network::{Connection, Connector};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
 use super::rpc::RaftMessage;
 use super::types::NodeId;
+
+/// A thread-safe, dynamically updatable peer map.
+///
+/// Shared between the peer listener and [`PeerUpdater`] so that newly added
+/// peers are recognized on inbound connections at runtime.
+pub type SharedPeerMap = Arc<RwLock<PeerMap>>;
 
 /// Maps node IDs to their network addresses.
 #[derive(Debug, Clone)]
@@ -32,6 +38,30 @@ impl PeerMap {
     /// Look up the address for a given node ID.
     pub fn get(&self, id: NodeId) -> Option<&SocketAddr> {
         self.peers.get(&id)
+    }
+
+    /// Insert a new peer or update an existing peer's address.
+    ///
+    /// Returns the previous address if the node was already present.
+    pub fn insert(&mut self, id: NodeId, addr: SocketAddr) -> Option<SocketAddr> {
+        self.peers.insert(id, addr)
+    }
+
+    /// Remove a peer by node ID.
+    ///
+    /// Returns the address if the node was present.
+    pub fn remove(&mut self, id: NodeId) -> Option<SocketAddr> {
+        self.peers.remove(&id)
+    }
+
+    /// Returns the number of peers in the map.
+    pub fn len(&self) -> usize {
+        self.peers.len()
+    }
+
+    /// Returns `true` if the map contains no peers.
+    pub fn is_empty(&self) -> bool {
+        self.peers.is_empty()
     }
 
     /// Returns all peer node IDs.
@@ -100,6 +130,24 @@ impl PeerConnections {
 
         Ok(())
     }
+
+    /// Add a new peer to the connection manager.
+    ///
+    /// If the peer already exists, its address is updated and any existing
+    /// connection is dropped so a fresh one will be established on next send.
+    pub fn add_peer(&mut self, id: NodeId, addr: SocketAddr) {
+        self.peers.insert(id, addr);
+        // Drop stale connection if address changed.
+        self.connections.remove(&id);
+    }
+
+    /// Remove a peer from the connection manager.
+    ///
+    /// Drops the peer's address mapping and any active connection.
+    pub fn remove_peer(&mut self, id: NodeId) {
+        self.peers.remove(id);
+        self.connections.remove(&id);
+    }
 }
 
 /// Errors from the Raft transport layer.
@@ -111,6 +159,64 @@ pub enum TransportError {
     ConnectionFailed(NodeId),
     #[error("failed to send to peer: {0}")]
     SendFailed(NodeId),
+}
+
+/// Handle for dynamically adding and removing peers at runtime.
+///
+/// Holds references to both the shared peer map (used by the peer listener for
+/// inbound connection identification) and the peer connections (used for
+/// outbound message delivery). When a peer is added or removed through this
+/// handle, both data structures are updated atomically so the change is
+/// reflected in both directions.
+#[derive(Clone)]
+pub struct PeerUpdater {
+    shared_peer_map: SharedPeerMap,
+    peer_connections: Arc<Mutex<PeerConnections>>,
+}
+
+impl PeerUpdater {
+    /// Create a new peer updater.
+    pub fn new(
+        shared_peer_map: SharedPeerMap,
+        peer_connections: Arc<Mutex<PeerConnections>>,
+    ) -> Self {
+        Self {
+            shared_peer_map,
+            peer_connections,
+        }
+    }
+
+    /// Add a new peer to the transport layer.
+    ///
+    /// Updates both the shared peer map (for inbound identification) and the
+    /// peer connections (for outbound delivery).
+    pub async fn add_peer(&self, id: NodeId, addr: SocketAddr) {
+        {
+            let mut map = self.shared_peer_map.write().await;
+            map.insert(id, addr);
+        }
+        {
+            let mut conns = self.peer_connections.lock().await;
+            conns.add_peer(id, addr);
+        }
+        info!(%id, %addr, "peer added to transport layer");
+    }
+
+    /// Remove a peer from the transport layer.
+    ///
+    /// Removes from both the shared peer map and the peer connections,
+    /// dropping any active connection to the peer.
+    pub async fn remove_peer(&self, id: NodeId) {
+        {
+            let mut map = self.shared_peer_map.write().await;
+            map.remove(id);
+        }
+        {
+            let mut conns = self.peer_connections.lock().await;
+            conns.remove_peer(id);
+        }
+        info!(%id, "peer removed from transport layer");
+    }
 }
 
 /// Spawns the outbound transport task that reads messages from the Raft driver
@@ -202,10 +308,13 @@ where
 
 /// Spawns a listener task that accepts incoming peer connections on the Raft
 /// port and creates inbound handlers for each.
+///
+/// Uses a [`SharedPeerMap`] so that peers added at runtime via [`PeerUpdater`]
+/// are recognized on inbound connections without restarting the listener.
 pub fn spawn_peer_listener<T>(
     listener: pirc_network::Listener,
     inbound_tx: mpsc::UnboundedSender<(NodeId, RaftMessage<T>)>,
-    peer_map: &PeerMap,
+    shared_peer_map: SharedPeerMap,
     mut shutdown: pirc_network::ShutdownSignal,
 ) -> tokio::task::JoinHandle<()>
 where
@@ -217,32 +326,30 @@ where
         + serde::de::DeserializeOwned
         + 'static,
 {
-    // Build a reverse lookup: SocketAddr IP -> NodeId.
-    // We match on IP only since the peer's ephemeral source port won't match.
-    let ip_to_node: HashMap<std::net::IpAddr, NodeId> = peer_map
-        .peers
-        .iter()
-        .map(|(id, addr)| (addr.ip(), *id))
-        .collect();
-
     tokio::spawn(async move {
         info!("raft peer listener started");
         loop {
             match listener.accept_with_shutdown(&mut shutdown).await {
                 Ok(Some((connection, peer_addr))) => {
-                    let node_id = ip_to_node
-                        .get(&peer_addr.ip())
-                        .copied()
-                        .unwrap_or_else(|| {
-                            // Unknown peer IP — assign a synthetic ID from the address.
-                            warn!(%peer_addr, "accepted connection from unknown peer IP");
-                            NodeId::new(u64::from(
-                                match peer_addr.ip() {
-                                    std::net::IpAddr::V4(ip) => u32::from(ip),
-                                    std::net::IpAddr::V6(_) => 0,
-                                },
-                            ))
+                    // Look up the peer IP in the shared map on every accept
+                    // so that dynamically added peers are recognized.
+                    let node_id = {
+                        let map = shared_peer_map.read().await;
+                        let found = map.node_ids().find(|id| {
+                            map.get(*id)
+                                .is_some_and(|addr| addr.ip() == peer_addr.ip())
                         });
+                        found
+                    };
+
+                    let node_id = node_id.unwrap_or_else(|| {
+                        // Unknown peer IP — assign a synthetic ID from the address.
+                        warn!(%peer_addr, "accepted connection from unknown peer IP");
+                        NodeId::new(u64::from(match peer_addr.ip() {
+                            std::net::IpAddr::V4(ip) => u32::from(ip),
+                            std::net::IpAddr::V6(_) => 0,
+                        }))
+                    });
 
                     info!(%node_id, %peer_addr, "accepted peer connection");
                     spawn_inbound_handler::<T>(node_id, connection, inbound_tx.clone());
@@ -392,5 +499,159 @@ mod tests {
         let msg = pirc_protocol::Message::new(Command::Ping, vec!["test".into()]);
         let result = conns.send_to(NodeId::new(1), msg).await;
         assert!(matches!(result, Err(TransportError::UnknownPeer(_))));
+    }
+
+    #[test]
+    fn peer_map_insert() {
+        let mut map = PeerMap::new(vec![]);
+        assert!(map.is_empty());
+
+        let addr: SocketAddr = "10.0.0.1:7000".parse().unwrap();
+        assert!(map.insert(NodeId::new(1), addr).is_none());
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get(NodeId::new(1)), Some(&addr));
+
+        // Inserting same key with different address returns old address.
+        let addr2: SocketAddr = "10.0.0.1:8000".parse().unwrap();
+        assert_eq!(map.insert(NodeId::new(1), addr2), Some(addr));
+        assert_eq!(map.get(NodeId::new(1)), Some(&addr2));
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn peer_map_remove() {
+        let addr: SocketAddr = "10.0.0.1:7000".parse().unwrap();
+        let mut map = PeerMap::new(vec![(NodeId::new(1), addr)]);
+        assert_eq!(map.len(), 1);
+
+        assert_eq!(map.remove(NodeId::new(1)), Some(addr));
+        assert!(map.is_empty());
+        assert_eq!(map.get(NodeId::new(1)), None);
+
+        // Removing non-existent key returns None.
+        assert_eq!(map.remove(NodeId::new(99)), None);
+    }
+
+    #[test]
+    fn peer_map_len_and_is_empty() {
+        let mut map = PeerMap::new(vec![]);
+        assert!(map.is_empty());
+        assert_eq!(map.len(), 0);
+
+        map.insert(NodeId::new(1), "10.0.0.1:7000".parse().unwrap());
+        assert!(!map.is_empty());
+        assert_eq!(map.len(), 1);
+
+        map.insert(NodeId::new(2), "10.0.0.2:7000".parse().unwrap());
+        assert_eq!(map.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn peer_connections_add_peer() {
+        let peer_map = PeerMap::new(vec![]);
+        let mut conns = PeerConnections::new(peer_map);
+
+        // Initially unknown.
+        let msg = pirc_protocol::Message::new(Command::Ping, vec!["test".into()]);
+        assert!(matches!(
+            conns.send_to(NodeId::new(1), msg).await,
+            Err(TransportError::UnknownPeer(_))
+        ));
+
+        // After adding, the peer is known (send will fail to connect but
+        // with ConnectionFailed, not UnknownPeer).
+        let addr: SocketAddr = "10.0.0.99:7000".parse().unwrap();
+        conns.add_peer(NodeId::new(1), addr);
+
+        let msg = pirc_protocol::Message::new(Command::Ping, vec!["test".into()]);
+        let result = conns.send_to(NodeId::new(1), msg).await;
+        assert!(matches!(result, Err(TransportError::ConnectionFailed(_))));
+    }
+
+    #[tokio::test]
+    async fn peer_connections_remove_peer() {
+        let addr: SocketAddr = "10.0.0.99:7000".parse().unwrap();
+        let peer_map = PeerMap::new(vec![(NodeId::new(1), addr)]);
+        let mut conns = PeerConnections::new(peer_map);
+
+        // Peer is known before removal.
+        let msg = pirc_protocol::Message::new(Command::Ping, vec!["test".into()]);
+        let result = conns.send_to(NodeId::new(1), msg).await;
+        assert!(matches!(result, Err(TransportError::ConnectionFailed(_))));
+
+        // After removal, peer is unknown.
+        conns.remove_peer(NodeId::new(1));
+        let msg = pirc_protocol::Message::new(Command::Ping, vec!["test".into()]);
+        let result = conns.send_to(NodeId::new(1), msg).await;
+        assert!(matches!(result, Err(TransportError::UnknownPeer(_))));
+    }
+
+    #[tokio::test]
+    async fn peer_updater_add_and_remove() {
+        let peer_map = PeerMap::new(vec![]);
+        let shared = Arc::new(RwLock::new(peer_map.clone()));
+        let conns = Arc::new(Mutex::new(PeerConnections::new(peer_map)));
+        let updater = PeerUpdater::new(Arc::clone(&shared), Arc::clone(&conns));
+
+        let addr: SocketAddr = "10.0.0.5:7000".parse().unwrap();
+
+        // Add a peer via the updater.
+        updater.add_peer(NodeId::new(5), addr).await;
+
+        // Verify shared map was updated.
+        {
+            let map = shared.read().await;
+            assert_eq!(map.get(NodeId::new(5)), Some(&addr));
+            assert_eq!(map.len(), 1);
+        }
+
+        // Verify peer connections were updated (peer is now known).
+        {
+            let mut c = conns.lock().await;
+            let msg = pirc_protocol::Message::new(Command::Ping, vec!["test".into()]);
+            let result = c.send_to(NodeId::new(5), msg).await;
+            // ConnectionFailed means it's known but unreachable, not UnknownPeer.
+            assert!(matches!(result, Err(TransportError::ConnectionFailed(_))));
+        }
+
+        // Remove the peer via the updater.
+        updater.remove_peer(NodeId::new(5)).await;
+
+        // Verify shared map was updated.
+        {
+            let map = shared.read().await;
+            assert_eq!(map.get(NodeId::new(5)), None);
+            assert!(map.is_empty());
+        }
+
+        // Verify peer connections were updated (peer is now unknown).
+        {
+            let mut c = conns.lock().await;
+            let msg = pirc_protocol::Message::new(Command::Ping, vec!["test".into()]);
+            let result = c.send_to(NodeId::new(5), msg).await;
+            assert!(matches!(result, Err(TransportError::UnknownPeer(_))));
+        }
+    }
+
+    #[tokio::test]
+    async fn peer_updater_is_cloneable() {
+        let peer_map = PeerMap::new(vec![]);
+        let shared = Arc::new(RwLock::new(peer_map.clone()));
+        let conns = Arc::new(Mutex::new(PeerConnections::new(peer_map)));
+        let updater = PeerUpdater::new(Arc::clone(&shared), Arc::clone(&conns));
+
+        // Clone and use from both handles.
+        let updater2 = updater.clone();
+
+        let addr1: SocketAddr = "10.0.0.1:7000".parse().unwrap();
+        let addr2: SocketAddr = "10.0.0.2:7000".parse().unwrap();
+
+        updater.add_peer(NodeId::new(1), addr1).await;
+        updater2.add_peer(NodeId::new(2), addr2).await;
+
+        let map = shared.read().await;
+        assert_eq!(map.len(), 2);
+        assert_eq!(map.get(NodeId::new(1)), Some(&addr1));
+        assert_eq!(map.get(NodeId::new(2)), Some(&addr2));
     }
 }

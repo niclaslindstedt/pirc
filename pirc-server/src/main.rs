@@ -10,7 +10,7 @@ use pirc_protocol::{Command, Message};
 use pirc_server::channel_registry::ChannelRegistry;
 use pirc_server::config::ServerConfig;
 use pirc_server::handler::{self, HandleResult, PreRegistrationState};
-use pirc_server::raft::transport::{PeerConnections, PeerMap};
+use pirc_server::raft::transport::{PeerConnections, PeerMap, PeerUpdater};
 use pirc_server::raft::{FileStorage, NullStateMachine, RaftBuilder, RaftHandle};
 use pirc_server::registry::UserRegistry;
 use tokio::sync::{mpsc, Mutex};
@@ -91,11 +91,13 @@ async fn main() {
     // Raft cluster initialization
     let mut _raft_shutdown: Option<pirc_server::raft::ShutdownSender> = None;
     let mut _raft_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    let mut _peer_updater: Option<PeerUpdater> = None;
     let raft_handle: Option<Arc<RaftHandle<String>>> = if config.cluster.enabled {
         match init_raft_cluster(&config, &shutdown_signal).await {
-            Ok((handle, raft_shutdown_sender, handles)) => {
+            Ok((handle, raft_shutdown_sender, handles, peer_updater)) => {
                 _raft_shutdown = Some(raft_shutdown_sender);
                 _raft_handles = handles;
+                _peer_updater = Some(peer_updater);
                 Some(Arc::new(handle))
             }
             Err(e) => {
@@ -107,6 +109,7 @@ async fn main() {
         None
     };
     let _ = &raft_handle; // suppress unused warning when cluster is disabled
+    let _ = &_peer_updater; // suppress unused warning when cluster is disabled
 
     let config = Arc::new(config);
 
@@ -257,7 +260,8 @@ async fn handle_connection(
 ///
 /// Sets up file storage, builds the Raft driver and handle, spawns the driver
 /// task, creates the transport bridge (outbound sender + peer listener), and
-/// returns the handle and shutdown sender.
+/// returns the handle, shutdown sender, and a [`PeerUpdater`] for adding peers
+/// at runtime.
 async fn init_raft_cluster(
     config: &ServerConfig,
     shutdown_signal: &ShutdownSignal,
@@ -266,9 +270,12 @@ async fn init_raft_cluster(
         RaftHandle<String>,
         pirc_server::raft::ShutdownSender,
         Vec<tokio::task::JoinHandle<()>>,
+        PeerUpdater,
     ),
     Box<dyn std::error::Error>,
 > {
+    use tokio::sync::RwLock;
+
     let raft_config = config
         .cluster
         .to_raft_config()
@@ -306,11 +313,19 @@ async fn init_raft_cluster(
         .collect();
     let peer_map = PeerMap::new(peer_map_entries);
 
+    // Create shared peer map for both the listener and the peer updater.
+    let shared_peer_map = Arc::new(RwLock::new(peer_map.clone()));
+
     // Spawn the outbound transport task.
-    let peer_conns = Arc::new(Mutex::new(PeerConnections::new(peer_map.clone())));
-    let outbound_handle =
-        pirc_server::raft::transport::spawn_outbound_transport(outbound_rx, peer_conns);
+    let peer_conns = Arc::new(Mutex::new(PeerConnections::new(peer_map)));
+    let outbound_handle = pirc_server::raft::transport::spawn_outbound_transport(
+        outbound_rx,
+        Arc::clone(&peer_conns),
+    );
     handles.push(outbound_handle);
+
+    // Create the peer updater handle for runtime peer management.
+    let peer_updater = PeerUpdater::new(Arc::clone(&shared_peer_map), Arc::clone(&peer_conns));
 
     // Spawn the peer listener if a raft_port is configured.
     if let Some(raft_port) = config.cluster.raft_port {
@@ -328,7 +343,7 @@ async fn init_raft_cluster(
                     pirc_server::raft::transport::spawn_peer_listener::<String>(
                         listener,
                         inbound_tx,
-                        &peer_map,
+                        Arc::clone(&shared_peer_map),
                         shutdown_signal.clone(),
                     );
                 handles.push(listener_handle);
@@ -347,5 +362,5 @@ async fn init_raft_cluster(
     handles.push(driver_handle);
 
     info!("raft cluster initialized");
-    Ok((handle, shutdown_sender, handles))
+    Ok((handle, shutdown_sender, handles, peer_updater))
 }
