@@ -3,6 +3,7 @@ pub mod client_command;
 pub mod command_parser;
 mod config;
 mod connection_state;
+mod registration;
 mod tui;
 
 use app::App;

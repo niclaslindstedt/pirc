@@ -11,6 +11,8 @@ pub const RPL_WELCOME: u16 = 1;
 pub const RPL_YOURHOST: u16 = 2;
 /// This server was created ...
 pub const RPL_CREATED: u16 = 3;
+/// Server info: `<servername> <version> <available user modes> <available channel modes>`.
+pub const RPL_MYINFO: u16 = 4;
 /// List of nicks in a channel (part of NAMES reply).
 pub const RPL_NAMREPLY: u16 = 353;
 /// End of /NAMES list.
@@ -110,6 +112,8 @@ pub const ERR_NONICKNAMEGIVEN: u16 = 431;
 pub const ERR_ERRONEUSNICKNAME: u16 = 432;
 /// Nickname is already in use.
 pub const ERR_NICKNAMEINUSE: u16 = 433;
+/// Nick collision (KILL): `<nick> :<reason>`.
+pub const ERR_NICKCOLLISION: u16 = 436;
 /// MOTD file is missing.
 pub const ERR_NOMOTD: u16 = 422;
 /// User not in channel: `<nick> <channel>`.
@@ -165,6 +169,7 @@ pub fn reply_name(code: u16) -> Option<&'static str> {
         RPL_WELCOME => Some("RPL_WELCOME"),
         RPL_YOURHOST => Some("RPL_YOURHOST"),
         RPL_CREATED => Some("RPL_CREATED"),
+        RPL_MYINFO => Some("RPL_MYINFO"),
         RPL_UMODEIS => Some("RPL_UMODEIS"),
         RPL_LIST => Some("RPL_LIST"),
         RPL_LISTEND => Some("RPL_LISTEND"),
@@ -199,6 +204,7 @@ pub fn reply_name(code: u16) -> Option<&'static str> {
         ERR_NONICKNAMEGIVEN => Some("ERR_NONICKNAMEGIVEN"),
         ERR_ERRONEUSNICKNAME => Some("ERR_ERRONEUSNICKNAME"),
         ERR_NICKNAMEINUSE => Some("ERR_NICKNAMEINUSE"),
+        ERR_NICKCOLLISION => Some("ERR_NICKCOLLISION"),
         ERR_USERNOTINCHANNEL => Some("ERR_USERNOTINCHANNEL"),
         ERR_NOTONCHANNEL => Some("ERR_NOTONCHANNEL"),
         ERR_USERONCHANNEL => Some("ERR_USERONCHANNEL"),
@@ -235,6 +241,7 @@ mod tests {
         assert_eq!(RPL_WELCOME, 1);
         assert_eq!(RPL_YOURHOST, 2);
         assert_eq!(RPL_CREATED, 3);
+        assert_eq!(RPL_MYINFO, 4);
         assert_eq!(RPL_UMODEIS, 221);
         assert_eq!(RPL_AWAY, 301);
         assert_eq!(RPL_UNAWAY, 305);
@@ -278,6 +285,7 @@ mod tests {
         assert_eq!(ERR_NONICKNAMEGIVEN, 431);
         assert_eq!(ERR_ERRONEUSNICKNAME, 432);
         assert_eq!(ERR_NICKNAMEINUSE, 433);
+        assert_eq!(ERR_NICKCOLLISION, 436);
         assert_eq!(ERR_USERNOTINCHANNEL, 441);
         assert_eq!(ERR_NOTONCHANNEL, 442);
         assert_eq!(ERR_USERONCHANNEL, 443);
@@ -303,6 +311,7 @@ mod tests {
         assert_eq!(reply_name(RPL_WELCOME), Some("RPL_WELCOME"));
         assert_eq!(reply_name(RPL_YOURHOST), Some("RPL_YOURHOST"));
         assert_eq!(reply_name(RPL_CREATED), Some("RPL_CREATED"));
+        assert_eq!(reply_name(RPL_MYINFO), Some("RPL_MYINFO"));
         assert_eq!(reply_name(RPL_UMODEIS), Some("RPL_UMODEIS"));
         assert_eq!(reply_name(RPL_AWAY), Some("RPL_AWAY"));
         assert_eq!(reply_name(RPL_UNAWAY), Some("RPL_UNAWAY"));
@@ -328,6 +337,7 @@ mod tests {
             Some("ERR_ERRONEUSNICKNAME")
         );
         assert_eq!(reply_name(ERR_NICKNAMEINUSE), Some("ERR_NICKNAMEINUSE"));
+        assert_eq!(reply_name(ERR_NICKCOLLISION), Some("ERR_NICKCOLLISION"));
         assert_eq!(reply_name(ERR_NEEDMOREPARAMS), Some("ERR_NEEDMOREPARAMS"));
         assert_eq!(
             reply_name(ERR_ALREADYREGISTERED),
@@ -402,6 +412,7 @@ mod tests {
         assert!(is_error(ERR_NONICKNAMEGIVEN));
         assert!(is_error(ERR_ERRONEUSNICKNAME));
         assert!(is_error(ERR_NICKNAMEINUSE));
+        assert!(is_error(ERR_NICKCOLLISION));
         assert!(is_error(ERR_USERNOTINCHANNEL));
         assert!(is_error(ERR_NOTONCHANNEL));
         assert!(is_error(ERR_USERONCHANNEL));
@@ -427,6 +438,7 @@ mod tests {
     #[test]
     fn is_error_for_non_error_codes() {
         assert!(!is_error(RPL_WELCOME));
+        assert!(!is_error(RPL_MYINFO));
         assert!(!is_error(RPL_UMODEIS));
         assert!(!is_error(RPL_LIST));
         assert!(!is_error(RPL_CHANNELMODEIS));

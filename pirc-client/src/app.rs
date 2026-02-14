@@ -1,21 +1,28 @@
 use std::io;
 use std::net::ToSocketAddrs;
+use std::time::Duration;
 
 use pirc_network::connection::AsyncTransport;
 use pirc_network::{Connection, Connector, ShutdownController, ShutdownSignal};
 use pirc_protocol::Message;
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 use tracing::warn;
 
 use crate::client_command::ClientCommand;
 use crate::config::ClientConfig;
 use crate::connection_state::{ConnectionManager, ConnectionState};
+use crate::registration::{RegistrationEvent, RegistrationState};
 use crate::tui::buffer::Buffer;
 use crate::tui::input::KeyEvent;
 use crate::tui::message_buffer::{BufferLine, LineType};
 use crate::tui::renderer::Renderer;
 use crate::tui::view_coordinator::{ViewAction, ViewCoordinator};
 use crate::tui::{terminal_size, InputReader, RawModeGuard, SignalHandler};
+
+/// Registration timeout — if no RPL_WELCOME is received within this duration,
+/// the connection is dropped.
+const REGISTRATION_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Central coordinator for the pirc client.
 ///
@@ -27,6 +34,8 @@ pub struct App {
     connection_mgr: ConnectionManager,
     view: ViewCoordinator,
     connection: Option<Connection>,
+    registration: Option<RegistrationState>,
+    registration_deadline: Option<Instant>,
     shutdown_controller: ShutdownController,
     _shutdown_signal: ShutdownSignal,
 }
@@ -49,6 +58,8 @@ impl App {
             connection_mgr,
             view,
             connection: None,
+            registration: None,
+            registration_deadline: None,
             shutdown_controller,
             _shutdown_signal: shutdown_signal,
         }
@@ -125,7 +136,7 @@ impl App {
                 } => {
                     match msg {
                         Ok(Some(msg)) => {
-                            self.handle_server_message(&msg);
+                            self.handle_server_message(&msg).await;
                             self.render(&mut renderer)?;
                         }
                         Ok(None) => {
@@ -138,6 +149,16 @@ impl App {
                             self.render(&mut renderer)?;
                         }
                     }
+                }
+                // Registration timeout
+                _ = async {
+                    match self.registration_deadline {
+                        Some(deadline) => tokio::time::sleep_until(deadline).await,
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {
+                    self.handle_disconnect("Registration timed out (no RPL_WELCOME within 30s)");
+                    self.render(&mut renderer)?;
                 }
             }
         }
@@ -194,8 +215,24 @@ impl App {
                     return;
                 }
 
-                // Send NICK and USER
-                self.send_registration().await;
+                // Build registration state from config
+                let nick = self.connection_mgr.nick().to_string();
+                let username = nick.clone();
+                let realname = self
+                    .config
+                    .identity
+                    .realname
+                    .clone()
+                    .unwrap_or_else(|| nick.clone());
+                let alt_nicks = self.config.identity.alt_nicks.clone();
+
+                let reg = RegistrationState::new(nick, alt_nicks, username, realname);
+
+                // Send NICK and USER via the registration state
+                self.send_registration_messages(&reg).await;
+
+                self.registration = Some(reg);
+                self.registration_deadline = Some(Instant::now() + REGISTRATION_TIMEOUT);
 
                 self.push_status(&format!("Connected to {addr_str}, registering..."));
             }
@@ -208,28 +245,13 @@ impl App {
         }
     }
 
-    /// Send NICK and USER registration messages.
-    async fn send_registration(&mut self) {
-        let nick = self.connection_mgr.nick().to_string();
-        let realname = self
-            .config
-            .identity
-            .realname
-            .clone()
-            .unwrap_or_else(|| nick.clone());
-
+    /// Send NICK and USER registration messages using the registration state.
+    async fn send_registration_messages(&mut self, reg: &RegistrationState) {
         if let Some(ref mut conn) = self.connection {
-            let nick_msg =
-                Message::new(pirc_protocol::Command::Nick, vec![nick.clone()]);
-            if let Err(e) = conn.send(nick_msg).await {
+            if let Err(e) = conn.send(reg.nick_message()).await {
                 warn!("Failed to send NICK: {e}");
             }
-
-            let user_msg = Message::new(
-                pirc_protocol::Command::User,
-                vec![nick, "0".to_string(), "*".to_string(), realname],
-            );
-            if let Err(e) = conn.send(user_msg).await {
+            if let Err(e) = conn.send(reg.user_message()).await {
                 warn!("Failed to send USER: {e}");
             }
         }
@@ -328,26 +350,59 @@ impl App {
 
     /// Handle an inbound server message.
     ///
-    /// For now, this is a stub that displays all inbound messages in the
-    /// status buffer. Full message routing (T110) and registration flow
-    /// (T109) will be implemented in follow-up tickets.
-    fn handle_server_message(&mut self, msg: &Message) {
-        // Check for RPL_WELCOME (001) to transition to Connected
-        if msg.command == pirc_protocol::Command::Numeric(1) {
-            let server_name = msg.prefix.as_ref().map_or_else(
-                || self.connection_mgr.server_addr().to_string(),
-                ToString::to_string,
-            );
+    /// During registration (Registering state), messages are first routed
+    /// through the [`RegistrationState`] handler. Once registered, or for
+    /// unhandled messages, the default handler displays them in the status
+    /// buffer. Full message routing (T110) will refine this further.
+    async fn handle_server_message(&mut self, msg: &Message) {
+        // During registration, let the registration handler process the message first.
+        if self.registration.is_some() {
+            let event = self.registration.as_mut().unwrap().handle_message(msg);
+            match event {
+                RegistrationEvent::Welcome { server_name, nick, message } => {
+                    // Complete registration
+                    let sname = if server_name.is_empty() {
+                        self.connection_mgr.server_addr().to_string()
+                    } else {
+                        server_name
+                    };
 
-            let _ = self.connection_mgr.transition(ConnectionState::Connected {
-                server_name: server_name.clone(),
-            });
+                    let _ = self.connection_mgr.transition(ConnectionState::Connected {
+                        server_name: sname,
+                    });
+                    self.connection_mgr.set_nick(nick.clone());
+                    self.view.set_nick(nick);
 
-            // Extract welcome text from trailing parameter
-            let welcome_text = msg.params.last().cloned().unwrap_or_default();
+                    // Clear registration state and timeout
+                    self.registration = None;
+                    self.registration_deadline = None;
 
-            self.push_status(&welcome_text);
-            return;
+                    self.push_status(&message);
+                    return;
+                }
+                RegistrationEvent::Info(text) => {
+                    self.push_status(&text);
+                    return;
+                }
+                RegistrationEvent::NickRetry { new_nick, nick_message } => {
+                    self.push_status(&format!("Nick in use, trying {new_nick}..."));
+                    self.connection_mgr.set_nick(new_nick.clone());
+                    self.view.set_nick(new_nick);
+                    if let Some(ref mut conn) = self.connection {
+                        if let Err(e) = conn.send(nick_message).await {
+                            warn!("Failed to send NICK retry: {e}");
+                        }
+                    }
+                    return;
+                }
+                RegistrationEvent::NickError(reason) => {
+                    self.push_status(&format!("Nick error: {reason}"));
+                    return;
+                }
+                RegistrationEvent::Unhandled => {
+                    // Fall through to default handling below
+                }
+            }
         }
 
         // Default: display the raw message in the status buffer
@@ -363,6 +418,8 @@ impl App {
     /// Handle a disconnection event.
     fn handle_disconnect(&mut self, reason: &str) {
         self.connection = None;
+        self.registration = None;
+        self.registration_deadline = None;
         let _ = self
             .connection_mgr
             .transition(ConnectionState::Disconnected);
@@ -575,7 +632,8 @@ mod tests {
 
     #[test]
     fn handle_server_message_rpl_welcome() {
-        let config = ClientConfig::default();
+        let mut config = ClientConfig::default();
+        config.identity.nick = Some("testuser".to_string());
         let mut app = App::new(config);
 
         // Must be in Registering state to transition to Connected
@@ -586,6 +644,15 @@ mod tests {
             .transition(ConnectionState::Registering)
             .unwrap();
 
+        // Set up registration state (as initiate_connection would)
+        app.registration = Some(RegistrationState::new(
+            "testuser".into(),
+            vec![],
+            "testuser".into(),
+            "testuser".into(),
+        ));
+        app.registration_deadline = Some(Instant::now() + REGISTRATION_TIMEOUT);
+
         let msg = Message::with_prefix(
             pirc_protocol::Prefix::Server("irc.test.net".into()),
             pirc_protocol::Command::Numeric(1),
@@ -595,9 +662,133 @@ mod tests {
             ],
         );
 
-        app.handle_server_message(&msg);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(app.handle_server_message(&msg));
         assert!(app.connection_mgr.is_connected());
         assert_eq!(app.connection_mgr.server_name(), Some("irc.test.net"));
+        assert!(app.registration.is_none());
+        assert!(app.registration_deadline.is_none());
+    }
+
+    #[test]
+    fn handle_server_message_rpl_welcome_updates_nick() {
+        let mut config = ClientConfig::default();
+        config.identity.nick = Some("mynick".to_string());
+        let mut app = App::new(config);
+
+        app.connection_mgr
+            .transition(ConnectionState::Connecting)
+            .unwrap();
+        app.connection_mgr
+            .transition(ConnectionState::Registering)
+            .unwrap();
+
+        app.registration = Some(RegistrationState::new(
+            "mynick".into(),
+            vec![],
+            "mynick".into(),
+            "mynick".into(),
+        ));
+
+        let msg = Message::with_prefix(
+            pirc_protocol::Prefix::Server("irc.test.net".into()),
+            pirc_protocol::Command::Numeric(1),
+            vec![
+                "servernick".into(),
+                "Welcome!".into(),
+            ],
+        );
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(app.handle_server_message(&msg));
+        assert_eq!(app.connection_mgr.nick(), "servernick");
+    }
+
+    #[test]
+    fn handle_server_message_info_numerics() {
+        let mut config = ClientConfig::default();
+        config.identity.nick = Some("user".to_string());
+        let mut app = App::new(config);
+
+        app.connection_mgr
+            .transition(ConnectionState::Connecting)
+            .unwrap();
+        app.connection_mgr
+            .transition(ConnectionState::Registering)
+            .unwrap();
+        app.registration = Some(RegistrationState::new(
+            "user".into(), vec![], "user".into(), "user".into(),
+        ));
+
+        let initial_count = app
+            .view
+            .buffers()
+            .get(&crate::tui::buffer_manager::BufferId::Status)
+            .unwrap()
+            .len();
+
+        let msg = Message::new(
+            pirc_protocol::Command::Numeric(2),
+            vec!["user".into(), "Your host is irc.test.net".into()],
+        );
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(app.handle_server_message(&msg));
+
+        let new_count = app
+            .view
+            .buffers()
+            .get(&crate::tui::buffer_manager::BufferId::Status)
+            .unwrap()
+            .len();
+        assert_eq!(new_count, initial_count + 1);
+    }
+
+    #[test]
+    fn handle_server_message_nick_in_use() {
+        let mut config = ClientConfig::default();
+        config.identity.nick = Some("mynick".to_string());
+        config.identity.alt_nicks = vec!["alt1".into()];
+        let mut app = App::new(config);
+
+        app.connection_mgr
+            .transition(ConnectionState::Connecting)
+            .unwrap();
+        app.connection_mgr
+            .transition(ConnectionState::Registering)
+            .unwrap();
+        app.registration = Some(RegistrationState::new(
+            "mynick".into(),
+            vec!["alt1".into()],
+            "mynick".into(),
+            "mynick".into(),
+        ));
+
+        let msg = Message::new(
+            pirc_protocol::Command::Numeric(433),
+            vec!["*".into(), "mynick".into(), "Nickname is already in use".into()],
+        );
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(app.handle_server_message(&msg));
+
+        // Nick should have been updated to alt1
+        assert_eq!(app.connection_mgr.nick(), "alt1");
+        // Still registering
+        assert!(!app.connection_mgr.is_connected());
+        assert!(app.registration.is_some());
     }
 
     #[test]
@@ -617,7 +808,11 @@ mod tests {
             .unwrap()
             .len();
 
-        app.handle_server_message(&msg);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(app.handle_server_message(&msg));
 
         let new_count = app
             .view
@@ -627,6 +822,29 @@ mod tests {
             .len();
 
         assert_eq!(new_count, initial_count + 1);
+    }
+
+    #[test]
+    fn handle_disconnect_clears_registration() {
+        let mut config = ClientConfig::default();
+        config.identity.nick = Some("user".to_string());
+        let mut app = App::new(config);
+
+        app.connection_mgr
+            .transition(ConnectionState::Connecting)
+            .unwrap();
+        app.connection_mgr
+            .transition(ConnectionState::Registering)
+            .unwrap();
+        app.registration = Some(RegistrationState::new(
+            "user".into(), vec![], "user".into(), "user".into(),
+        ));
+        app.registration_deadline = Some(Instant::now() + REGISTRATION_TIMEOUT);
+
+        app.handle_disconnect("test disconnect");
+        assert!(app.registration.is_none());
+        assert!(app.registration_deadline.is_none());
+        assert!(app.connection.is_none());
     }
 
     #[test]
