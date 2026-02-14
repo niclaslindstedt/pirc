@@ -11,6 +11,9 @@ pub mod storage;
 pub mod transport;
 pub mod types;
 
+#[cfg(test)]
+pub(crate) mod test_utils;
+
 pub use driver::{RaftBuilder, RaftDriver, RaftError, RaftHandle, ShutdownSender};
 pub use election::{compute_election_timeout, is_log_up_to_date, ElectionTracker};
 pub use file_storage::FileStorage;
