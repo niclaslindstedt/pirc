@@ -7,6 +7,7 @@ pub mod replication;
 pub mod rpc;
 pub mod state;
 pub mod storage;
+pub mod transport;
 pub mod types;
 
 pub use driver::{RaftBuilder, RaftDriver, RaftError, RaftHandle, ShutdownSender};
@@ -19,4 +20,5 @@ pub use rpc::{
 };
 pub use state::{LeaderState, PersistentState, VolatileState};
 pub use storage::{RaftStorage, StorageError, StorageResult};
+pub use transport::{PeerConnections, PeerMap, TransportError};
 pub use types::{LogEntry, LogIndex, NodeId, RaftConfig, RaftState, Term};

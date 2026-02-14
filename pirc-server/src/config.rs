@@ -9,11 +9,14 @@
 //! acceptable ranges.
 
 use std::net::IpAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use pirc_common::config::default_server_config_path;
-use pirc_common::PircError;
+use pirc_common::{PircError, ServerId};
 use serde::{Deserialize, Serialize};
+
+use crate::raft::types::{NodeId, RaftConfig};
 
 /// Top-level server configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -189,6 +192,103 @@ pub struct ClusterConfig {
     pub node_id: Option<String>,
     pub peers: Vec<String>,
     pub raft_port: Option<u16>,
+    pub data_dir: Option<PathBuf>,
+    pub election_timeout_min_ms: Option<u64>,
+    pub election_timeout_max_ms: Option<u64>,
+    pub heartbeat_interval_ms: Option<u64>,
+}
+
+/// Peer address entry parsed from the cluster config.
+///
+/// Each peer entry has the format `<node_id>@<host>:<port>`.
+#[derive(Debug, Clone)]
+pub struct PeerEntry {
+    pub node_id: NodeId,
+    pub address: String,
+}
+
+impl ClusterConfig {
+    /// Parse the node ID string into a [`ServerId`].
+    ///
+    /// Uses a simple hash of the string to produce a stable u64 identifier.
+    pub fn parse_node_id(&self) -> Option<ServerId> {
+        self.node_id.as_ref().map(|id| string_to_server_id(id))
+    }
+
+    /// Parse peer entries from the config.
+    ///
+    /// Peers are specified as `<node_id>@<host>:<port>` strings. If a peer
+    /// string does not contain `@`, it is treated as just an address and is
+    /// assigned a [`ServerId`] derived from the full address string.
+    pub fn parse_peers(&self) -> Vec<PeerEntry> {
+        self.peers
+            .iter()
+            .map(|s| {
+                if let Some((id_part, addr_part)) = s.split_once('@') {
+                    PeerEntry {
+                        node_id: string_to_server_id(id_part),
+                        address: addr_part.to_owned(),
+                    }
+                } else {
+                    PeerEntry {
+                        node_id: string_to_server_id(s),
+                        address: s.clone(),
+                    }
+                }
+            })
+            .collect()
+    }
+
+    /// Build a [`RaftConfig`] from this cluster configuration.
+    ///
+    /// Returns `None` if clustering is not enabled or the node ID is not set.
+    pub fn to_raft_config(&self) -> Option<RaftConfig> {
+        if !self.enabled {
+            return None;
+        }
+        let node_id = self.parse_node_id()?;
+        let peers: Vec<NodeId> = self.parse_peers().iter().map(|p| p.node_id).collect();
+
+        Some(RaftConfig {
+            election_timeout_min: Duration::from_millis(
+                self.election_timeout_min_ms.unwrap_or(150),
+            ),
+            election_timeout_max: Duration::from_millis(
+                self.election_timeout_max_ms.unwrap_or(300),
+            ),
+            heartbeat_interval: Duration::from_millis(self.heartbeat_interval_ms.unwrap_or(50)),
+            node_id,
+            peers,
+        })
+    }
+
+    /// Returns the data directory for Raft storage, falling back to
+    /// `~/.pirc/raft/<node_id>/` if not set explicitly.
+    pub fn raft_data_dir(&self) -> PathBuf {
+        if let Some(ref dir) = self.data_dir {
+            return dir.clone();
+        }
+        let node_id = self
+            .node_id
+            .as_deref()
+            .unwrap_or("default");
+        std::env::var("HOME")
+            .map_or_else(|_| PathBuf::from("."), PathBuf::from)
+            .join(".pirc")
+            .join("raft")
+            .join(node_id)
+    }
+}
+
+/// Produce a deterministic [`ServerId`] from a string by hashing it.
+fn string_to_server_id(s: &str) -> ServerId {
+    // Simple FNV-1a-like hash for deterministic mapping.
+    let mut hash: u64 = 14_695_981_039_346_656_037;
+    for byte in s.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(1_099_511_628_211);
+    }
+    ServerId::new(hash)
 }
 
 /// Message of the Day configuration.
@@ -404,6 +504,10 @@ bind_address = "127.0.0.1"
         assert!(cluster.node_id.is_none());
         assert!(cluster.peers.is_empty());
         assert!(cluster.raft_port.is_none());
+        assert!(cluster.data_dir.is_none());
+        assert!(cluster.election_timeout_min_ms.is_none());
+        assert!(cluster.election_timeout_max_ms.is_none());
+        assert!(cluster.heartbeat_interval_ms.is_none());
     }
 
     #[test]
@@ -457,8 +561,12 @@ bind_address = "127.0.0.1"
             cluster: ClusterConfig {
                 enabled: true,
                 node_id: Some(String::from("node-1")),
-                peers: vec![String::from("10.0.0.2:7000"), String::from("10.0.0.3:7000")],
+                peers: vec![String::from("node-2@10.0.0.2:7000"), String::from("node-3@10.0.0.3:7000")],
                 raft_port: Some(7000),
+                data_dir: None,
+                election_timeout_min_ms: Some(200),
+                election_timeout_max_ms: Some(400),
+                heartbeat_interval_ms: Some(75),
             },
             motd: MotdConfig {
                 path: Some(String::from("/etc/pirc/motd.txt")),
@@ -521,5 +629,129 @@ port = 6697
         assert_eq!(config.network.bind_address, "0.0.0.0");
         assert_eq!(config.network.port, 6667);
         assert_eq!(config.limits.max_message_length, 512);
+    }
+
+    // ---- ClusterConfig conversion tests ----
+
+    #[test]
+    fn cluster_config_parse_node_id() {
+        let cluster = ClusterConfig {
+            enabled: true,
+            node_id: Some("node-1".into()),
+            ..ClusterConfig::default()
+        };
+        let id = cluster.parse_node_id();
+        assert!(id.is_some());
+        // Same input should produce the same ID
+        let id2 = cluster.parse_node_id().unwrap();
+        assert_eq!(id.unwrap(), id2);
+    }
+
+    #[test]
+    fn cluster_config_parse_node_id_none_when_missing() {
+        let cluster = ClusterConfig::default();
+        assert!(cluster.parse_node_id().is_none());
+    }
+
+    #[test]
+    fn cluster_config_parse_peers_with_at_syntax() {
+        let cluster = ClusterConfig {
+            peers: vec![
+                "node-2@10.0.0.2:7000".into(),
+                "node-3@10.0.0.3:7000".into(),
+            ],
+            ..ClusterConfig::default()
+        };
+        let peers = cluster.parse_peers();
+        assert_eq!(peers.len(), 2);
+        assert_eq!(peers[0].address, "10.0.0.2:7000");
+        assert_eq!(peers[1].address, "10.0.0.3:7000");
+        // Different node names produce different IDs
+        assert_ne!(peers[0].node_id, peers[1].node_id);
+    }
+
+    #[test]
+    fn cluster_config_parse_peers_without_at_syntax() {
+        let cluster = ClusterConfig {
+            peers: vec!["10.0.0.2:7000".into()],
+            ..ClusterConfig::default()
+        };
+        let peers = cluster.parse_peers();
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].address, "10.0.0.2:7000");
+    }
+
+    #[test]
+    fn cluster_config_to_raft_config_disabled() {
+        let cluster = ClusterConfig::default();
+        assert!(cluster.to_raft_config().is_none());
+    }
+
+    #[test]
+    fn cluster_config_to_raft_config_enabled() {
+        let cluster = ClusterConfig {
+            enabled: true,
+            node_id: Some("node-1".into()),
+            peers: vec![
+                "node-2@10.0.0.2:7000".into(),
+                "node-3@10.0.0.3:7000".into(),
+            ],
+            election_timeout_min_ms: Some(200),
+            election_timeout_max_ms: Some(400),
+            heartbeat_interval_ms: Some(75),
+            ..ClusterConfig::default()
+        };
+        let raft = cluster.to_raft_config().unwrap();
+        assert_eq!(raft.election_timeout_min, Duration::from_millis(200));
+        assert_eq!(raft.election_timeout_max, Duration::from_millis(400));
+        assert_eq!(raft.heartbeat_interval, Duration::from_millis(75));
+        assert_eq!(raft.peers.len(), 2);
+    }
+
+    #[test]
+    fn cluster_config_to_raft_config_uses_defaults() {
+        let cluster = ClusterConfig {
+            enabled: true,
+            node_id: Some("node-1".into()),
+            ..ClusterConfig::default()
+        };
+        let raft = cluster.to_raft_config().unwrap();
+        assert_eq!(raft.election_timeout_min, Duration::from_millis(150));
+        assert_eq!(raft.election_timeout_max, Duration::from_millis(300));
+        assert_eq!(raft.heartbeat_interval, Duration::from_millis(50));
+    }
+
+    #[test]
+    fn cluster_config_raft_data_dir_explicit() {
+        let cluster = ClusterConfig {
+            data_dir: Some(PathBuf::from("/var/raft/data")),
+            ..ClusterConfig::default()
+        };
+        assert_eq!(cluster.raft_data_dir(), PathBuf::from("/var/raft/data"));
+    }
+
+    #[test]
+    fn cluster_config_raft_data_dir_default() {
+        let cluster = ClusterConfig {
+            node_id: Some("node-1".into()),
+            ..ClusterConfig::default()
+        };
+        let dir = cluster.raft_data_dir();
+        // Should end with raft/node-1
+        assert!(dir.ends_with("raft/node-1"));
+    }
+
+    #[test]
+    fn string_to_server_id_deterministic() {
+        let id1 = super::string_to_server_id("node-1");
+        let id2 = super::string_to_server_id("node-1");
+        assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn string_to_server_id_different_inputs() {
+        let id1 = super::string_to_server_id("node-1");
+        let id2 = super::string_to_server_id("node-2");
+        assert_ne!(id1, id2);
     }
 }

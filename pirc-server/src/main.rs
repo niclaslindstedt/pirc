@@ -10,8 +10,10 @@ use pirc_protocol::{Command, Message};
 use pirc_server::channel_registry::ChannelRegistry;
 use pirc_server::config::ServerConfig;
 use pirc_server::handler::{self, HandleResult, PreRegistrationState};
+use pirc_server::raft::transport::{PeerConnections, PeerMap};
+use pirc_server::raft::{FileStorage, RaftBuilder, RaftHandle};
 use pirc_server::registry::UserRegistry;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tracing::{error, info, warn};
 
 fn parse_config_path() -> Option<PathBuf> {
@@ -85,6 +87,27 @@ async fn main() {
 
     let registry = Arc::new(UserRegistry::new());
     let channels = Arc::new(ChannelRegistry::new());
+
+    // Raft cluster initialization
+    let mut _raft_shutdown: Option<pirc_server::raft::ShutdownSender> = None;
+    let mut _raft_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    let raft_handle: Option<Arc<RaftHandle<String>>> = if config.cluster.enabled {
+        match init_raft_cluster(&config, &shutdown_signal).await {
+            Ok((handle, raft_shutdown_sender, handles)) => {
+                _raft_shutdown = Some(raft_shutdown_sender);
+                _raft_handles = handles;
+                Some(Arc::new(handle))
+            }
+            Err(e) => {
+                error!("failed to initialize raft cluster: {e}");
+                process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+    let _ = &raft_handle; // suppress unused warning when cluster is disabled
+
     let config = Arc::new(config);
 
     // Accept loop
@@ -228,4 +251,100 @@ async fn handle_connection(
     if state.registered {
         registry.remove_by_connection(conn_id);
     }
+}
+
+/// Initialize the Raft consensus engine when clustering is enabled.
+///
+/// Sets up file storage, builds the Raft driver and handle, spawns the driver
+/// task, creates the transport bridge (outbound sender + peer listener), and
+/// returns the handle and shutdown sender.
+async fn init_raft_cluster(
+    config: &ServerConfig,
+    shutdown_signal: &ShutdownSignal,
+) -> Result<
+    (
+        RaftHandle<String>,
+        pirc_server::raft::ShutdownSender,
+        Vec<tokio::task::JoinHandle<()>>,
+    ),
+    Box<dyn std::error::Error>,
+> {
+    let raft_config = config
+        .cluster
+        .to_raft_config()
+        .ok_or("cluster enabled but raft config could not be built")?;
+
+    let data_dir = config.cluster.raft_data_dir();
+    info!(?data_dir, node_id = %raft_config.node_id, "initializing raft cluster");
+
+    // Ensure data directory exists.
+    std::fs::create_dir_all(&data_dir)?;
+
+    let storage = FileStorage::new(&data_dir).await?;
+
+    let (mut driver, handle, shutdown_sender, inbound_tx, outbound_rx) =
+        RaftBuilder::<String, FileStorage>::new()
+            .config(raft_config)
+            .storage(storage)
+            .build()
+            .await?;
+
+    let mut handles = Vec::new();
+
+    // Parse peer addresses for the transport layer.
+    let peer_entries = config.cluster.parse_peers();
+    let peer_map_entries: Vec<_> = peer_entries
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .address
+                .parse::<SocketAddr>()
+                .ok()
+                .map(|addr| (entry.node_id, addr))
+        })
+        .collect();
+    let peer_map = PeerMap::new(peer_map_entries);
+
+    // Spawn the outbound transport task.
+    let peer_conns = Arc::new(Mutex::new(PeerConnections::new(peer_map.clone())));
+    let outbound_handle =
+        pirc_server::raft::transport::spawn_outbound_transport(outbound_rx, peer_conns);
+    handles.push(outbound_handle);
+
+    // Spawn the peer listener if a raft_port is configured.
+    if let Some(raft_port) = config.cluster.raft_port {
+        let listen_addr: SocketAddr =
+            format!("{}:{raft_port}", config.network.bind_address)
+                .parse()
+                .unwrap_or_else(|_| {
+                    format!("0.0.0.0:{raft_port}").parse().unwrap()
+                });
+
+        match Listener::bind(listen_addr).await {
+            Ok(listener) => {
+                info!(%listen_addr, "raft peer listener bound");
+                let listener_handle =
+                    pirc_server::raft::transport::spawn_peer_listener::<String>(
+                        listener,
+                        inbound_tx,
+                        &peer_map,
+                        shutdown_signal.clone(),
+                    );
+                handles.push(listener_handle);
+            }
+            Err(e) => {
+                error!(%listen_addr, error = %e, "failed to bind raft peer listener");
+                return Err(Box::new(e));
+            }
+        }
+    }
+
+    // Spawn the Raft driver task.
+    let driver_handle = tokio::spawn(async move {
+        driver.run().await;
+    });
+    handles.push(driver_handle);
+
+    info!("raft cluster initialized");
+    Ok((handle, shutdown_sender, handles))
 }

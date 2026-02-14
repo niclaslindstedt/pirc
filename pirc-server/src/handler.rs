@@ -9,10 +9,13 @@ use pirc_protocol::numeric::{
     RPL_CREATED, RPL_ENDOFWHOIS, RPL_NOWAWAY, RPL_UMODEIS, RPL_UNAWAY, RPL_WELCOME, RPL_WHOISIDLE,
     RPL_WHOISOPERATOR, RPL_WHOISSERVER, RPL_WHOISUSER, RPL_YOURHOST,
 };
-use pirc_protocol::{Command, Message, Prefix};
+use pirc_protocol::{Command, Message, PircSubcommand, Prefix};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tracing::warn;
+use tracing::{debug, warn};
+
+use crate::raft::rpc::RaftMessage;
+use crate::raft::types::NodeId;
 
 use crate::channel_registry::ChannelRegistry;
 use crate::config::ServerConfig;
@@ -138,6 +141,9 @@ pub fn handle_message(
             Command::Wallops => handle_wallops(msg, connection_id, registry, sender),
             Command::Motd => send_motd(sender, &get_nick(connection_id, registry), config),
             Command::Ping => handle_ping(msg, sender),
+            Command::Pirc(PircSubcommand::ClusterRaft) => {
+                debug!(conn_id = connection_id, "received PIRC CLUSTER RAFT on client connection");
+            }
             // PONG and other commands are silently absorbed.
             _ => {}
         }
@@ -827,6 +833,33 @@ fn get_nick(connection_id: u64, registry: &Arc<UserRegistry>) -> String {
         session.nickname.to_string()
     } else {
         "*".to_owned()
+    }
+}
+
+/// Route an inbound PIRC CLUSTER RAFT message to the Raft driver.
+///
+/// Deserializes the protocol message into a [`RaftMessage`] and forwards it
+/// to the Raft driver's inbound channel. The `from` parameter identifies which
+/// peer sent this message.
+///
+/// Returns `true` if the message was successfully forwarded, `false` otherwise.
+pub fn handle_cluster_raft(
+    msg: &Message,
+    from: NodeId,
+    inbound_tx: &mpsc::UnboundedSender<(NodeId, RaftMessage<String>)>,
+) -> bool {
+    match RaftMessage::<String>::from_protocol_message(msg) {
+        Ok(raft_msg) => {
+            if inbound_tx.send((from, raft_msg)).is_err() {
+                warn!(%from, "raft inbound channel closed");
+                return false;
+            }
+            true
+        }
+        Err(e) => {
+            warn!(%from, error = %e, "failed to deserialize raft message");
+            false
+        }
     }
 }
 
