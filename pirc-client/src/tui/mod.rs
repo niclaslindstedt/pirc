@@ -10,8 +10,10 @@ pub mod signal;
 pub mod style;
 pub mod tab_completion;
 mod terminal;
+pub mod input_handler;
 
 pub use input::{InputReader, KeyEvent};
+pub use input_handler::{InputAction, InputHandler};
 pub use input_history::InputHistory;
 pub use input_line_state::InputLineState;
 pub use layout::{Layout, Rect};
