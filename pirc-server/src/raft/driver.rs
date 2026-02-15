@@ -1,7 +1,10 @@
+use std::collections::HashMap;
+
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{self, Instant};
 use tracing::{debug, info, warn};
 
+use super::health::{HealthConfig, HealthEvent, NodeHealthMonitor, PeerStatus};
 use super::membership::{MembershipChange, MembershipError};
 use super::node::RaftNode;
 use super::rpc::RaftMessage;
@@ -26,6 +29,8 @@ pub struct RaftHandle<T: Send + 'static> {
     membership_tx: mpsc::UnboundedSender<MembershipProposal<T>>,
     commit_rx: mpsc::UnboundedReceiver<LogEntry<T>>,
     state_rx: watch::Receiver<(RaftState, Term, Option<NodeId>)>,
+    health_event_rx: mpsc::UnboundedReceiver<HealthEvent>,
+    peer_status_rx: watch::Receiver<HashMap<NodeId, PeerStatus>>,
 }
 
 impl<T: Send + 'static> RaftHandle<T> {
@@ -94,6 +99,21 @@ impl<T: Send + 'static> RaftHandle<T> {
     pub fn take_commit_rx(&mut self) -> mpsc::UnboundedReceiver<LogEntry<T>> {
         let (_, empty_rx) = mpsc::unbounded_channel();
         std::mem::replace(&mut self.commit_rx, empty_rx)
+    }
+
+    /// Take the health event receiver to consume peer status change events.
+    ///
+    /// This can only be called once; subsequent calls return an empty receiver.
+    pub fn take_health_event_rx(&mut self) -> mpsc::UnboundedReceiver<HealthEvent> {
+        let (_, empty_rx) = mpsc::unbounded_channel();
+        std::mem::replace(&mut self.health_event_rx, empty_rx)
+    }
+
+    /// Get the current peer statuses as reported by the health monitor.
+    ///
+    /// Returns an empty map when this node is not the leader.
+    pub fn peer_statuses(&self) -> HashMap<NodeId, PeerStatus> {
+        self.peer_status_rx.borrow().clone()
     }
 }
 
@@ -168,6 +188,14 @@ where
     shutdown: ShutdownSignal,
     /// Whether an election timeout reset was requested.
     election_reset: bool,
+    /// Health monitor for tracking peer liveness (active only when leader).
+    health_monitor: Option<NodeHealthMonitor>,
+    /// Forwards health events from the monitor to the handle.
+    health_event_fwd: mpsc::UnboundedSender<HealthEvent>,
+    /// Publishes peer status snapshots for external queries.
+    peer_status_tx: watch::Sender<HashMap<NodeId, PeerStatus>>,
+    /// Configuration for health monitoring thresholds.
+    health_config: HealthConfig,
 }
 
 impl<T, S, M> RaftDriver<T, S, M>
@@ -215,9 +243,16 @@ where
                         election_deadline = Instant::now() + self.node.election_timeout();
                         self.election_reset = false;
                     }
-                    // If we just became leader, reset the heartbeat interval.
-                    if !was_leader && self.node.state() == RaftState::Leader {
+                    let is_leader = self.node.state() == RaftState::Leader;
+                    // If we just became leader, reset the heartbeat interval
+                    // and start the health monitor.
+                    if !was_leader && is_leader {
                         heartbeat_tick.reset();
+                        self.start_health_monitor();
+                    }
+                    // If we just lost leadership, stop the health monitor.
+                    if was_leader && !is_leader {
+                        self.stop_health_monitor();
                     }
                 }
 
@@ -281,6 +316,11 @@ where
             "heartbeat tick"
         );
         self.node.send_heartbeats();
+        // Evaluate peer health on each heartbeat tick.
+        if let Some(ref mut monitor) = self.health_monitor {
+            monitor.evaluate();
+            self.publish_peer_statuses();
+        }
     }
 
     async fn handle_inbound_message(&mut self, from: NodeId, msg: RaftMessage<T>) {
@@ -339,6 +379,7 @@ where
                 }
             }
             RaftMessage::AppendEntriesResponse(resp) => {
+                let success = resp.success;
                 if let Err(e) = self.node.handle_append_entries_response(from, resp).await {
                     warn!(
                         node = %self.node.node_id(),
@@ -346,6 +387,12 @@ where
                         error = %e,
                         "error handling AppendEntriesResponse"
                     );
+                }
+                // Record the response in the health monitor (success means the peer is alive).
+                if success {
+                    if let Some(ref mut monitor) = self.health_monitor {
+                        monitor.record_response(from);
+                    }
                 }
             }
             RaftMessage::InstallSnapshot(req) => self.handle_install_snapshot(from, req).await,
@@ -361,6 +408,10 @@ where
                         error = %e,
                         "error handling InstallSnapshotResponse"
                     );
+                }
+                // Any snapshot response means the peer is alive.
+                if let Some(ref mut monitor) = self.health_monitor {
+                    monitor.record_response(from);
                 }
             }
         }
@@ -494,6 +545,48 @@ where
         ));
     }
 
+    /// Initialize the health monitor when this node becomes leader.
+    fn start_health_monitor(&mut self) {
+        let peers = self.node.membership().peers(self.node.node_id());
+        let (monitor, mut event_rx) = NodeHealthMonitor::new(&peers, self.health_config.clone());
+        self.health_monitor = Some(monitor);
+
+        // Drain any events from the monitor's channel into our forwarding channel.
+        let fwd = self.health_event_fwd.clone();
+        tokio::spawn(async move {
+            while let Some(event) = event_rx.recv().await {
+                if fwd.send(event).is_err() {
+                    break;
+                }
+            }
+        });
+
+        info!(
+            node = %self.node.node_id(),
+            peers = peers.len(),
+            "health monitor started"
+        );
+    }
+
+    /// Stop the health monitor when this node loses leadership.
+    fn stop_health_monitor(&mut self) {
+        if self.health_monitor.take().is_some() {
+            // Publish empty statuses since we're no longer monitoring.
+            let _ = self.peer_status_tx.send(HashMap::new());
+            info!(
+                node = %self.node.node_id(),
+                "health monitor stopped"
+            );
+        }
+    }
+
+    /// Publish current peer statuses from the health monitor.
+    fn publish_peer_statuses(&self) {
+        if let Some(ref monitor) = self.health_monitor {
+            let _ = self.peer_status_tx.send(monitor.peer_statuses());
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn node(&self) -> &RaftNode<T, S> {
         &self.node
@@ -595,6 +688,7 @@ where
             .state_machine
             .expect("RaftBuilder: state_machine is required");
 
+        let health_config = HealthConfig::from_heartbeat_interval(config.heartbeat_interval);
         let (node, outbound_rx) = RaftNode::new(config, storage).await?;
 
         let (inbound_tx, inbound_rx) = mpsc::unbounded_channel();
@@ -603,6 +697,8 @@ where
         let (commit_tx, commit_rx) = mpsc::unbounded_channel();
         let (outbound_fwd, outbound_ext_rx) = mpsc::unbounded_channel();
         let (shutdown_sender, shutdown_signal) = shutdown_channel();
+        let (health_event_fwd, health_event_rx) = mpsc::unbounded_channel();
+        let (peer_status_tx, peer_status_rx) = watch::channel(HashMap::new());
 
         let initial_state = (node.state(), node.current_term(), node.current_leader());
         let (state_tx, state_rx) = watch::channel(initial_state);
@@ -619,6 +715,10 @@ where
             state_tx,
             shutdown: shutdown_signal,
             election_reset: false,
+            health_monitor: None,
+            health_event_fwd,
+            peer_status_tx,
+            health_config,
         };
 
         let handle = RaftHandle {
@@ -626,6 +726,8 @@ where
             membership_tx,
             commit_rx,
             state_rx,
+            health_event_rx,
+            peer_status_rx,
         };
 
         Ok((driver, handle, shutdown_sender, inbound_tx, outbound_ext_rx))
