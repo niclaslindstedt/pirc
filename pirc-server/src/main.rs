@@ -14,6 +14,7 @@ use pirc_server::handler::{self, HandleResult, PreRegistrationState};
 use pirc_server::handler_cluster::ClusterContext;
 use pirc_server::raft::rpc::RaftMessage;
 use pirc_server::raft::transport::{PeerConnections, PeerMap, PeerUpdater, SharedPeerMap};
+use pirc_server::raft::types::LogEntry;
 use pirc_server::raft::{ClusterCommand, ClusterStateMachine, FileStorage, NodeId, RaftBuilder, RaftHandle};
 use pirc_server::registry::UserRegistry;
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -44,6 +45,7 @@ struct ClusterState {
     raft_handle: Arc<RaftHandle<ClusterCommand>>,
     cluster_service: Arc<ClusterService>,
     cluster_context: Arc<ClusterContext>,
+    commit_rx: mpsc::UnboundedReceiver<LogEntry<ClusterCommand>>,
     _raft_shutdown: pirc_server::raft::ShutdownSender,
     _task_handles: Vec<tokio::task::JoinHandle<()>>,
 }
@@ -119,6 +121,23 @@ async fn main() {
 
     let cluster_ctx: Option<Arc<ClusterContext>> =
         cluster_state.as_ref().map(|s| Arc::clone(&s.cluster_context));
+
+    // Spawn the commit consumer that syncs Raft state to local registries.
+    let mut cluster_state = cluster_state;
+    if let Some(ref mut state) = cluster_state {
+        let commit_rx = std::mem::replace(
+            &mut state.commit_rx,
+            mpsc::unbounded_channel().1,
+        );
+        let consumer_handle = pirc_server::commit_consumer::spawn_commit_consumer(
+            commit_rx,
+            Arc::clone(&registry),
+            Arc::clone(&channels),
+        );
+        state._task_handles.push(consumer_handle);
+        info!("commit consumer started");
+    }
+
     // Keep cluster_state alive for the lifetime of the server.
     let _cluster_state = cluster_state;
 
@@ -311,7 +330,7 @@ async fn init_bootstrap(
     std::fs::create_dir_all(&data_dir)?;
     let storage = FileStorage::new(&data_dir).await?;
 
-    let (mut driver, handle, shutdown_sender, inbound_tx, outbound_rx) =
+    let (mut driver, mut handle, shutdown_sender, inbound_tx, outbound_rx) =
         RaftBuilder::<ClusterCommand, FileStorage, ClusterStateMachine>::new()
             .config(raft_config)
             .storage(storage)
@@ -319,6 +338,7 @@ async fn init_bootstrap(
             .build()
             .await?;
 
+    let commit_rx = handle.take_commit_rx();
     let handle = Arc::new(handle);
     let mut handles = Vec::new();
 
@@ -387,6 +407,7 @@ async fn init_bootstrap(
         raft_handle: handle,
         cluster_service,
         cluster_context,
+        commit_rx,
         _raft_shutdown: shutdown_sender,
         _task_handles: handles,
     })
@@ -458,7 +479,7 @@ async fn init_join(
     std::fs::create_dir_all(&data_dir)?;
     let storage = FileStorage::new(&data_dir).await?;
 
-    let (mut driver, handle, shutdown_sender, inbound_tx, outbound_rx) =
+    let (mut driver, mut handle, shutdown_sender, inbound_tx, outbound_rx) =
         RaftBuilder::<ClusterCommand, FileStorage, ClusterStateMachine>::new()
             .config(raft_config)
             .storage(storage)
@@ -466,6 +487,7 @@ async fn init_join(
             .build()
             .await?;
 
+    let commit_rx = handle.take_commit_rx();
     let handle = Arc::new(handle);
     let mut handles = Vec::new();
 
@@ -540,6 +562,7 @@ async fn init_join(
         raft_handle: handle,
         cluster_service,
         cluster_context,
+        commit_rx,
         _raft_shutdown: shutdown_sender,
         _task_handles: handles,
     })
@@ -618,7 +641,7 @@ async fn init_rejoin(
 
     let storage = FileStorage::new(&data_dir).await?;
 
-    let (mut driver, handle, shutdown_sender, inbound_tx, outbound_rx) =
+    let (mut driver, mut handle, shutdown_sender, inbound_tx, outbound_rx) =
         RaftBuilder::<ClusterCommand, FileStorage, ClusterStateMachine>::new()
             .config(raft_config)
             .storage(storage)
@@ -626,6 +649,7 @@ async fn init_rejoin(
             .build()
             .await?;
 
+    let commit_rx = handle.take_commit_rx();
     let handle = Arc::new(handle);
     let mut handles = Vec::new();
 
@@ -685,6 +709,7 @@ async fn init_rejoin(
         raft_handle: handle,
         cluster_service,
         cluster_context,
+        commit_rx,
         _raft_shutdown: shutdown_sender,
         _task_handles: handles,
     })

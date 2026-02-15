@@ -1,6 +1,7 @@
 pub mod channel;
 pub mod channel_registry;
 pub mod cluster;
+pub mod commit_consumer;
 pub mod config;
 pub mod handler;
 pub mod handler_channel;
