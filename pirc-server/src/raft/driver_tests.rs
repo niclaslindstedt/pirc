@@ -26,7 +26,7 @@ fn test_config(node_id: u64, peers: Vec<u64>) -> RaftConfig {
 
 #[tokio::test]
 async fn builder_creates_driver_and_handle() {
-    let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
+    let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -77,7 +77,7 @@ async fn builder_panics_without_state_machine() {
 
 #[tokio::test]
 async fn handle_propose_fails_when_not_leader() {
-    let (_driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
+    let (_driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -93,7 +93,7 @@ async fn handle_propose_fails_when_not_leader() {
 
 #[tokio::test]
 async fn handle_take_commit_rx() {
-    let (_driver, mut handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
+    let (_driver, mut handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -114,7 +114,7 @@ async fn handle_take_commit_rx() {
 
 #[tokio::test]
 async fn driver_shuts_down_on_signal() {
-    let (mut driver, _handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
+    let (mut driver, _handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -133,7 +133,7 @@ async fn driver_shuts_down_on_signal() {
 
 #[tokio::test]
 async fn driver_solo_node_becomes_leader_on_election_timeout() {
-    let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
+    let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -159,7 +159,7 @@ async fn driver_solo_node_becomes_leader_on_election_timeout() {
 
 #[tokio::test]
 async fn driver_election_timeout_fires_and_starts_election() {
-    let (mut driver, handle, shutdown, _inbound_tx, mut outbound_rx) = RaftBuilder::new()
+    let (mut driver, handle, shutdown, _inbound_tx, mut outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -193,7 +193,7 @@ async fn driver_election_timeout_fires_and_starts_election() {
 
 #[tokio::test]
 async fn driver_becomes_leader_after_majority_votes() {
-    let (mut driver, handle, shutdown, inbound_tx, mut outbound_rx) = RaftBuilder::new()
+    let (mut driver, handle, shutdown, inbound_tx, mut outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -243,7 +243,7 @@ async fn driver_becomes_leader_after_majority_votes() {
 
 #[tokio::test]
 async fn driver_handles_append_entries_from_leader() {
-    let (mut driver, handle, shutdown, inbound_tx, mut outbound_rx) = RaftBuilder::new()
+    let (mut driver, handle, shutdown, inbound_tx, mut outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(2, vec![1, 3]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -295,7 +295,7 @@ async fn driver_handles_append_entries_from_leader() {
 
 #[tokio::test]
 async fn driver_election_timer_resets_on_append_entries() {
-    let (mut driver, handle, shutdown, inbound_tx, _outbound_rx) = RaftBuilder::new()
+    let (mut driver, handle, shutdown, inbound_tx, _outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(2, vec![1, 3]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -332,7 +332,7 @@ async fn driver_election_timer_resets_on_append_entries() {
 
 #[tokio::test]
 async fn driver_handles_request_vote_and_grants() {
-    let (mut driver, handle, shutdown, inbound_tx, mut outbound_rx) = RaftBuilder::new()
+    let (mut driver, handle, shutdown, inbound_tx, mut outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(2, vec![1, 3]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -380,7 +380,7 @@ async fn driver_handles_request_vote_and_grants() {
 #[tokio::test]
 async fn driver_client_proposal_as_leader() {
     // Use a solo node so it becomes leader automatically.
-    let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
+    let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -412,7 +412,7 @@ async fn driver_client_proposal_as_leader() {
 #[tokio::test]
 async fn driver_committed_entries_sent_to_commit_channel() {
     // Solo node — commits are immediate.
-    let (mut driver, mut handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
+    let (mut driver, mut handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -447,7 +447,7 @@ async fn driver_committed_entries_sent_to_commit_channel() {
 
 #[tokio::test]
 async fn driver_heartbeats_sent_periodically_as_leader() {
-    let (mut driver, handle, shutdown, _inbound_tx, mut outbound_rx) = RaftBuilder::new()
+    let (mut driver, handle, shutdown, _inbound_tx, mut outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -465,7 +465,7 @@ async fn driver_heartbeats_sent_periodically_as_leader() {
 
     // Use solo node with no peers — it auto-elects, but no heartbeats to send.
     // Instead test with 3-node cluster that wins election.
-    let (mut driver, handle, shutdown, inbound_tx, mut outbound_rx) = RaftBuilder::new()
+    let (mut driver, handle, shutdown, inbound_tx, mut outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -519,7 +519,7 @@ async fn driver_heartbeats_sent_periodically_as_leader() {
 
 #[tokio::test]
 async fn driver_steps_down_on_higher_term() {
-    let (mut driver, handle, shutdown, inbound_tx, _outbound_rx) = RaftBuilder::new()
+    let (mut driver, handle, shutdown, inbound_tx, _outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -573,7 +573,7 @@ async fn driver_steps_down_on_higher_term() {
 
 #[tokio::test]
 async fn shutdown_sender_can_be_called_multiple_times() {
-    let (mut driver, _handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
+    let (mut driver, _handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -606,7 +606,7 @@ use crate::raft::membership::{MembershipChange, MembershipError};
 
 #[tokio::test]
 async fn handle_membership_change_fails_when_not_leader() {
-    let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
+    let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -639,7 +639,7 @@ async fn handle_membership_change_fails_when_not_leader() {
 async fn handle_membership_change_solo_leader_success() {
     // Solo node auto-elects. After becoming leader, it needs to commit an entry
     // in the current term before membership changes are allowed.
-    let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
+    let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -680,7 +680,7 @@ async fn handle_membership_change_solo_leader_success() {
 async fn handle_membership_change_no_current_term_commit() {
     // Leader that hasn't committed an entry in the current term should reject.
     // Use a 3-node cluster so we can control when commits happen.
-    let (mut driver, handle, shutdown, inbound_tx, _outbound_rx) = RaftBuilder::new()
+    let (mut driver, handle, shutdown, inbound_tx, _outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![2, 3]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -730,7 +730,7 @@ async fn handle_membership_change_no_current_term_commit() {
 #[tokio::test]
 async fn handle_membership_change_already_member() {
     // Solo leader tries to add a node that is already a member (itself).
-    let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
+    let (mut driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)
@@ -770,7 +770,7 @@ async fn handle_membership_change_already_member() {
 #[tokio::test]
 async fn handle_membership_change_driver_shutdown_returns_error() {
     // If the driver shuts down, the membership proposal should fail.
-    let (_driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::new()
+    let (_driver, handle, shutdown, _inbound_tx, _outbound_rx) = RaftBuilder::<String, _, _>::new()
         .config(test_config(1, vec![]))
         .storage(MemStorage::new())
         .state_machine(NullStateMachine)

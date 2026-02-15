@@ -1,3 +1,4 @@
+pub mod cluster_command;
 pub mod driver;
 pub mod election;
 pub mod file_storage;
@@ -31,4 +32,5 @@ pub use snapshot::{
 pub use state::{LeaderState, PersistentState, VolatileState};
 pub use storage::{RaftStorage, StorageError, StorageResult};
 pub use transport::{PeerConnections, PeerMap, PeerUpdater, SharedPeerMap, TransportError};
+pub use cluster_command::ClusterCommand;
 pub use types::{LogEntry, LogIndex, NodeId, RaftConfig, RaftState, Term};

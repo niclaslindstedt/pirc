@@ -8,7 +8,8 @@ use tracing::info;
 
 use crate::cluster::InviteKeyStore;
 use crate::raft::{
-    MembershipChange, MembershipError, NodeId, PeerUpdater, RaftError, RaftHandle, SharedPeerMap,
+    ClusterCommand, MembershipChange, MembershipError, NodeId, PeerUpdater, RaftError, RaftHandle,
+    SharedPeerMap,
 };
 
 /// Errors that can occur during the cluster join protocol.
@@ -53,7 +54,7 @@ pub struct JoinResult {
 /// the transport layer, and produces a `CLUSTER WELCOME` response.
 pub struct ClusterService {
     invite_keys: Arc<Mutex<InviteKeyStore>>,
-    raft_handle: Arc<RaftHandle<String>>,
+    raft_handle: Arc<RaftHandle<ClusterCommand>>,
     peer_updater: PeerUpdater,
     shared_peer_map: SharedPeerMap,
     /// This node's own ID (included in welcome topology for joiners).
@@ -70,7 +71,7 @@ impl ClusterService {
     /// - `next_node_id_start`: counter seed for assigning IDs to joining nodes
     pub fn new(
         invite_keys: Arc<Mutex<InviteKeyStore>>,
-        raft_handle: Arc<RaftHandle<String>>,
+        raft_handle: Arc<RaftHandle<ClusterCommand>>,
         peer_updater: PeerUpdater,
         shared_peer_map: SharedPeerMap,
         self_id: NodeId,
@@ -122,7 +123,10 @@ impl ClusterService {
 
         // Propose membership change via Raft.
         let change = MembershipChange::AddServer(new_node_id, joiner_addr);
-        let noop = format!("add-server:{}", new_node_id.as_u64());
+        let noop = ClusterCommand::ServerAdded {
+            node_id: new_node_id,
+            addr: joiner_addr,
+        };
         self.raft_handle
             .propose_membership_change(change, noop)
             .await?;
@@ -420,13 +424,13 @@ mod tests {
     /// The leader has already committed an entry in the current term
     /// (required before membership changes are allowed).
     async fn setup_leader() -> (
-        Arc<RaftHandle<String>>,
+        Arc<RaftHandle<ClusterCommand>>,
         crate::raft::ShutdownSender,
         tokio::task::JoinHandle<()>,
     ) {
         let config = test_config(1);
         let (mut driver, handle, shutdown_tx, _inbound_tx, _outbound_rx) =
-            RaftBuilder::new()
+            RaftBuilder::<ClusterCommand, _, _>::new()
                 .config(config)
                 .storage(MemStorage::new())
                 .state_machine(NullStateMachine)
@@ -444,7 +448,7 @@ mod tests {
         assert!(handle.is_leader(), "single-node should become leader");
 
         // Commit an entry in the current term (required for membership changes).
-        handle.propose("init".to_owned()).unwrap();
+        handle.propose(ClusterCommand::Noop { description: "init".into() }).unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         (handle, shutdown_tx, driver_handle)

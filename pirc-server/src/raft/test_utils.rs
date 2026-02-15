@@ -4,14 +4,14 @@ use crate::raft::storage::{RaftStorage, StorageResult};
 use crate::raft::types::{LogEntry, LogIndex, NodeId, Term};
 
 /// In-memory storage backend for testing.
-pub struct MemStorage {
+pub struct MemStorage<T: Clone + Send + Sync = String> {
     term: Mutex<Term>,
     voted_for: Mutex<Option<NodeId>>,
-    log: Mutex<Vec<LogEntry<String>>>,
+    log: Mutex<Vec<LogEntry<T>>>,
     snapshot: Mutex<Option<(Vec<u8>, LogIndex, Term)>>,
 }
 
-impl MemStorage {
+impl<T: Clone + Send + Sync> MemStorage<T> {
     pub fn new() -> Self {
         Self {
             term: Mutex::new(Term::default()),
@@ -22,7 +22,7 @@ impl MemStorage {
     }
 }
 
-impl RaftStorage<String> for MemStorage {
+impl<T: Clone + Send + Sync + 'static> RaftStorage<T> for MemStorage<T> {
     fn save_term(
         &self,
         term: Term,
@@ -53,7 +53,7 @@ impl RaftStorage<String> for MemStorage {
 
     fn append_entries(
         &self,
-        entries: &[LogEntry<String>],
+        entries: &[LogEntry<T>],
     ) -> impl std::future::Future<Output = StorageResult<()>> + Send {
         self.log.lock().unwrap().extend(entries.iter().cloned());
         async { Ok(()) }
@@ -61,7 +61,7 @@ impl RaftStorage<String> for MemStorage {
 
     fn load_log(
         &self,
-    ) -> impl std::future::Future<Output = StorageResult<Vec<LogEntry<String>>>> + Send {
+    ) -> impl std::future::Future<Output = StorageResult<Vec<LogEntry<T>>>> + Send {
         let log = self.log.lock().unwrap().clone();
         async move { Ok(log) }
     }

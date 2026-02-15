@@ -14,7 +14,7 @@ use pirc_server::handler::{self, HandleResult, PreRegistrationState};
 use pirc_server::handler_cluster::ClusterContext;
 use pirc_server::raft::rpc::RaftMessage;
 use pirc_server::raft::transport::{PeerConnections, PeerMap, PeerUpdater, SharedPeerMap};
-use pirc_server::raft::{FileStorage, NodeId, NullStateMachine, RaftBuilder, RaftHandle};
+use pirc_server::raft::{ClusterCommand, FileStorage, NodeId, NullStateMachine, RaftBuilder, RaftHandle};
 use pirc_server::registry::UserRegistry;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
@@ -41,7 +41,7 @@ fn parse_config_path() -> Option<PathBuf> {
 /// `cluster_context` is shared with connection handlers for operator commands.
 #[allow(dead_code)]
 struct ClusterState {
-    raft_handle: Arc<RaftHandle<String>>,
+    raft_handle: Arc<RaftHandle<ClusterCommand>>,
     cluster_service: Arc<ClusterService>,
     cluster_context: Arc<ClusterContext>,
     _raft_shutdown: pirc_server::raft::ShutdownSender,
@@ -312,7 +312,7 @@ async fn init_bootstrap(
     let storage = FileStorage::new(&data_dir).await?;
 
     let (mut driver, handle, shutdown_sender, inbound_tx, outbound_rx) =
-        RaftBuilder::<String, FileStorage, NullStateMachine>::new()
+        RaftBuilder::<ClusterCommand, FileStorage, NullStateMachine>::new()
             .config(raft_config)
             .storage(storage)
             .state_machine(NullStateMachine)
@@ -459,7 +459,7 @@ async fn init_join(
     let storage = FileStorage::new(&data_dir).await?;
 
     let (mut driver, handle, shutdown_sender, inbound_tx, outbound_rx) =
-        RaftBuilder::<String, FileStorage, NullStateMachine>::new()
+        RaftBuilder::<ClusterCommand, FileStorage, NullStateMachine>::new()
             .config(raft_config)
             .storage(storage)
             .state_machine(NullStateMachine)
@@ -619,7 +619,7 @@ async fn init_rejoin(
     let storage = FileStorage::new(&data_dir).await?;
 
     let (mut driver, handle, shutdown_sender, inbound_tx, outbound_rx) =
-        RaftBuilder::<String, FileStorage, NullStateMachine>::new()
+        RaftBuilder::<ClusterCommand, FileStorage, NullStateMachine>::new()
             .config(raft_config)
             .storage(storage)
             .state_machine(NullStateMachine)
@@ -713,7 +713,7 @@ fn cluster_self_addr(config: &ServerConfig) -> SocketAddr {
 /// connection is treated as a Raft peer and forwarded to the inbound channel.
 fn spawn_cluster_listener(
     listener: Listener,
-    inbound_tx: mpsc::UnboundedSender<(NodeId, RaftMessage<String>)>,
+    inbound_tx: mpsc::UnboundedSender<(NodeId, RaftMessage<ClusterCommand>)>,
     shared_peer_map: SharedPeerMap,
     mut shutdown: ShutdownSignal,
 ) -> tokio::task::JoinHandle<()> {
@@ -753,7 +753,7 @@ fn spawn_cluster_listener(
 async fn handle_cluster_connection(
     mut connection: Connection,
     peer_addr: SocketAddr,
-    inbound_tx: mpsc::UnboundedSender<(NodeId, RaftMessage<String>)>,
+    inbound_tx: mpsc::UnboundedSender<(NodeId, RaftMessage<ClusterCommand>)>,
     shared_peer_map: SharedPeerMap,
 ) {
     // Read the first message to determine connection type.
@@ -770,7 +770,7 @@ async fn handle_cluster_connection(
     };
 
     // Try to parse as a Raft message first (most common case).
-    if let Ok(raft_msg) = RaftMessage::<String>::from_protocol_message(&first_msg) {
+    if let Ok(raft_msg) = RaftMessage::<ClusterCommand>::from_protocol_message(&first_msg) {
         // Identify the peer by looking up IP in the shared peer map.
         let node_id = {
             let map = shared_peer_map.read().await;
@@ -791,7 +791,7 @@ async fn handle_cluster_connection(
         if inbound_tx.send((node_id, raft_msg)).is_err() {
             return;
         }
-        pirc_server::raft::transport::spawn_inbound_handler::<String>(
+        pirc_server::raft::transport::spawn_inbound_handler::<ClusterCommand>(
             node_id,
             connection,
             inbound_tx,

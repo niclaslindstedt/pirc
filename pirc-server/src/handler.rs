@@ -14,6 +14,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::{debug, warn};
 
+use crate::raft::cluster_command::ClusterCommand;
 use crate::raft::rpc::RaftMessage;
 use crate::raft::types::NodeId;
 
@@ -885,9 +886,9 @@ fn get_nick(connection_id: u64, registry: &Arc<UserRegistry>) -> String {
 pub fn handle_cluster_raft(
     msg: &Message,
     from: NodeId,
-    inbound_tx: &mpsc::UnboundedSender<(NodeId, RaftMessage<String>)>,
+    inbound_tx: &mpsc::UnboundedSender<(NodeId, RaftMessage<ClusterCommand>)>,
 ) -> bool {
-    match RaftMessage::<String>::from_protocol_message(msg) {
+    match RaftMessage::<ClusterCommand>::from_protocol_message(msg) {
         Ok(raft_msg) => {
             if inbound_tx.send((from, raft_msg)).is_err() {
                 warn!(%from, "raft inbound channel closed");

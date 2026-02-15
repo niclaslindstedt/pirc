@@ -13,7 +13,7 @@ use crate::handler::{handle_message, PreRegistrationState};
 use crate::handler_cluster::ClusterContext;
 use crate::raft::test_utils::MemStorage;
 use crate::raft::transport::{PeerMap, SharedPeerMap};
-use crate::raft::{NodeId, NullStateMachine, RaftBuilder, RaftConfig, RaftHandle};
+use crate::raft::{ClusterCommand, NodeId, NullStateMachine, RaftBuilder, RaftConfig, RaftHandle};
 use crate::registry::UserRegistry;
 
 fn make_sender() -> (
@@ -99,17 +99,18 @@ fn test_raft_config() -> RaftConfig {
     }
 }
 
-async fn setup_cluster_context() -> (Arc<ClusterContext>, Arc<RaftHandle<String>>) {
+async fn setup_cluster_context() -> (Arc<ClusterContext>, Arc<RaftHandle<ClusterCommand>>) {
     let config = test_raft_config();
     let node_id = config.node_id;
 
-    let (_driver, handle, _shutdown_tx, _inbound_tx, _outbound_rx) = RaftBuilder::new()
-        .config(config)
-        .storage(MemStorage::new())
-        .state_machine(NullStateMachine)
-        .build()
-        .await
-        .unwrap();
+    let (_driver, handle, _shutdown_tx, _inbound_tx, _outbound_rx) =
+        RaftBuilder::<ClusterCommand, _, _>::new()
+            .config(config)
+            .storage(MemStorage::new())
+            .state_machine(NullStateMachine)
+            .build()
+            .await
+            .unwrap();
 
     let handle = Arc::new(handle);
     let invite_keys = Arc::new(Mutex::new(InviteKeyStore::new()));

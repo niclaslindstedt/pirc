@@ -8,13 +8,13 @@ use tokio::sync::mpsc;
 use crate::cluster::InviteKeyStore;
 use crate::handler::{send_numeric, SERVER_NAME};
 use crate::handler_oper::is_oper;
-use crate::raft::{NodeId, RaftHandle, SharedPeerMap};
+use crate::raft::{ClusterCommand, NodeId, RaftHandle, SharedPeerMap};
 use crate::registry::UserRegistry;
 
 /// Shared cluster state made available to command handlers.
 pub struct ClusterContext {
     pub invite_keys: Arc<tokio::sync::Mutex<InviteKeyStore>>,
-    pub raft_handle: Arc<RaftHandle<String>>,
+    pub raft_handle: Arc<RaftHandle<ClusterCommand>>,
     pub shared_peer_map: SharedPeerMap,
     pub self_id: NodeId,
 }
