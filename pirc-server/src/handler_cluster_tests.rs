@@ -9,6 +9,7 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 use crate::channel_registry::ChannelRegistry;
 use crate::cluster::InviteKeyStore;
 use crate::config::ServerConfig;
+use crate::degraded_mode::DegradedModeState;
 use crate::handler::{handle_message, PreRegistrationState};
 use crate::handler_cluster::ClusterContext;
 use crate::raft::test_utils::MemStorage;
@@ -125,6 +126,7 @@ async fn setup_cluster_context() -> (Arc<ClusterContext>, Arc<RaftHandle<Cluster
         raft_handle: Arc::clone(&handle),
         shared_peer_map,
         self_id: node_id,
+        degraded_state: Arc::new(DegradedModeState::new()),
     });
 
     (ctx, handle)

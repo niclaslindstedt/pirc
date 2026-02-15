@@ -67,6 +67,14 @@ impl<T: Send + 'static> RaftHandle<T> {
         self.state_rx.borrow().0
     }
 
+    /// Subscribe to Raft state changes.
+    ///
+    /// Returns a cloned watch receiver that yields `(RaftState, Term, Option<NodeId>)`
+    /// whenever the Raft driver publishes a state update.
+    pub fn subscribe_state(&self) -> watch::Receiver<(RaftState, Term, Option<NodeId>)> {
+        self.state_rx.clone()
+    }
+
     /// Propose a membership change to the Raft cluster.
     ///
     /// Sends the change to the driver loop, which applies it via

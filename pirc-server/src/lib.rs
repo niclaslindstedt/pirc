@@ -3,6 +3,7 @@ pub mod channel_registry;
 pub mod cluster;
 pub mod commit_consumer;
 pub mod config;
+pub mod degraded_mode;
 pub mod failover_queue;
 pub mod graceful_shutdown;
 pub mod handler;

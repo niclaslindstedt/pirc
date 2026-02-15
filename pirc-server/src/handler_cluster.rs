@@ -6,6 +6,7 @@ use pirc_protocol::Message;
 use tokio::sync::mpsc;
 
 use crate::cluster::InviteKeyStore;
+use crate::degraded_mode::SharedDegradedState;
 use crate::handler::{send_numeric, SERVER_NAME};
 use crate::handler_oper::is_oper;
 use crate::raft::{ClusterCommand, NodeId, RaftHandle, SharedPeerMap};
@@ -17,6 +18,7 @@ pub struct ClusterContext {
     pub raft_handle: Arc<RaftHandle<ClusterCommand>>,
     pub shared_peer_map: SharedPeerMap,
     pub self_id: NodeId,
+    pub degraded_state: SharedDegradedState,
 }
 
 /// Send a server NOTICE to the client.
@@ -229,6 +231,11 @@ pub fn handle_cluster_status(
         sender,
         &nick,
         &format!("Is leader: {}", ctx.raft_handle.is_leader()),
+    );
+    send_notice(
+        sender,
+        &nick,
+        &format!("Degraded: {}", ctx.degraded_state.is_degraded()),
     );
 }
 

@@ -10,6 +10,7 @@ use pirc_protocol::{Command, Message};
 use pirc_server::channel_registry::ChannelRegistry;
 use pirc_server::cluster::{ClusterService, InviteKeyStore, PersistedClusterState, PersistedPeer};
 use pirc_server::config::{ClusterStartupMode, ServerConfig};
+use pirc_server::degraded_mode::{DegradedModeState, SharedDegradedState};
 use pirc_server::failover_queue::{FailoverMessageQueue, SharedFailoverQueue};
 use pirc_server::graceful_shutdown::GracefulShutdown;
 use pirc_server::handler::{self, HandleResult, PreRegistrationState};
@@ -51,6 +52,7 @@ struct ClusterState {
     commit_rx: mpsc::UnboundedReceiver<LogEntry<ClusterCommand>>,
     health_event_rx: mpsc::UnboundedReceiver<HealthEvent>,
     user_node_index: SharedUserNodeIndex,
+    degraded_state: SharedDegradedState,
     self_id: NodeId,
     peer_ids: Vec<NodeId>,
     _raft_shutdown: pirc_server::raft::ShutdownSender,
@@ -167,6 +169,18 @@ async fn main() {
         );
         state._task_handles.push(consumer_handle);
         info!("commit consumer started");
+
+        // Spawn the degraded mode monitor that detects quorum loss/restore.
+        let state_rx = state.raft_handle.subscribe_state();
+        let is_single_node = state.peer_ids.is_empty();
+        let degraded_monitor_handle = pirc_server::degraded_mode::spawn_degraded_mode_monitor(
+            state_rx,
+            Arc::clone(&registry),
+            Arc::clone(&state.degraded_state),
+            is_single_node,
+        );
+        state._task_handles.push(degraded_monitor_handle);
+        info!("degraded mode monitor started");
 
         // Spawn the migration service that handles user migration on node failure.
         let health_event_rx = std::mem::replace(
@@ -474,11 +488,14 @@ async fn init_bootstrap(
     persisted.save(&data_dir)?;
     info!("persisted initial cluster state");
 
+    let degraded_state: SharedDegradedState = Arc::new(DegradedModeState::new());
+
     let cluster_context = Arc::new(ClusterContext {
         invite_keys: Arc::clone(&invite_keys),
         raft_handle: Arc::clone(&handle),
         shared_peer_map: Arc::clone(&shared_peer_map),
         self_id: node_id,
+        degraded_state: Arc::clone(&degraded_state),
     });
 
     info!("cluster bootstrapped as master");
@@ -489,6 +506,7 @@ async fn init_bootstrap(
         commit_rx,
         health_event_rx,
         user_node_index,
+        degraded_state,
         self_id: node_id,
         peer_ids: vec![],
         _raft_shutdown: shutdown_sender,
@@ -635,11 +653,14 @@ async fn init_join(
     persisted.save(&data_dir)?;
     info!("persisted cluster state after join");
 
+    let degraded_state: SharedDegradedState = Arc::new(DegradedModeState::new());
+
     let cluster_context = Arc::new(ClusterContext {
         invite_keys: Arc::clone(&invite_keys),
         raft_handle: Arc::clone(&handle),
         shared_peer_map: Arc::clone(&shared_peer_map),
         self_id: assigned_id,
+        degraded_state: Arc::clone(&degraded_state),
     });
 
     info!("joined cluster successfully");
@@ -650,6 +671,7 @@ async fn init_join(
         commit_rx,
         health_event_rx,
         user_node_index,
+        degraded_state,
         self_id: assigned_id,
         peer_ids: peer_ids.clone(),
         _raft_shutdown: shutdown_sender,
@@ -788,11 +810,14 @@ async fn init_rejoin(
         next_node_id_start,
     ));
 
+    let degraded_state: SharedDegradedState = Arc::new(DegradedModeState::new());
+
     let cluster_context = Arc::new(ClusterContext {
         invite_keys: Arc::clone(&invite_keys),
         raft_handle: Arc::clone(&handle),
         shared_peer_map: Arc::clone(&shared_peer_map),
         self_id: node_id,
+        degraded_state: Arc::clone(&degraded_state),
     });
 
     info!("cluster rejoin initialized");
@@ -803,6 +828,7 @@ async fn init_rejoin(
         commit_rx,
         health_event_rx,
         user_node_index,
+        degraded_state,
         self_id: node_id,
         peer_ids: peer_ids.clone(),
         _raft_shutdown: shutdown_sender,
