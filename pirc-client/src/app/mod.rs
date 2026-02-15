@@ -2,12 +2,15 @@ use std::io::{self, Write};
 use std::net::ToSocketAddrs;
 use std::time::Duration;
 
+use pirc_crypto::protocol::{encode_for_wire, KeyExchangeMessage};
 use pirc_network::connection::AsyncTransport;
 use pirc_network::{Connection, Connector, ShutdownController, ShutdownSignal};
-use pirc_protocol::{Command, Message};
+use pirc_protocol::{Command, Message, PircSubcommand};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::{info, warn};
+
+use crate::encryption::EncryptionManager;
 
 use crate::client_command::ClientCommand;
 use crate::config::ClientConfig;
@@ -68,6 +71,8 @@ pub struct App {
     reconnect_attempt: u32,
     /// Channels to rejoin after a successful reconnect.
     channels_to_rejoin: Vec<String>,
+    /// E2E encryption manager for private messages.
+    encryption: EncryptionManager,
 }
 
 impl App {
@@ -98,6 +103,7 @@ impl App {
             reconnect_at: None,
             reconnect_attempt: 0,
             channels_to_rejoin: Vec::new(),
+            encryption: EncryptionManager::new(),
         }
     }
 
@@ -580,6 +586,9 @@ impl App {
 
                     // Rejoin channels if this was a reconnect
                     self.rejoin_channels().await;
+
+                    // Upload pre-key bundle for E2E encryption
+                    self.upload_pre_key_bundle().await;
                     return;
                 }
                 RegistrationEvent::Info(text) => {
@@ -844,6 +853,30 @@ impl App {
             }
         }
         self.push_status(&format!("Rejoining {} channel(s)...", channels.len()));
+    }
+
+    /// Generate and upload our pre-key bundle to the server.
+    ///
+    /// Sends `PIRC KEYEXCHANGE * <base64-bundle>` where `*` as target
+    /// signals "store my bundle" to the server.
+    async fn upload_pre_key_bundle(&mut self) {
+        let bundle = self.encryption.create_pre_key_bundle();
+        let bundle_msg = KeyExchangeMessage::Bundle(Box::new(bundle));
+        let encoded = encode_for_wire(&bundle_msg.to_bytes());
+
+        let msg = Message::new(
+            Command::Pirc(PircSubcommand::KeyExchange),
+            vec!["*".to_string(), encoded],
+        );
+
+        if let Some(ref mut conn) = self.connection {
+            if let Err(e) = conn.send(msg).await {
+                warn!("Failed to upload pre-key bundle: {e}");
+                self.push_status(&format!("Failed to upload encryption keys: {e}"));
+                return;
+            }
+            info!("Pre-key bundle uploaded");
+        }
     }
 
     /// Push a status message to the status buffer.

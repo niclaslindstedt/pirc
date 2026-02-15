@@ -1,5 +1,6 @@
 use super::*;
 use crate::config::ClientConfig;
+use pirc_crypto::protocol::{decode_from_wire, KeyExchangeMessage};
 
 #[test]
 fn app_new_creates_with_defaults() {
@@ -877,4 +878,111 @@ fn dispatch_quit_none_returns_true_and_disables_reconnect() {
     let result = rt.block_on(app.dispatch_view_action(ViewAction::Quit(None)));
     assert!(result);
     assert!(!app.connection_mgr.auto_reconnect());
+}
+
+// ── Encryption tests ─────────────────────────────────────────
+
+#[test]
+fn app_new_initializes_encryption_manager() {
+    let config = ClientConfig::default();
+    let app = App::new(config);
+    // EncryptionManager is initialized — verify by checking fingerprint is valid
+    let fp = app.encryption.get_identity_fingerprint();
+    assert_eq!(fp.len(), 95); // 32 bytes as "XX:XX:...:XX"
+}
+
+#[test]
+fn upload_pre_key_bundle_constructs_valid_message() {
+    // Verify the message construction logic produces a valid bundle
+    let config = ClientConfig::default();
+    let app = App::new(config);
+
+    let bundle = app.encryption.create_pre_key_bundle();
+    let bundle_msg = KeyExchangeMessage::Bundle(Box::new(bundle));
+    let encoded = pirc_crypto::protocol::encode_for_wire(&bundle_msg.to_bytes());
+
+    // Verify the encoded data round-trips correctly
+    let decoded = decode_from_wire(&encoded).expect("decode should succeed");
+    let restored = KeyExchangeMessage::from_bytes(&decoded).expect("parse should succeed");
+    assert!(matches!(restored, KeyExchangeMessage::Bundle(_)));
+
+    if let KeyExchangeMessage::Bundle(b) = restored {
+        b.validate().expect("bundle should be valid");
+    }
+}
+
+#[test]
+fn upload_pre_key_bundle_no_connection_does_not_panic() {
+    let mut config = ClientConfig::default();
+    config.identity.nick = Some("testuser".to_string());
+    let mut app = App::new(config);
+
+    // No connection — upload should silently do nothing
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(app.upload_pre_key_bundle());
+    // Should not panic and encryption manager should still be valid
+    assert!(!app.encryption.get_identity_fingerprint().is_empty());
+}
+
+#[test]
+fn rpl_welcome_triggers_bundle_upload_without_panic() {
+    let mut config = ClientConfig::default();
+    config.identity.nick = Some("testuser".to_string());
+    let mut app = App::new(config);
+
+    // Set up registration state
+    app.connection_mgr
+        .transition(ConnectionState::Connecting)
+        .unwrap();
+    app.connection_mgr
+        .transition(ConnectionState::Registering)
+        .unwrap();
+    app.registration = Some(RegistrationState::new(
+        "testuser".into(),
+        vec![],
+        "testuser".into(),
+        "testuser".into(),
+    ));
+    app.registration_deadline = Some(Instant::now() + REGISTRATION_TIMEOUT);
+
+    let msg = Message::with_prefix(
+        pirc_protocol::Prefix::Server("irc.test.net".into()),
+        pirc_protocol::Command::Numeric(1),
+        vec!["testuser".into(), "Welcome to the test network!".into()],
+    );
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    // Should not panic even without a real connection
+    // (upload_pre_key_bundle is a no-op when connection is None)
+    rt.block_on(app.handle_server_message(&msg));
+    assert!(app.connection_mgr.is_connected());
+}
+
+#[test]
+fn upload_pre_key_bundle_message_format() {
+    // Verify the wire message has the expected structure:
+    // PIRC KEYEXCHANGE * <base64-data>
+    let config = ClientConfig::default();
+    let app = App::new(config);
+
+    let bundle = app.encryption.create_pre_key_bundle();
+    let bundle_msg = KeyExchangeMessage::Bundle(Box::new(bundle));
+    let encoded = pirc_crypto::protocol::encode_for_wire(&bundle_msg.to_bytes());
+
+    let msg = Message::new(
+        Command::Pirc(pirc_protocol::PircSubcommand::KeyExchange),
+        vec!["*".to_string(), encoded.clone()],
+    );
+
+    // Verify the message serializes correctly
+    let wire = msg.to_string();
+    assert!(wire.starts_with("PIRC KEYEXCHANGE * "));
+    // The encoded data should be present (possibly with : prefix for trailing)
+    assert!(wire.contains(&encoded[..20])); // check first 20 chars of base64
 }
