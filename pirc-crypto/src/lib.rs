@@ -5,7 +5,7 @@
 //!
 //! - **Identity** — [`identity`] long-term identity key management
 //! - **Pre-keys** — [`prekey`] X3DH-style pre-key bundles with PQ extension
-//! - **Key exchange** — [`x25519`] X25519 Diffie-Hellman
+//! - **Key exchange** — [`x25519`] X25519 Diffie-Hellman, [`x3dh`] X3DH + PQ extension
 //! - **Encryption** — [`aead`] AES-256-GCM authenticated encryption
 //! - **Key derivation** — [`kdf`] HKDF-SHA-256
 //! - **Post-quantum KEM** — [`kem`] ML-KEM (Kyber) key encapsulation
@@ -28,5 +28,6 @@ pub mod signing;
 pub mod symmetric_ratchet;
 pub mod triple_ratchet;
 pub mod x25519;
+pub mod x3dh;
 
 pub use error::{CryptoError, Result};
