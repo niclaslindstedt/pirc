@@ -49,6 +49,21 @@ impl PqRatchetState {
         }
     }
 
+    /// Create a new PQ ratchet state with an existing KEM key pair.
+    ///
+    /// Used by the session receiver who shared their KEM public key
+    /// out-of-band. The sender will encapsulate under this public key
+    /// during the first PQ ratchet step.
+    #[must_use]
+    pub fn with_keypair(initial_key: [u8; kdf::KEY_SIZE], kem_pair: KemKeyPair) -> Self {
+        Self {
+            kem_pair,
+            remote_kem_public: None,
+            pq_chain_key: initial_key,
+            step_counter: 0,
+        }
+    }
+
     /// Initiate a PQ ratchet step (sender side).
     ///
     /// Encapsulates a fresh shared secret under the remote party's KEM

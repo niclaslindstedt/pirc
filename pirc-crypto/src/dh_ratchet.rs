@@ -28,18 +28,25 @@ impl RootKey {
         &self.0
     }
 
-    /// Derive a new root key and chain key from a DH shared secret.
+    /// Derive a new root key, chain key, and header key from a DH shared
+    /// secret.
     ///
     /// Uses HKDF with the current root key as salt and the DH output as
-    /// input key material. Produces 64 bytes: the first 32 become the new
-    /// root key, the second 32 become a chain key for a symmetric ratchet.
-    fn kdf(&self, dh_output: &x25519::SharedSecret) -> Result<(RootKey, ChainKey)> {
-        let output = kdf::derive_key(self.as_bytes(), dh_output.as_bytes(), ROOT_KEY_INFO, 64)?;
+    /// input key material. Produces 96 bytes: the first 32 become the new
+    /// root key, the next 32 become a chain key for a symmetric ratchet,
+    /// and the last 32 become a header key.
+    fn kdf(
+        &self,
+        dh_output: &x25519::SharedSecret,
+    ) -> Result<(RootKey, ChainKey, [u8; kdf::KEY_SIZE])> {
+        let output = kdf::derive_key(self.as_bytes(), dh_output.as_bytes(), ROOT_KEY_INFO, 96)?;
         let mut new_root = [0u8; kdf::KEY_SIZE];
         let mut chain = [0u8; kdf::KEY_SIZE];
+        let mut header = [0u8; kdf::KEY_SIZE];
         new_root.copy_from_slice(&output[..32]);
-        chain.copy_from_slice(&output[32..]);
-        Ok((RootKey::new(new_root), ChainKey::new(chain)))
+        chain.copy_from_slice(&output[32..64]);
+        header.copy_from_slice(&output[64..96]);
+        Ok((RootKey::new(new_root), ChainKey::new(chain), header))
     }
 }
 
@@ -78,23 +85,29 @@ impl DhRatchetState {
     ///
     /// Returns [`CryptoError`] if the initial DH produces an invalid shared
     /// secret or the root key derivation fails.
+    /// Returns `(Self, header_key)` where `header_key` is derived from
+    /// the initial DH root-KDF step.  The caller uses this as the
+    /// sender's *next* sending header key.
     pub fn init_sender(
         root_key: [u8; kdf::KEY_SIZE],
         remote_public: PublicKey,
-    ) -> Result<Self> {
+    ) -> Result<(Self, [u8; kdf::KEY_SIZE])> {
         let dh_pair = KeyPair::generate();
         let dh_output = x25519::diffie_hellman_keypair(&dh_pair, &remote_public)?;
 
         let rk = RootKey::new(root_key);
-        let (new_rk, sending_ck) = rk.kdf(&dh_output)?;
+        let (new_rk, sending_ck, header_key) = rk.kdf(&dh_output)?;
 
-        Ok(Self {
-            dh_pair,
-            remote_public: Some(remote_public),
-            root_key: new_rk,
-            sending_chain: Some(SymmetricRatchet::new(sending_ck)),
-            receiving_chain: None,
-        })
+        Ok((
+            Self {
+                dh_pair,
+                remote_public: Some(remote_public),
+                root_key: new_rk,
+                sending_chain: Some(SymmetricRatchet::new(sending_ck)),
+                receiving_chain: None,
+            },
+            header_key,
+        ))
     }
 
     /// Initialize as the session receiver (Bob).
@@ -129,13 +142,22 @@ impl DhRatchetState {
     /// # Errors
     ///
     /// Returns [`CryptoError`] if any DH operation or key derivation fails.
-    pub fn ratchet_step(&mut self, new_remote_public: PublicKey) -> Result<()> {
+    /// Perform a DH ratchet step and return the derived header keys.
+    ///
+    /// Returns `(receiving_header_key, sending_header_key)` so the
+    /// caller (e.g. the triple ratchet session) can rotate its header
+    /// encryption state.
+    pub fn ratchet_step(
+        &mut self,
+        new_remote_public: PublicKey,
+    ) -> Result<([u8; kdf::KEY_SIZE], [u8; kdf::KEY_SIZE])> {
         // Step 1–2: derive receiving chain from current key pair
         let dh_output_recv =
             x25519::diffie_hellman_keypair(&self.dh_pair, &new_remote_public)?;
-        let (new_rk, recv_ck) = self.root_key.kdf(&dh_output_recv)?;
+        let (new_rk, recv_chain_key, recv_header_key) =
+            self.root_key.kdf(&dh_output_recv)?;
         self.root_key = new_rk;
-        self.receiving_chain = Some(SymmetricRatchet::new(recv_ck));
+        self.receiving_chain = Some(SymmetricRatchet::new(recv_chain_key));
 
         // Step 3: generate new DH key pair
         self.dh_pair = KeyPair::generate();
@@ -143,14 +165,15 @@ impl DhRatchetState {
         // Step 4–5: derive sending chain from new key pair
         let dh_output_send =
             x25519::diffie_hellman_keypair(&self.dh_pair, &new_remote_public)?;
-        let (new_rk, send_ck) = self.root_key.kdf(&dh_output_send)?;
+        let (new_rk, send_chain_key, send_header_key) =
+            self.root_key.kdf(&dh_output_send)?;
         self.root_key = new_rk;
-        self.sending_chain = Some(SymmetricRatchet::new(send_ck));
+        self.sending_chain = Some(SymmetricRatchet::new(send_chain_key));
 
         // Update remote public key
         self.remote_public = Some(new_remote_public);
 
-        Ok(())
+        Ok((recv_header_key, send_header_key))
     }
 
     /// Advance the sending chain and return a message key for encryption.
@@ -172,33 +195,20 @@ impl DhRatchetState {
         Ok((mk, msg_num, self.dh_pair.public_key()))
     }
 
-    /// Obtain a message key for decryption.
+    /// Advance the receiving chain to `msg_num` and return the message key.
     ///
-    /// If the `remote_public` key in the message header differs from our
-    /// stored remote key, a ratchet step is performed first (the remote
-    /// party has generated a new key pair). Then the receiving chain is
-    /// advanced (or skipped) to `msg_num`.
+    /// Also returns intermediate (skipped) keys for out-of-order caching.
+    /// The caller must ensure a ratchet step has been performed if needed.
     ///
     /// # Errors
     ///
     /// Returns [`CryptoError`] if:
-    /// - the ratchet step fails (DH or KDF error)
     /// - the receiving chain has not been initialized
     /// - `msg_num` requires a backwards skip or exceeds [`MAX_SKIP`](crate::symmetric_ratchet::MAX_SKIP)
-    pub fn decrypt_message_key(
+    pub fn receive_message_key(
         &mut self,
-        remote_public: &PublicKey,
         msg_num: u32,
-    ) -> Result<MessageKey> {
-        let needs_ratchet = match &self.remote_public {
-            Some(stored) => stored != remote_public,
-            None => true,
-        };
-
-        if needs_ratchet {
-            self.ratchet_step(*remote_public)?;
-        }
-
+    ) -> Result<(MessageKey, Vec<(u32, MessageKey)>)> {
         let chain = self.receiving_chain.as_mut().ok_or_else(|| {
             CryptoError::Ratchet("receiving chain not initialized".into())
         })?;
@@ -211,17 +221,68 @@ impl DhRatchetState {
         }
 
         if msg_num == current {
-            Ok(chain.advance())
+            Ok((chain.advance(), Vec::new()))
         } else {
             // Skip to the target message number; skip_to returns all
-            // intermediate keys, we want the last one (the target).
-            let keys = chain.skip_to(msg_num)?;
-            let (_, mk) = keys
-                .into_iter()
-                .last()
+            // keys up to and including target.
+            let mut keys = chain.skip_to(msg_num)?;
+            // The last key is the target; the rest are skipped intermediates.
+            let (_, target_mk) = keys
+                .pop()
                 .expect("skip_to always returns at least one key");
-            Ok(mk)
+            Ok((target_mk, keys))
         }
+    }
+
+    /// Skip remaining keys in the current receiving chain and return them.
+    ///
+    /// Called before a DH ratchet step to preserve intermediate keys from
+    /// the old receiving chain. Returns the skipped `(msg_num, key)` pairs.
+    /// Returns an empty vec if there is no receiving chain.
+    pub fn skip_remaining_receiving_keys(
+        &mut self,
+        up_to: u32,
+    ) -> Result<Vec<(u32, MessageKey)>> {
+        let Some(chain) = self.receiving_chain.as_mut() else {
+            return Ok(Vec::new());
+        };
+
+        let current = chain.message_number();
+        if up_to <= current {
+            return Ok(Vec::new());
+        }
+
+        // Skip to up_to - 1 so that we collect keys [current .. up_to)
+        // (all the keys the remote sent but we haven't consumed yet)
+        chain.skip_to(up_to - 1)
+    }
+
+    /// Obtain a message key for decryption (convenience wrapper).
+    ///
+    /// Performs a ratchet step if the remote public key has changed, then
+    /// advances the receiving chain to `msg_num`. Returns the target key
+    /// and any intermediate skipped keys.
+    ///
+    /// For callers that need to store skipped keys before the ratchet step
+    /// (e.g. the triple ratchet session), use
+    /// [`skip_remaining_receiving_keys`](Self::skip_remaining_receiving_keys),
+    /// [`ratchet_step`](Self::ratchet_step), and
+    /// [`receive_message_key`](Self::receive_message_key) separately.
+    pub fn decrypt_message_key(
+        &mut self,
+        remote_public: &PublicKey,
+        msg_num: u32,
+    ) -> Result<(MessageKey, Vec<(u32, MessageKey)>)> {
+        let needs_ratchet = match &self.remote_public {
+            Some(stored) => stored != remote_public,
+            None => true,
+        };
+
+        if needs_ratchet {
+            let _header_keys = self.ratchet_step(*remote_public)?;
+        }
+
+        self.receive_message_key(msg_num)
     }
 
     /// Returns our current DH public key.
@@ -254,7 +315,7 @@ mod tests {
     fn init_sender_creates_sending_chain() {
         let bob = KeyPair::generate();
         let alice =
-            DhRatchetState::init_sender(test_root_key(), bob.public_key()).expect("init failed");
+            DhRatchetState::init_sender(test_root_key(), bob.public_key()).expect("init failed").0;
 
         // Alice should have a sending chain and know Bob's public key
         assert!(alice.sending_chain.is_some());
@@ -280,7 +341,7 @@ mod tests {
     fn sender_can_encrypt_message_key() {
         let bob = KeyPair::generate();
         let mut alice =
-            DhRatchetState::init_sender(test_root_key(), bob.public_key()).expect("init failed");
+            DhRatchetState::init_sender(test_root_key(), bob.public_key()).expect("init failed").0;
 
         let (mk, num, pk) = alice.encrypt_message_key().expect("encrypt failed");
         assert_eq!(num, 0);
@@ -308,7 +369,7 @@ mod tests {
         let root = test_root_key();
 
         let mut alice =
-            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed");
+            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed").0;
         let mut bob = DhRatchetState::init_receiver(root, bob_pair);
 
         // Alice encrypts
@@ -316,7 +377,7 @@ mod tests {
             alice.encrypt_message_key().expect("encrypt failed");
 
         // Bob decrypts — this triggers a ratchet step on Bob's side
-        let bob_mk = bob
+        let (bob_mk, _) = bob
             .decrypt_message_key(&alice_pub, msg_num)
             .expect("decrypt failed");
 
@@ -329,7 +390,7 @@ mod tests {
         let root = test_root_key();
 
         let mut alice =
-            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed");
+            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed").0;
         let mut bob = DhRatchetState::init_receiver(root, bob_pair);
 
         // Alice sends 3 messages
@@ -343,7 +404,7 @@ mod tests {
 
         // Bob decrypts all 3
         for (i, a_mk) in alice_keys.iter().enumerate() {
-            let bob_mk = bob
+            let (bob_mk, _) = bob
                 .decrypt_message_key(&alice_pub, i as u32)
                 .expect("decrypt failed");
             assert_eq!(a_mk.as_bytes(), bob_mk.as_bytes(), "mismatch at msg {i}");
@@ -356,26 +417,26 @@ mod tests {
         let root = test_root_key();
 
         let mut alice =
-            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed");
+            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed").0;
         let mut bob = DhRatchetState::init_receiver(root, bob_pair);
 
         // Alice -> Bob (message 0)
         let (a_mk0, a_num0, a_pub0) = alice.encrypt_message_key().expect("encrypt failed");
-        let b_mk0 = bob
+        let (b_mk0, _) = bob
             .decrypt_message_key(&a_pub0, a_num0)
             .expect("decrypt failed");
         assert_eq!(a_mk0.as_bytes(), b_mk0.as_bytes());
 
         // Bob -> Alice (message 0 on Bob's sending chain)
         let (b_mk1, b_num1, b_pub1) = bob.encrypt_message_key().expect("encrypt failed");
-        let a_mk1 = alice
+        let (a_mk1, _) = alice
             .decrypt_message_key(&b_pub1, b_num1)
             .expect("decrypt failed");
         assert_eq!(b_mk1.as_bytes(), a_mk1.as_bytes());
 
         // Alice -> Bob again (message 0 on Alice's new sending chain)
         let (a_mk2, a_num2, a_pub2) = alice.encrypt_message_key().expect("encrypt failed");
-        let b_mk2 = bob
+        let (b_mk2, _) = bob
             .decrypt_message_key(&a_pub2, a_num2)
             .expect("decrypt failed");
         assert_eq!(a_mk2.as_bytes(), b_mk2.as_bytes());
@@ -391,7 +452,7 @@ mod tests {
         let root = test_root_key();
 
         let mut alice =
-            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed");
+            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed").0;
         let pub_before = alice.public_key();
 
         // Simulate receiving a message from Bob (triggers ratchet step)
@@ -412,7 +473,7 @@ mod tests {
         let root = test_root_key();
 
         let mut alice =
-            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed");
+            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed").0;
         let rk_after_init = *alice.root_key.as_bytes();
 
         let remote_pk = KeyPair::generate().public_key();
@@ -435,7 +496,7 @@ mod tests {
         let root = test_root_key();
 
         let mut alice =
-            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed");
+            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed").0;
 
         // Advance sending chain a few times
         alice.encrypt_message_key().expect("encrypt failed");
@@ -478,12 +539,13 @@ mod tests {
         let root = test_root_key();
 
         let mut alice =
-            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed");
+            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed").0;
         let mut bob = DhRatchetState::init_receiver(root, bob_pair);
 
         // Alice sends message 0
         let (mk0, num0, pub0) = alice.encrypt_message_key().expect("encrypt failed");
-        bob.decrypt_message_key(&pub0, num0).expect("decrypt failed");
+        bob.decrypt_message_key(&pub0, num0)
+            .expect("decrypt failed");
 
         // Capture Alice's state "snapshot" — in a real attack, the adversary
         // would have compromised alice's current root key + chain keys.
@@ -526,14 +588,14 @@ mod tests {
         let root = test_root_key();
 
         let mut alice =
-            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed");
+            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed").0;
         let mut bob = DhRatchetState::init_receiver(root, bob_pair);
 
         for round in 0..5 {
             // Alice -> Bob
             let (a_mk, a_num, a_pub) =
                 alice.encrypt_message_key().expect("alice encrypt failed");
-            let b_mk = bob
+            let (b_mk, _) = bob
                 .decrypt_message_key(&a_pub, a_num)
                 .expect("bob decrypt failed");
             assert_eq!(
@@ -545,7 +607,7 @@ mod tests {
             // Bob -> Alice
             let (b_mk2, b_num, b_pub) =
                 bob.encrypt_message_key().expect("bob encrypt failed");
-            let a_mk2 = alice
+            let (a_mk2, _) = alice
                 .decrypt_message_key(&b_pub, b_num)
                 .expect("alice decrypt failed");
             assert_eq!(
@@ -566,7 +628,7 @@ mod tests {
         let root = test_root_key();
 
         let mut alice =
-            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed");
+            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed").0;
         let mut bob = DhRatchetState::init_receiver(root, bob_pair);
 
         // Alice sends messages 0, 1, 2
@@ -575,10 +637,11 @@ mod tests {
         let (mk2, _, _) = alice.encrypt_message_key().expect("encrypt 2");
 
         // Bob receives message 2 first (skipping 0 and 1)
-        let bob_mk2 = bob
+        let (bob_mk2, skipped) = bob
             .decrypt_message_key(&pub0, 2)
             .expect("decrypt msg 2 failed");
         assert_eq!(mk2.as_bytes(), bob_mk2.as_bytes());
+        assert_eq!(skipped.len(), 2, "should return 2 skipped keys");
     }
 
     // -----------------------------------------------------------
@@ -591,7 +654,7 @@ mod tests {
         let root = test_root_key();
 
         let mut alice =
-            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed");
+            DhRatchetState::init_sender(root, bob_pair.public_key()).expect("init failed").0;
         let mut bob = DhRatchetState::init_receiver(root, bob_pair);
 
         // Alice sends messages 0 and 1
@@ -599,7 +662,8 @@ mod tests {
         alice.encrypt_message_key().expect("encrypt 1");
 
         // Bob receives message 1
-        bob.decrypt_message_key(&pub0, 1).expect("decrypt 1");
+        bob.decrypt_message_key(&pub0, 1)
+            .expect("decrypt 1");
 
         // Bob tries to receive message 0 (already past it)
         let result = bob.decrypt_message_key(&pub0, 0);
@@ -611,7 +675,7 @@ mod tests {
     fn unique_message_keys_per_message() {
         let bob = KeyPair::generate();
         let mut alice =
-            DhRatchetState::init_sender(test_root_key(), bob.public_key()).expect("init failed");
+            DhRatchetState::init_sender(test_root_key(), bob.public_key()).expect("init failed").0;
 
         let (mk0, _, _) = alice.encrypt_message_key().expect("encrypt 0");
         let (mk1, _, _) = alice.encrypt_message_key().expect("encrypt 1");
@@ -626,7 +690,7 @@ mod tests {
     fn public_key_accessor() {
         let bob = KeyPair::generate();
         let alice =
-            DhRatchetState::init_sender(test_root_key(), bob.public_key()).expect("init failed");
+            DhRatchetState::init_sender(test_root_key(), bob.public_key()).expect("init failed").0;
 
         let pk = alice.public_key();
         // Should be a valid non-zero public key
