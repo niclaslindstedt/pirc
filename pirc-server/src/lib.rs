@@ -4,6 +4,7 @@ pub mod cluster;
 pub mod commit_consumer;
 pub mod config;
 pub mod failover_queue;
+pub mod graceful_shutdown;
 pub mod handler;
 pub mod handler_channel;
 pub mod handler_cluster;

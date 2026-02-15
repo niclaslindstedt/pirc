@@ -115,6 +115,27 @@ impl<T: Send + 'static> RaftHandle<T> {
     pub fn peer_statuses(&self) -> HashMap<NodeId, PeerStatus> {
         self.peer_status_rx.borrow().clone()
     }
+
+    /// Create a handle from raw channels (for testing only).
+    #[cfg(test)]
+    #[allow(private_interfaces)]
+    pub fn new_for_test(
+        proposal_tx: mpsc::UnboundedSender<T>,
+        membership_tx: mpsc::UnboundedSender<MembershipProposal<T>>,
+        commit_rx: mpsc::UnboundedReceiver<LogEntry<T>>,
+        state_rx: watch::Receiver<(RaftState, Term, Option<NodeId>)>,
+        health_event_rx: mpsc::UnboundedReceiver<HealthEvent>,
+        peer_status_rx: watch::Receiver<HashMap<NodeId, PeerStatus>>,
+    ) -> Self {
+        Self {
+            proposal_tx,
+            membership_tx,
+            commit_rx,
+            state_rx,
+            health_event_rx,
+            peer_status_rx,
+        }
+    }
 }
 
 /// Errors returned by [`RaftHandle`] operations.
@@ -141,7 +162,8 @@ impl ShutdownSignal {
 
 /// Sender half of the shutdown signal.
 pub struct ShutdownSender {
-    tx: watch::Sender<bool>,
+    /// The watch channel sender for signalling shutdown.
+    pub tx: watch::Sender<bool>,
 }
 
 impl ShutdownSender {

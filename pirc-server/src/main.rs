@@ -11,6 +11,7 @@ use pirc_server::channel_registry::ChannelRegistry;
 use pirc_server::cluster::{ClusterService, InviteKeyStore, PersistedClusterState, PersistedPeer};
 use pirc_server::config::{ClusterStartupMode, ServerConfig};
 use pirc_server::failover_queue::{FailoverMessageQueue, SharedFailoverQueue};
+use pirc_server::graceful_shutdown::GracefulShutdown;
 use pirc_server::handler::{self, HandleResult, PreRegistrationState};
 use pirc_server::handler_cluster::ClusterContext;
 use pirc_server::raft::rpc::RaftMessage;
@@ -99,13 +100,25 @@ async fn main() {
     let (shutdown_controller, mut shutdown_signal) = ShutdownSignal::new();
     let shutdown_controller = Arc::new(shutdown_controller);
 
-    // Spawn Ctrl+C handler
+    // Spawn signal handlers for Ctrl+C (SIGINT) and SIGTERM.
     {
         let ctrl_c_shutdown = Arc::clone(&shutdown_controller);
         tokio::spawn(async move {
             tokio::signal::ctrl_c().await.ok();
             info!("received Ctrl+C, initiating shutdown");
             ctrl_c_shutdown.shutdown();
+        });
+    }
+    #[cfg(unix)]
+    {
+        let sigterm_shutdown = Arc::clone(&shutdown_controller);
+        tokio::spawn(async move {
+            use tokio::signal::unix::{signal, SignalKind};
+            if let Ok(mut sigterm) = signal(SignalKind::terminate()) {
+                sigterm.recv().await;
+                info!("received SIGTERM, initiating shutdown");
+                sigterm_shutdown.shutdown();
+            }
         });
     }
 
@@ -128,8 +141,11 @@ async fn main() {
     let cluster_ctx: Option<Arc<ClusterContext>> =
         cluster_state.as_ref().map(|s| Arc::clone(&s.cluster_context));
 
-    // Spawn the commit consumer and migration service.
+    // Spawn the commit consumer and migration service. Also prepare the
+    // graceful shutdown handler for later use when the server shuts down.
     let mut cluster_state = cluster_state;
+    let mut graceful_shutdown: Option<GracefulShutdown> = None;
+
     if let Some(ref mut state) = cluster_state {
         let commit_rx = std::mem::replace(
             &mut state.commit_rx,
@@ -166,6 +182,26 @@ async fn main() {
         );
         state._task_handles.push(migration_handle);
         info!("migration service started");
+
+        // Extract the Raft shutdown sender for the graceful shutdown handler.
+        // The GracefulShutdown will signal Raft to stop after pre-migration.
+        let raft_shutdown = std::mem::replace(
+            &mut state._raft_shutdown,
+            {
+                let (sender, _) = pirc_server::raft::driver::shutdown_channel();
+                sender
+            },
+        );
+
+        graceful_shutdown = Some(GracefulShutdown::new(
+            Arc::clone(&state.raft_handle),
+            Arc::clone(&registry),
+            Arc::clone(&state.user_node_index),
+            Arc::clone(&state.cluster_context.shared_peer_map),
+            state.self_id,
+            state.peer_ids.clone(),
+            raft_shutdown,
+        ));
     }
 
     // Keep cluster_state alive for the lifetime of the server.
@@ -205,6 +241,17 @@ async fn main() {
                 warn!("failed to accept connection: {e}");
             }
         }
+    }
+
+    // Run graceful shutdown with pre-migration if clustering is active.
+    if let Some(mut shutdown) = graceful_shutdown {
+        let result = shutdown.execute().await;
+        info!(
+            users_migrated = result.users_migrated,
+            migration_committed = result.migration_committed,
+            membership_removed = result.membership_removed,
+            "graceful shutdown complete"
+        );
     }
 
     info!("pircd shut down");
