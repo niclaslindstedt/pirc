@@ -623,6 +623,7 @@ name = "pirc-crypto"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "base64",
  "hkdf",
  "ml-dsa",
  "ml-kem",
