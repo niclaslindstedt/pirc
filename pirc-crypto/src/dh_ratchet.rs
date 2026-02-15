@@ -17,6 +17,10 @@ const ROOT_KEY_INFO: &[u8] = b"pirc-dh-ratchet-root";
 /// The root key evolves with each ratchet step and is never reused directly.
 /// It is combined with a DH shared secret via HKDF to produce a new root
 /// key and a chain key for the next sending or receiving chain.
+///
+/// Implements [`Zeroize`] and [`ZeroizeOnDrop`] so old root keys are
+/// securely erased when replaced.
+#[derive(zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
 struct RootKey([u8; kdf::KEY_SIZE]);
 
 impl RootKey {
@@ -50,12 +54,6 @@ impl RootKey {
     }
 }
 
-impl Drop for RootKey {
-    fn drop(&mut self) {
-        zeroize::Zeroize::zeroize(&mut self.0);
-    }
-}
-
 /// The DH ratchet state for one party in a session.
 ///
 /// Manages X25519 key pairs and uses DH shared secrets to periodically
@@ -72,6 +70,8 @@ pub struct DhRatchetState {
     sending_chain: Option<SymmetricRatchet>,
     /// Receiving chain — derives per-message decryption keys.
     receiving_chain: Option<SymmetricRatchet>,
+    /// Number of DH ratchet steps completed.
+    step_count: u32,
 }
 
 impl DhRatchetState {
@@ -105,6 +105,7 @@ impl DhRatchetState {
                 root_key: new_rk,
                 sending_chain: Some(SymmetricRatchet::new(sending_ck)),
                 receiving_chain: None,
+                step_count: 0,
             },
             header_key,
         ))
@@ -124,6 +125,7 @@ impl DhRatchetState {
             root_key: RootKey::new(root_key),
             sending_chain: None,
             receiving_chain: None,
+            step_count: 0,
         }
     }
 
@@ -172,6 +174,7 @@ impl DhRatchetState {
 
         // Update remote public key
         self.remote_public = Some(new_remote_public);
+        self.step_count += 1;
 
         Ok((recv_header_key, send_header_key))
     }
@@ -295,6 +298,12 @@ impl DhRatchetState {
     #[must_use]
     pub fn remote_public_key(&self) -> Option<PublicKey> {
         self.remote_public
+    }
+
+    /// Returns the number of completed DH ratchet steps.
+    #[must_use]
+    pub fn step_count(&self) -> u32 {
+        self.step_count
     }
 }
 

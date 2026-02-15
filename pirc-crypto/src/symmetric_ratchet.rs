@@ -40,7 +40,9 @@ impl ChainKey {
 /// Each message key is used exactly once for AES-256-GCM encryption and
 /// then discarded. Implements [`Zeroize`] and [`ZeroizeOnDrop`] for
 /// forward secrecy.
-#[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
+/// Deliberately non-[`Clone`] to enforce single-use semantics:
+/// each message key must be consumed (moved) exactly once.
+#[derive(Debug, Zeroize, ZeroizeOnDrop)]
 pub struct MessageKey(pub(crate) [u8; kdf::KEY_SIZE]);
 
 impl MessageKey {

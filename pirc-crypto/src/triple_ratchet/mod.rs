@@ -75,7 +75,8 @@ pub struct TripleRatchetSession {
     next_receiving_header_key: HeaderKey,
     /// Cached message keys for out-of-order decryption.
     /// Keyed by (DH public key bytes, message number).
-    skipped_keys: HashMap<([u8; 32], u32), MessageKey>,
+    /// Value is (message key, DH step at which the key was stored).
+    skipped_keys: HashMap<([u8; 32], u32), SkippedKey>,
     /// Number of DH ratchet steps between PQ ratchet steps.
     pq_step_interval: u32,
     /// Counter tracking DH ratchet steps since the last PQ step.
@@ -85,6 +86,38 @@ pub struct TripleRatchetSession {
     previous_chain_length: u32,
     /// Number of messages sent in the current sending chain.
     sending_message_number: u32,
+    /// Total number of messages sent across all chains.
+    total_messages_sent: u64,
+    /// Total number of messages received (successfully decrypted).
+    total_messages_received: u64,
+}
+
+/// A skipped message key together with the DH step at which it was cached.
+///
+/// Storing the DH step allows age-based eviction of old skipped keys via
+/// [`TripleRatchetSession::purge_skipped_keys_older_than`].
+struct SkippedKey {
+    key: MessageKey,
+    dh_step: u32,
+}
+
+/// Session state information for monitoring and diagnostics.
+///
+/// Returned by [`TripleRatchetSession::session_info`].
+#[derive(Debug, Clone)]
+pub struct SessionInfo {
+    /// Number of DH ratchet steps completed.
+    pub dh_step_count: u32,
+    /// Number of PQ ratchet steps completed.
+    pub pq_step_count: u32,
+    /// Total messages sent across all chains.
+    pub messages_sent: u64,
+    /// Total messages received (successfully decrypted).
+    pub messages_received: u64,
+    /// Number of cached skipped message keys.
+    pub skipped_key_count: usize,
+    /// Current DH public key fingerprint (first 8 bytes as hex).
+    pub dh_public_fingerprint: [u8; 32],
 }
 
 impl TripleRatchetSession {
@@ -144,6 +177,8 @@ impl TripleRatchetSession {
             dh_steps_since_pq: 0,
             previous_chain_length: 0,
             sending_message_number: 0,
+            total_messages_sent: 0,
+            total_messages_received: 0,
         })
     }
 
@@ -210,6 +245,8 @@ impl TripleRatchetSession {
             dh_steps_since_pq: 0,
             previous_chain_length: 0,
             sending_message_number: 0,
+            total_messages_sent: 0,
+            total_messages_received: 0,
         })
     }
 
@@ -251,6 +288,9 @@ impl TripleRatchetSession {
 
         let body_nonce = aead::generate_nonce();
         let ciphertext = aead::encrypt(message_key.as_bytes(), &body_nonce, plaintext, b"")?;
+        // message_key is dropped here — zeroized via ZeroizeOnDrop
+
+        self.total_messages_sent += 1;
 
         Ok(EncryptedMessage {
             encrypted_header,
@@ -352,6 +392,9 @@ impl TripleRatchetSession {
             &message.ciphertext,
             b"",
         )?;
+        // message_key is dropped here — zeroized via ZeroizeOnDrop
+
+        self.total_messages_received += 1;
 
         Ok(plaintext)
     }
@@ -399,13 +442,15 @@ impl TripleRatchetSession {
         };
 
         let lookup = (header.dh_public.to_bytes(), header.message_number);
-        if let Some(mk) = self.skipped_keys.remove(&lookup) {
+        if let Some(skipped) = self.skipped_keys.remove(&lookup) {
             let plaintext = aead::decrypt(
-                mk.as_bytes(),
+                skipped.key.as_bytes(),
                 &message.body_nonce,
                 &message.ciphertext,
                 b"",
             )?;
+            // skipped.key is dropped here — zeroized via ZeroizeOnDrop
+            self.total_messages_received += 1;
             Ok(Some(plaintext))
         } else {
             Ok(None)
@@ -481,8 +526,38 @@ impl TripleRatchetSession {
                 self.skipped_keys.remove(&first_key);
             }
         }
+        let dh_step = self.dh_ratchet.step_count();
         self.skipped_keys
-            .insert((dh_public.to_bytes(), msg_num), key);
+            .insert((dh_public.to_bytes(), msg_num), SkippedKey { key, dh_step });
+    }
+
+    /// Remove skipped keys that are from DH epochs older than `max_age`
+    /// ratchet steps ago.
+    ///
+    /// For example, if the current DH step count is 10 and `max_age` is 3,
+    /// all skipped keys stored at DH step 7 or earlier are purged. The
+    /// removed keys are zeroized via [`ZeroizeOnDrop`].
+    pub fn purge_skipped_keys_older_than(&mut self, max_age: u32) {
+        let current = self.dh_ratchet.step_count();
+        self.skipped_keys.retain(|_, sk| {
+            current.saturating_sub(sk.dh_step) <= max_age
+        });
+    }
+
+    /// Return session state information for monitoring.
+    ///
+    /// Reports DH/PQ ratchet counts, message counters, skipped key
+    /// cache size, and the current DH public key fingerprint.
+    #[must_use]
+    pub fn session_info(&self) -> SessionInfo {
+        SessionInfo {
+            dh_step_count: self.dh_ratchet.step_count(),
+            pq_step_count: self.pq_ratchet.step_counter(),
+            messages_sent: self.total_messages_sent,
+            messages_received: self.total_messages_received,
+            skipped_key_count: self.skipped_keys.len(),
+            dh_public_fingerprint: self.dh_ratchet.public_key().to_bytes(),
+        }
     }
 }
 
@@ -503,420 +578,4 @@ fn extract_key(buf: &[u8], index: usize) -> [u8; 32] {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::kem::KemKeyPair;
-    use crate::x25519::KeyPair;
-
-    fn shared_secret() -> [u8; 32] {
-        [0x42u8; 32]
-    }
-
-    /// Create a sender/receiver session pair.
-    fn make_session_pair() -> (TripleRatchetSession, TripleRatchetSession) {
-        let bob_dh = KeyPair::generate();
-        let bob_kem = KemKeyPair::generate();
-        let secret = shared_secret();
-
-        let alice = TripleRatchetSession::init_sender(
-            &secret,
-            bob_dh.public_key(),
-            bob_kem.public_key(),
-        )
-        .expect("init sender failed");
-
-        let bob = TripleRatchetSession::init_receiver(&secret, bob_dh, bob_kem)
-            .expect("init receiver failed");
-
-        (alice, bob)
-    }
-
-    // ── Basic send/receive ─────────────────────────────────────────
-
-    #[test]
-    fn basic_send_receive() {
-        let (mut alice, mut bob) = make_session_pair();
-
-        let plaintext = b"Hello, Bob!";
-        let msg = alice.encrypt(plaintext).expect("encrypt failed");
-        let decrypted = bob.decrypt(&msg).expect("decrypt failed");
-
-        assert_eq!(decrypted, plaintext);
-    }
-
-    #[test]
-    fn multiple_messages_same_direction() {
-        let (mut alice, mut bob) = make_session_pair();
-
-        for i in 0..5 {
-            let plaintext = format!("message {i}");
-            let msg = alice.encrypt(plaintext.as_bytes()).expect("encrypt failed");
-            let decrypted = bob.decrypt(&msg).expect("decrypt failed");
-            assert_eq!(decrypted, plaintext.as_bytes(), "mismatch at message {i}");
-        }
-    }
-
-    // ── Bidirectional communication ────────────────────────────────
-
-    #[test]
-    fn bidirectional_exchange() {
-        let (mut alice, mut bob) = make_session_pair();
-
-        // Alice -> Bob
-        let msg1 = alice.encrypt(b"Hello Bob").expect("alice encrypt 1");
-        let dec1 = bob.decrypt(&msg1).expect("bob decrypt 1");
-        assert_eq!(dec1, b"Hello Bob");
-
-        // Bob -> Alice
-        let msg2 = bob.encrypt(b"Hello Alice").expect("bob encrypt 1");
-        let dec2 = alice.decrypt(&msg2).expect("alice decrypt 1");
-        assert_eq!(dec2, b"Hello Alice");
-
-        // Alice -> Bob again
-        let msg3 = alice.encrypt(b"How are you?").expect("alice encrypt 2");
-        let dec3 = bob.decrypt(&msg3).expect("bob decrypt 2");
-        assert_eq!(dec3, b"How are you?");
-    }
-
-    #[test]
-    fn many_round_trips() {
-        let (mut alice, mut bob) = make_session_pair();
-
-        for round in 0..10 {
-            let a_msg = format!("Alice round {round}");
-            let encrypted = alice.encrypt(a_msg.as_bytes()).expect("alice encrypt");
-            let decrypted = bob.decrypt(&encrypted).expect("bob decrypt");
-            assert_eq!(decrypted, a_msg.as_bytes(), "A->B mismatch round {round}");
-
-            let b_msg = format!("Bob round {round}");
-            let encrypted = bob.encrypt(b_msg.as_bytes()).expect("bob encrypt");
-            let decrypted = alice.decrypt(&encrypted).expect("alice decrypt");
-            assert_eq!(decrypted, b_msg.as_bytes(), "B->A mismatch round {round}");
-        }
-    }
-
-    // ── Out-of-order messages ──────────────────────────────────────
-
-    #[test]
-    fn out_of_order_within_same_chain() {
-        let (mut alice, mut bob) = make_session_pair();
-
-        // Alice sends 3 messages (all in the same sending chain)
-        let msg0 = alice.encrypt(b"message 0").expect("encrypt 0");
-        let msg1 = alice.encrypt(b"message 1").expect("encrypt 1");
-        let msg2 = alice.encrypt(b"message 2").expect("encrypt 2");
-
-        // Bob receives message 2 first (skips 0 and 1 in the chain)
-        let dec2 = bob.decrypt(&msg2).expect("decrypt 2");
-        assert_eq!(dec2, b"message 2");
-
-        // Skipped keys should have been cached
-        assert_eq!(bob.skipped_key_count(), 2);
-
-        // Now Bob receives message 0 (from skipped cache)
-        let dec0 = bob.decrypt(&msg0).expect("decrypt 0");
-        assert_eq!(dec0, b"message 0");
-
-        // And message 1
-        let dec1 = bob.decrypt(&msg1).expect("decrypt 1");
-        assert_eq!(dec1, b"message 1");
-
-        // All skipped keys should be consumed now
-        assert_eq!(bob.skipped_key_count(), 0);
-    }
-
-    #[test]
-    fn out_of_order_reversed_delivery() {
-        let (mut alice, mut bob) = make_session_pair();
-
-        // Alice sends 5 messages
-        let msgs: Vec<_> = (0..5)
-            .map(|i| alice.encrypt(format!("msg {i}").as_bytes()).expect("encrypt"))
-            .collect();
-
-        // Bob receives them in reverse order
-        for i in (0..5).rev() {
-            let dec = bob.decrypt(&msgs[i]).expect("decrypt");
-            assert_eq!(dec, format!("msg {i}").as_bytes(), "mismatch at msg {i}");
-        }
-    }
-
-    #[test]
-    fn out_of_order_across_dh_ratchet() {
-        let (mut alice, mut bob) = make_session_pair();
-
-        // Alice sends 2 messages in her first sending chain
-        let msg0 = alice.encrypt(b"chain1-msg0").expect("encrypt 0");
-        let msg1 = alice.encrypt(b"chain1-msg1").expect("encrypt 1");
-
-        // Bob receives only msg1 (skipping msg0)
-        let dec1 = bob.decrypt(&msg1).expect("decrypt 1");
-        assert_eq!(dec1, b"chain1-msg1");
-        assert_eq!(bob.skipped_key_count(), 1); // msg0 is cached
-
-        // Bob replies (triggers DH ratchet on Alice)
-        let reply = bob.encrypt(b"reply").expect("bob encrypt");
-        let dec_reply = alice.decrypt(&reply).expect("alice decrypt");
-        assert_eq!(dec_reply, b"reply");
-
-        // Alice sends in her new chain
-        let msg2 = alice.encrypt(b"chain2-msg0").expect("encrypt 2");
-        let dec2 = bob.decrypt(&msg2).expect("decrypt 2");
-        assert_eq!(dec2, b"chain2-msg0");
-
-        // msg0 from the old chain should still be recoverable
-        let dec0 = bob.decrypt(&msg0).expect("decrypt old msg0");
-        assert_eq!(dec0, b"chain1-msg0");
-        assert_eq!(bob.skipped_key_count(), 0);
-    }
-
-    // ── Empty and large messages ───────────────────────────────────
-
-    #[test]
-    fn empty_message() {
-        let (mut alice, mut bob) = make_session_pair();
-
-        let msg = alice.encrypt(b"").expect("encrypt empty");
-        let decrypted = bob.decrypt(&msg).expect("decrypt empty");
-        assert!(decrypted.is_empty());
-    }
-
-    #[test]
-    fn large_message() {
-        let (mut alice, mut bob) = make_session_pair();
-
-        let plaintext = vec![0xAB; 64 * 1024]; // 64 KiB
-        let msg = alice.encrypt(&plaintext).expect("encrypt large");
-        let decrypted = bob.decrypt(&msg).expect("decrypt large");
-        assert_eq!(decrypted, plaintext);
-    }
-
-    // ── PQ ratchet step trigger ────────────────────────────────────
-
-    #[test]
-    fn pq_step_triggers_at_interval() {
-        let (mut alice, mut bob) = make_session_pair();
-        alice.set_pq_interval(3);
-
-        // Each round trip causes a DH ratchet step on each side.
-        // After 3 DH steps on Alice's side, a PQ step should trigger.
-        for round in 0..4 {
-            let msg = alice
-                .encrypt(format!("alice {round}").as_bytes())
-                .expect("alice encrypt");
-            bob.decrypt(&msg).expect("bob decrypt");
-
-            let msg = bob
-                .encrypt(format!("bob {round}").as_bytes())
-                .expect("bob encrypt");
-            alice.decrypt(&msg).expect("alice decrypt");
-        }
-
-        assert!(
-            alice.pq_step_count() > 0,
-            "PQ ratchet step should have triggered on sender"
-        );
-    }
-
-    // ── Session initialization ─────────────────────────────────────
-
-    #[test]
-    fn init_sender_succeeds() {
-        let bob_dh = KeyPair::generate();
-        let bob_kem = KemKeyPair::generate();
-
-        let result = TripleRatchetSession::init_sender(
-            &shared_secret(),
-            bob_dh.public_key(),
-            bob_kem.public_key(),
-        );
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn init_receiver_succeeds() {
-        let bob_dh = KeyPair::generate();
-        let bob_kem = KemKeyPair::generate();
-
-        let result = TripleRatchetSession::init_receiver(&shared_secret(), bob_dh, bob_kem);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn different_shared_secrets_fail_decryption() {
-        let bob_dh = KeyPair::generate();
-        let bob_kem = KemKeyPair::generate();
-
-        let mut alice = TripleRatchetSession::init_sender(
-            &[0x01u8; 32],
-            bob_dh.public_key(),
-            bob_kem.public_key(),
-        )
-        .expect("init sender");
-
-        let mut bob = TripleRatchetSession::init_receiver(&[0x02u8; 32], bob_dh, bob_kem)
-            .expect("init receiver");
-
-        let msg = alice.encrypt(b"test").expect("encrypt");
-        let result = bob.decrypt(&msg);
-        assert!(result.is_err(), "different secrets should fail");
-    }
-
-    // ── Key uniqueness ─────────────────────────────────────────────
-
-    #[test]
-    fn each_message_uses_unique_encryption() {
-        let (mut alice, mut bob) = make_session_pair();
-
-        let msg1 = alice.encrypt(b"same content").expect("encrypt 1");
-        let msg2 = alice.encrypt(b"same content").expect("encrypt 2");
-
-        // Even with same plaintext, ciphertexts should differ
-        assert_ne!(msg1.ciphertext, msg2.ciphertext);
-
-        // Both should still decrypt correctly
-        let dec1 = bob.decrypt(&msg1).expect("decrypt 1");
-        let dec2 = bob.decrypt(&msg2).expect("decrypt 2");
-        assert_eq!(dec1, b"same content");
-        assert_eq!(dec2, b"same content");
-    }
-
-    // ── Skipped key management ─────────────────────────────────────
-
-    #[test]
-    fn skipped_keys_initially_empty() {
-        let (alice, _bob) = make_session_pair();
-        assert_eq!(alice.skipped_key_count(), 0);
-    }
-
-    #[test]
-    fn store_and_retrieve_skipped_key() {
-        let (mut alice, _bob) = make_session_pair();
-
-        let dh_pub = KeyPair::generate().public_key();
-        let mk = crate::symmetric_ratchet::ChainKey::new([0xAA; 32]);
-        let mut ratchet = crate::symmetric_ratchet::SymmetricRatchet::new(mk);
-        let msg_key = ratchet.advance();
-
-        alice.store_skipped_key(&dh_pub, 5, msg_key);
-        assert_eq!(alice.skipped_key_count(), 1);
-    }
-
-    #[test]
-    fn skipped_key_eviction_at_limit() {
-        let (mut alice, _bob) = make_session_pair();
-
-        let dh_pub = KeyPair::generate().public_key();
-        let ck = crate::symmetric_ratchet::ChainKey::new([0xBB; 32]);
-        let mut ratchet = crate::symmetric_ratchet::SymmetricRatchet::new(ck);
-
-        // Fill up to MAX_SKIPPED_KEYS + 1
-        for i in 0..=MAX_SKIPPED_KEYS {
-            let mk = ratchet.advance();
-            #[allow(clippy::cast_possible_truncation)]
-            alice.store_skipped_key(&dh_pub, i as u32, mk);
-        }
-
-        assert!(alice.skipped_key_count() <= MAX_SKIPPED_KEYS);
-    }
-
-    // ── PQ interval configuration ──────────────────────────────────
-
-    #[test]
-    fn set_pq_interval() {
-        let (mut alice, _bob) = make_session_pair();
-        alice.set_pq_interval(5);
-        assert_eq!(alice.pq_step_interval, 5);
-    }
-
-    #[test]
-    fn pq_disabled_with_zero_interval() {
-        let (mut alice, mut bob) = make_session_pair();
-        alice.set_pq_interval(0);
-
-        for round in 0..5 {
-            let msg = alice
-                .encrypt(format!("alice {round}").as_bytes())
-                .expect("encrypt");
-            bob.decrypt(&msg).expect("decrypt");
-
-            let msg = bob
-                .encrypt(format!("bob {round}").as_bytes())
-                .expect("encrypt");
-            alice.decrypt(&msg).expect("decrypt");
-        }
-
-        assert_eq!(alice.pq_step_count(), 0);
-    }
-
-    // ── Multiple messages before first reply ───────────────────────
-
-    #[test]
-    fn multiple_messages_before_reply() {
-        let (mut alice, mut bob) = make_session_pair();
-
-        for i in 0..10 {
-            let msg = alice
-                .encrypt(format!("msg {i}").as_bytes())
-                .expect("encrypt");
-            let dec = bob.decrypt(&msg).expect("decrypt");
-            assert_eq!(dec, format!("msg {i}").as_bytes());
-        }
-
-        let reply = bob.encrypt(b"got them all").expect("encrypt");
-        let dec = alice.decrypt(&reply).expect("decrypt");
-        assert_eq!(dec, b"got them all");
-    }
-
-    // ── Header key rotation ──────────────────────────────────────
-
-    #[test]
-    fn previous_header_key_decrypts_after_dh_ratchet() {
-        let (mut alice, mut bob) = make_session_pair();
-
-        // Alice sends two messages in the first epoch.
-        let msg_epoch1_0 = alice.encrypt(b"epoch1-msg0").expect("encrypt epoch1-0");
-        let msg_epoch1_1 = alice.encrypt(b"epoch1-msg1").expect("encrypt epoch1-1");
-
-        // Bob only receives msg1 (skip msg0 for later).
-        let dec = bob.decrypt(&msg_epoch1_1).expect("decrypt epoch1-1");
-        assert_eq!(dec, b"epoch1-msg1");
-
-        // Bob replies — this triggers a DH ratchet on Alice.
-        let reply = bob.encrypt(b"reply").expect("bob encrypt");
-        alice.decrypt(&reply).expect("alice decrypt reply");
-
-        // Alice sends a message in the new epoch (new DH key, new header key).
-        let msg_epoch2 = alice.encrypt(b"epoch2-msg0").expect("encrypt epoch2-0");
-        bob.decrypt(&msg_epoch2).expect("bob decrypt epoch2-0");
-
-        // Now decrypt the delayed msg0 from epoch 1.
-        // This requires the previous receiving header key to
-        // decrypt the header, then the cached skipped message key.
-        let dec0 = bob.decrypt(&msg_epoch1_0).expect("decrypt old epoch1-msg0");
-        assert_eq!(dec0, b"epoch1-msg0");
-    }
-
-    #[test]
-    fn header_decryption_fails_with_unrelated_key() {
-        let (mut alice, _bob) = make_session_pair();
-
-        // Alice encrypts a message.
-        let msg = alice.encrypt(b"secret").expect("encrypt");
-
-        // Create a completely separate session with a different
-        // shared secret.
-        let bob_dh = KeyPair::generate();
-        let bob_kem = KemKeyPair::generate();
-        let mut eve = TripleRatchetSession::init_receiver(
-            &[0xFF; 32],
-            bob_dh,
-            bob_kem,
-        )
-        .expect("init eve");
-
-        // Eve should not be able to decrypt Alice's message.
-        let result = eve.decrypt(&msg);
-        assert!(result.is_err(), "unrelated key must fail decryption");
-    }
-}
+mod tests;
