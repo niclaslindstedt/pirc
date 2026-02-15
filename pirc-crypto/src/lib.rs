@@ -4,6 +4,7 @@
 //! post-quantum resistant primitives:
 //!
 //! - **Identity** — [`identity`] long-term identity key management
+//! - **Pre-keys** — [`prekey`] X3DH-style pre-key bundles with PQ extension
 //! - **Key exchange** — [`x25519`] X25519 Diffie-Hellman
 //! - **Encryption** — [`aead`] AES-256-GCM authenticated encryption
 //! - **Key derivation** — [`kdf`] HKDF-SHA-256
@@ -19,6 +20,7 @@ pub mod error;
 pub mod header;
 pub mod identity;
 pub mod kdf;
+pub mod prekey;
 pub mod kem;
 pub mod message;
 pub mod pq_ratchet;
