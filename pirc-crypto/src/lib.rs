@@ -7,6 +7,7 @@
 //! - **Encryption** — [`aead`] AES-256-GCM authenticated encryption
 //! - **Key derivation** — [`kdf`] HKDF-SHA-256
 //! - **Post-quantum KEM** — [`kem`] ML-KEM (Kyber) key encapsulation
+//! - **Post-quantum signatures** — [`signing`] ML-DSA (Dilithium) digital signatures
 //! - **Ratchets** — [`dh_ratchet`], [`symmetric_ratchet`], [`pq_ratchet`]
 //! - **Session** — [`triple_ratchet`] combined session state machine
 //! - **Wire format** — [`header`] encryption and [`message`] types
@@ -19,6 +20,7 @@ pub mod kdf;
 pub mod kem;
 pub mod message;
 pub mod pq_ratchet;
+pub mod signing;
 pub mod symmetric_ratchet;
 pub mod triple_ratchet;
 pub mod x25519;
