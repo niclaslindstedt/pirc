@@ -10,6 +10,7 @@ use pirc_protocol::{Command, Message};
 use pirc_server::channel_registry::ChannelRegistry;
 use pirc_server::cluster::{ClusterService, InviteKeyStore, PersistedClusterState, PersistedPeer};
 use pirc_server::config::{ClusterStartupMode, ServerConfig};
+use pirc_server::failover_queue::{FailoverMessageQueue, SharedFailoverQueue};
 use pirc_server::handler::{self, HandleResult, PreRegistrationState};
 use pirc_server::handler_cluster::ClusterContext;
 use pirc_server::raft::rpc::RaftMessage;
@@ -134,12 +135,19 @@ async fn main() {
             &mut state.commit_rx,
             mpsc::unbounded_channel().1,
         );
+
+        // Create the failover message queue for buffering messages during migration.
+        let failover_queue: SharedFailoverQueue = Arc::new(
+            tokio::sync::RwLock::new(FailoverMessageQueue::new(1000, Duration::from_secs(60))),
+        );
+
         let consumer_handle = pirc_server::commit_consumer::spawn_commit_consumer(
             commit_rx,
             Arc::clone(&registry),
             Arc::clone(&channels),
             Some(Arc::clone(&state.user_node_index)),
             Some(state.self_id),
+            Some(Arc::clone(&failover_queue)),
         );
         state._task_handles.push(consumer_handle);
         info!("commit consumer started");

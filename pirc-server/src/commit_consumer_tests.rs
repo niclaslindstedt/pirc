@@ -656,7 +656,7 @@ async fn commit_consumer_processes_entries_from_channel() {
     let registry = Arc::new(UserRegistry::new());
     let channels = Arc::new(ChannelRegistry::new());
 
-    let handle = spawn_commit_consumer(rx, Arc::clone(&registry), Arc::clone(&channels), None, None);
+    let handle = spawn_commit_consumer(rx, Arc::clone(&registry), Arc::clone(&channels), None, None, None);
 
     // Send a UserRegistered entry.
     tx.send(LogEntry {

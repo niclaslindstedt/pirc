@@ -8,6 +8,7 @@ use tracing::{debug, info, warn};
 
 use crate::channel::{BanEntry, MemberStatus};
 use crate::channel_registry::ChannelRegistry;
+use crate::failover_queue::SharedFailoverQueue;
 use crate::migration::{self, SharedUserNodeIndex};
 use crate::raft::types::{LogEntry, NodeId};
 use crate::raft::ClusterCommand;
@@ -27,6 +28,7 @@ pub fn spawn_commit_consumer(
     channels: Arc<ChannelRegistry>,
     user_node_index: Option<SharedUserNodeIndex>,
     self_id: Option<NodeId>,
+    failover_queue: Option<SharedFailoverQueue>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         while let Some(entry) = commit_rx.recv().await {
@@ -41,6 +43,11 @@ pub fn spawn_commit_consumer(
             if let Some(ref index) = user_node_index {
                 let mut idx = index.write().await;
                 migration::update_user_node_index(&mut idx, &entry.command);
+            }
+
+            // Handle failover queue operations.
+            if let Some(ref queue) = failover_queue {
+                handle_failover_queue(&entry.command, &registry, queue, self_id).await;
             }
         }
         debug!("commit consumer shutting down: channel closed");
@@ -528,6 +535,64 @@ fn parse_user_mode(s: &str) -> Option<pirc_common::UserMode> {
         "o" => Some(pirc_common::UserMode::Operator),
         "v" => Some(pirc_common::UserMode::Voiced),
         _ => None,
+    }
+}
+
+/// Handle failover queue updates for committed commands.
+///
+/// - On `UserRegistered`: if we're the home node and have buffered messages,
+///   drain them to the user's session sender (reconnection path).
+/// - On `UserQuit`/`UserKilled`: remove any buffered messages.
+/// - On `NickChanged`: rename the queue entry.
+async fn handle_failover_queue(
+    command: &ClusterCommand,
+    registry: &UserRegistry,
+    queue: &SharedFailoverQueue,
+    self_id: Option<NodeId>,
+) {
+    match command {
+        ClusterCommand::UserRegistered {
+            nickname,
+            home_node,
+            ..
+        } => {
+            // Only drain on the home node (the node the user is connecting to).
+            if *home_node != self_id {
+                return;
+            }
+            let mut q = queue.write().await;
+            if q.message_count(nickname) == 0 {
+                return;
+            }
+            let messages = q.drain(nickname);
+            drop(q);
+
+            // Deliver buffered messages to the user's session.
+            let Ok(nick) = Nickname::new(nickname) else {
+                return;
+            };
+            if let Some(session_arc) = registry.get_by_nick(&nick) {
+                let session = session_arc.read().expect("session lock poisoned");
+                for msg in &messages {
+                    let _ = session.sender.send(msg.clone());
+                }
+                info!(
+                    nickname,
+                    count = messages.len(),
+                    "delivered buffered failover messages on reconnection"
+                );
+            }
+        }
+        ClusterCommand::UserQuit { nickname, .. }
+        | ClusterCommand::UserKilled { nickname, .. } => {
+            let mut q = queue.write().await;
+            q.remove(nickname);
+        }
+        ClusterCommand::NickChanged { old_nick, new_nick } => {
+            let mut q = queue.write().await;
+            q.rename(old_nick, new_nick);
+        }
+        _ => {}
     }
 }
 
