@@ -401,6 +401,18 @@ impl App {
             return;
         }
 
+        // Handle /encryption subcommands
+        if let ClientCommand::Encryption(ref sub) = cmd {
+            self.handle_encryption_command(sub);
+            return;
+        }
+
+        // Handle /fingerprint
+        if let ClientCommand::Fingerprint(ref nick) = cmd {
+            self.handle_fingerprint_command(nick.as_deref());
+            return;
+        }
+
         // Handle /msg with E2E encryption
         if let ClientCommand::Msg(ref target, ref message) = cmd {
             if !target.starts_with('#') && !target.starts_with('&') {

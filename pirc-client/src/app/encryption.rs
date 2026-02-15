@@ -11,6 +11,8 @@ use pirc_protocol::{Command, Message, Prefix, PircSubcommand};
 use tracing::{info, warn};
 
 use super::{current_timestamp, App};
+use crate::client_command::EncryptionSubcommand;
+use crate::encryption::EncryptionStatus;
 use crate::tui::buffer_manager::BufferId;
 use crate::tui::message_buffer::{BufferLine, LineType};
 
@@ -416,5 +418,85 @@ impl App {
         // No session and no pending exchange — initiate key exchange
         self.initiate_key_exchange(peer, Some(text)).await;
         true
+    }
+
+    // ── /encryption and /fingerprint command handlers ────────────────
+
+    /// Handle `/encryption <subcommand>`.
+    pub(super) fn handle_encryption_command(&mut self, sub: &EncryptionSubcommand) {
+        match sub {
+            EncryptionSubcommand::Status => self.handle_encryption_status(),
+            EncryptionSubcommand::Reset(nick) => self.handle_encryption_reset(nick),
+            EncryptionSubcommand::Info(nick) => self.handle_encryption_info(nick),
+        }
+    }
+
+    /// `/encryption status` — list all peers with encryption status.
+    fn handle_encryption_status(&mut self) {
+        let peers = self.encryption.list_peers();
+        if peers.is_empty() {
+            self.push_status("No active or pending encrypted sessions.");
+            return;
+        }
+
+        self.push_status("Encrypted sessions:");
+        for (peer, status) in &peers {
+            let status_str = match status {
+                EncryptionStatus::Active => "active",
+                EncryptionStatus::Establishing => "establishing",
+                EncryptionStatus::None => "none",
+            };
+            self.push_status(&format!("  {peer}: {status_str}"));
+        }
+    }
+
+    /// `/encryption reset <nick>` — remove session with a peer.
+    fn handle_encryption_reset(&mut self, nick: &str) {
+        self.encryption.remove_session(nick);
+        self.push_status(&format!(
+            "Encrypted session with {nick} has been reset. Next message will trigger fresh key exchange."
+        ));
+        self.push_encryption_event(
+            nick,
+            &format!("Encrypted session with {nick} has been reset"),
+        );
+    }
+
+    /// `/encryption info <nick>` — show detailed encryption info for a session.
+    fn handle_encryption_info(&mut self, nick: &str) {
+        let status = self.encryption.encryption_status(nick);
+        let status_str = match status {
+            EncryptionStatus::Active => "active",
+            EncryptionStatus::Establishing => "establishing",
+            EncryptionStatus::None => "none",
+        };
+
+        self.push_status(&format!("Encryption info for {nick}:"));
+        self.push_status(&format!("  Session state: {status_str}"));
+
+        if let Some(fp) = self.encryption.get_peer_fingerprint(nick) {
+            self.push_status(&format!("  Peer fingerprint: {fp}"));
+        } else {
+            self.push_status("  Peer fingerprint: unknown (no prior key exchange)");
+        }
+    }
+
+    /// Handle `/fingerprint [nick]`.
+    pub(super) fn handle_fingerprint_command(&mut self, nick: Option<&str>) {
+        match nick {
+            None => {
+                let fp = self.encryption.get_identity_fingerprint();
+                self.push_status(&format!("Your fingerprint: {fp}"));
+            }
+            Some(nick) => {
+                if let Some(fp) = self.encryption.get_peer_fingerprint(nick) {
+                    self.push_status(&format!("Fingerprint for {nick}: {fp}"));
+                } else {
+                    self.push_status(&format!(
+                        "No fingerprint available for {nick} (no prior key exchange)"
+                    ));
+                }
+            }
+        }
     }
 }

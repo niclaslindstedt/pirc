@@ -368,6 +368,24 @@ impl EncryptionManager {
         self.pending_exchanges.contains_key(peer)
     }
 
+    /// Return a list of all peers with their encryption status.
+    ///
+    /// Includes peers with active sessions and peers with pending exchanges.
+    #[must_use]
+    pub fn list_peers(&self) -> Vec<(String, EncryptionStatus)> {
+        let mut peers: Vec<(String, EncryptionStatus)> = Vec::new();
+        for peer in self.sessions.keys() {
+            peers.push((peer.clone(), EncryptionStatus::Active));
+        }
+        for peer in self.pending_exchanges.keys() {
+            if !self.sessions.contains_key(peer) {
+                peers.push((peer.clone(), EncryptionStatus::Establishing));
+            }
+        }
+        peers.sort_by(|a, b| a.0.cmp(&b.0));
+        peers
+    }
+
     /// Return a reference to our identity public key.
     #[must_use]
     pub fn identity_public(&self) -> IdentityPublicKey {
@@ -686,6 +704,41 @@ mod tests {
             .join();
 
         result.expect("encryption_status_none_after_removal panicked");
+    }
+
+    // ── list_peers ──────────────────────────────────────────────────
+
+    #[test]
+    fn list_peers_empty_initially() {
+        let mgr = EncryptionManager::new();
+        assert!(mgr.list_peers().is_empty());
+    }
+
+    #[test]
+    fn list_peers_shows_pending() {
+        let mut mgr = EncryptionManager::new();
+        let _msg = mgr.initiate_key_exchange("bob");
+        let peers = mgr.list_peers();
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].0, "bob");
+        assert_eq!(peers[0].1, EncryptionStatus::Establishing);
+    }
+
+    #[test]
+    fn list_peers_shows_active() {
+        let result = std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| {
+                let (alice, _bob) = establish_session();
+                let peers = alice.list_peers();
+                assert_eq!(peers.len(), 1);
+                assert_eq!(peers[0].0, "bob");
+                assert_eq!(peers[0].1, EncryptionStatus::Active);
+            })
+            .expect("thread spawn failed")
+            .join();
+
+        result.expect("list_peers_shows_active panicked");
     }
 
     // ── Test helper ──────────────────────────────────────────────────

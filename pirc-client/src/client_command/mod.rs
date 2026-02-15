@@ -103,11 +103,28 @@ pub enum ClientCommand {
     /// `/disconnect` — disconnect without auto-reconnect.
     Disconnect,
 
+    // ── Encryption ──────────────────────────────────────────────
+    /// `/encryption <subcommand> [args]`
+    Encryption(EncryptionSubcommand),
+    /// `/fingerprint [nick]`
+    Fingerprint(Option<String>),
+
     // ── Meta ───────────────────────────────────────────────────
     /// `/help [topic]`
     Help(Option<String>),
     /// Any command not recognised by the client.
     Unknown(String, Vec<String>),
+}
+
+/// Subcommands for the `/encryption` command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EncryptionSubcommand {
+    /// `/encryption status` — list all active encrypted sessions.
+    Status,
+    /// `/encryption reset <nick>` — reset encrypted session with a peer.
+    Reset(String),
+    /// `/encryption info <nick>` — show detailed session info.
+    Info(String),
 }
 
 impl ClientCommand {
@@ -163,6 +180,10 @@ impl ClientCommand {
             // ── Connection ──────────────────────────────────────
             "reconnect" => Ok(ClientCommand::Reconnect),
             "disconnect" => Ok(ClientCommand::Disconnect),
+
+            // ── Encryption ─────────────────────────────────────
+            "encryption" => parse_encryption(args),
+            "fingerprint" => Ok(ClientCommand::Fingerprint(args.first().cloned())),
 
             // ── Meta ───────────────────────────────────────────
             "help" => Ok(ClientCommand::Help(args.first().cloned())),
@@ -353,6 +374,9 @@ impl ClientCommand {
 
             // ── Connection ──────────────────────────────────────
             ClientCommand::Reconnect | ClientCommand::Disconnect => None,
+
+            // ── Encryption (client-local) ───────────────────────
+            ClientCommand::Encryption(_) | ClientCommand::Fingerprint(_) => None,
 
             // ── Meta ───────────────────────────────────────────
             ClientCommand::Help(_) => None,
@@ -586,6 +610,46 @@ fn parse_kill(args: &[String]) -> Result<ClientCommand, CommandError> {
         argument: "reason".into(),
     })?;
     Ok(ClientCommand::Kill(nick.clone(), reason.clone()))
+}
+
+fn parse_encryption(args: &[String]) -> Result<ClientCommand, CommandError> {
+    let sub = args.first().ok_or_else(|| CommandError::MissingArgument {
+        command: "encryption".into(),
+        argument: "subcommand".into(),
+    })?;
+
+    match sub.to_ascii_lowercase().as_str() {
+        "status" => Ok(ClientCommand::Encryption(EncryptionSubcommand::Status)),
+        "reset" => {
+            // The nick may be in the trailing text (args[1])
+            let nick = args.get(1).ok_or_else(|| CommandError::MissingArgument {
+                command: "encryption reset".into(),
+                argument: "nick".into(),
+            })?;
+            let (nick_word, _) = split_second_arg(nick);
+            Ok(ClientCommand::Encryption(EncryptionSubcommand::Reset(
+                nick_word.to_owned(),
+            )))
+        }
+        "info" => {
+            let nick = args.get(1).ok_or_else(|| CommandError::MissingArgument {
+                command: "encryption info".into(),
+                argument: "nick".into(),
+            })?;
+            let (nick_word, _) = split_second_arg(nick);
+            Ok(ClientCommand::Encryption(EncryptionSubcommand::Info(
+                nick_word.to_owned(),
+            )))
+        }
+        _ => Err(CommandError::InvalidArgument {
+            command: "encryption".into(),
+            argument: "subcommand".into(),
+            reason: format!(
+                "unknown subcommand '{}' (expected: status, reset, info)",
+                sub
+            ),
+        }),
+    }
 }
 
 fn parse_cluster(args: &[String]) -> Result<ClientCommand, CommandError> {

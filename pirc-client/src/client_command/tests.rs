@@ -1502,3 +1502,114 @@ fn reconnect_to_message_is_none() {
 fn disconnect_to_message_is_none() {
     assert!(ClientCommand::Disconnect.to_message(None).is_none());
 }
+
+// ── Encryption commands ───────────────────────────────────
+
+#[test]
+fn encryption_status_parses() {
+    assert_eq!(
+        ClientCommand::from_parsed("encryption", &args(&["status"])),
+        Ok(ClientCommand::Encryption(EncryptionSubcommand::Status))
+    );
+}
+
+#[test]
+fn encryption_status_case_insensitive() {
+    assert_eq!(
+        ClientCommand::from_parsed("encryption", &args(&["STATUS"])),
+        Ok(ClientCommand::Encryption(EncryptionSubcommand::Status))
+    );
+}
+
+#[test]
+fn encryption_reset_parses() {
+    assert_eq!(
+        ClientCommand::from_parsed("encryption", &args(&["reset", "alice"])),
+        Ok(ClientCommand::Encryption(EncryptionSubcommand::Reset(
+            "alice".into()
+        )))
+    );
+}
+
+#[test]
+fn encryption_reset_missing_nick() {
+    assert_eq!(
+        ClientCommand::from_parsed("encryption", &args(&["reset"])),
+        Err(CommandError::MissingArgument {
+            command: "encryption reset".into(),
+            argument: "nick".into(),
+        })
+    );
+}
+
+#[test]
+fn encryption_info_parses() {
+    assert_eq!(
+        ClientCommand::from_parsed("encryption", &args(&["info", "bob"])),
+        Ok(ClientCommand::Encryption(EncryptionSubcommand::Info(
+            "bob".into()
+        )))
+    );
+}
+
+#[test]
+fn encryption_info_missing_nick() {
+    assert_eq!(
+        ClientCommand::from_parsed("encryption", &args(&["info"])),
+        Err(CommandError::MissingArgument {
+            command: "encryption info".into(),
+            argument: "nick".into(),
+        })
+    );
+}
+
+#[test]
+fn encryption_missing_subcommand() {
+    assert_eq!(
+        ClientCommand::from_parsed("encryption", &[]),
+        Err(CommandError::MissingArgument {
+            command: "encryption".into(),
+            argument: "subcommand".into(),
+        })
+    );
+}
+
+#[test]
+fn encryption_unknown_subcommand() {
+    assert_eq!(
+        ClientCommand::from_parsed("encryption", &args(&["bogus"])),
+        Err(CommandError::InvalidArgument {
+            command: "encryption".into(),
+            argument: "subcommand".into(),
+            reason: "unknown subcommand 'bogus' (expected: status, reset, info)".into(),
+        })
+    );
+}
+
+#[test]
+fn fingerprint_no_args() {
+    assert_eq!(
+        ClientCommand::from_parsed("fingerprint", &[]),
+        Ok(ClientCommand::Fingerprint(None))
+    );
+}
+
+#[test]
+fn fingerprint_with_nick() {
+    assert_eq!(
+        ClientCommand::from_parsed("fingerprint", &args(&["alice"])),
+        Ok(ClientCommand::Fingerprint(Some("alice".into())))
+    );
+}
+
+#[test]
+fn encryption_to_message_is_none() {
+    let cmd = ClientCommand::Encryption(EncryptionSubcommand::Status);
+    assert!(cmd.to_message(None).is_none());
+}
+
+#[test]
+fn fingerprint_to_message_is_none() {
+    let cmd = ClientCommand::Fingerprint(None);
+    assert!(cmd.to_message(None).is_none());
+}
