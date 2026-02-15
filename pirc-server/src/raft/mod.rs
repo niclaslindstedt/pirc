@@ -9,6 +9,7 @@ pub mod replication;
 pub mod rpc;
 pub mod snapshot;
 pub mod state;
+pub mod state_machine;
 pub mod storage;
 pub mod transport;
 pub mod types;
@@ -29,6 +30,7 @@ pub use snapshot::{
     InstallSnapshot, InstallSnapshotResponse, NullStateMachine, Snapshot, SnapshotError,
     StateMachine,
 };
+pub use state_machine::ClusterStateMachine;
 pub use state::{LeaderState, PersistentState, VolatileState};
 pub use storage::{RaftStorage, StorageError, StorageResult};
 pub use transport::{PeerConnections, PeerMap, PeerUpdater, SharedPeerMap, TransportError};

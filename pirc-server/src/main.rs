@@ -14,7 +14,7 @@ use pirc_server::handler::{self, HandleResult, PreRegistrationState};
 use pirc_server::handler_cluster::ClusterContext;
 use pirc_server::raft::rpc::RaftMessage;
 use pirc_server::raft::transport::{PeerConnections, PeerMap, PeerUpdater, SharedPeerMap};
-use pirc_server::raft::{ClusterCommand, FileStorage, NodeId, NullStateMachine, RaftBuilder, RaftHandle};
+use pirc_server::raft::{ClusterCommand, ClusterStateMachine, FileStorage, NodeId, RaftBuilder, RaftHandle};
 use pirc_server::registry::UserRegistry;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
@@ -312,10 +312,10 @@ async fn init_bootstrap(
     let storage = FileStorage::new(&data_dir).await?;
 
     let (mut driver, handle, shutdown_sender, inbound_tx, outbound_rx) =
-        RaftBuilder::<ClusterCommand, FileStorage, NullStateMachine>::new()
+        RaftBuilder::<ClusterCommand, FileStorage, ClusterStateMachine>::new()
             .config(raft_config)
             .storage(storage)
-            .state_machine(NullStateMachine)
+            .state_machine(ClusterStateMachine::new())
             .build()
             .await?;
 
@@ -459,10 +459,10 @@ async fn init_join(
     let storage = FileStorage::new(&data_dir).await?;
 
     let (mut driver, handle, shutdown_sender, inbound_tx, outbound_rx) =
-        RaftBuilder::<ClusterCommand, FileStorage, NullStateMachine>::new()
+        RaftBuilder::<ClusterCommand, FileStorage, ClusterStateMachine>::new()
             .config(raft_config)
             .storage(storage)
-            .state_machine(NullStateMachine)
+            .state_machine(ClusterStateMachine::new())
             .build()
             .await?;
 
@@ -619,10 +619,10 @@ async fn init_rejoin(
     let storage = FileStorage::new(&data_dir).await?;
 
     let (mut driver, handle, shutdown_sender, inbound_tx, outbound_rx) =
-        RaftBuilder::<ClusterCommand, FileStorage, NullStateMachine>::new()
+        RaftBuilder::<ClusterCommand, FileStorage, ClusterStateMachine>::new()
             .config(raft_config)
             .storage(storage)
-            .state_machine(NullStateMachine)
+            .state_machine(ClusterStateMachine::new())
             .build()
             .await?;
 
