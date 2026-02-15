@@ -5,9 +5,42 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
+description = "Cryptographic primitives and triple ratchet protocol for pirc"
 
 [lints]
 workspace = true
 
 [dependencies]
+# Workspace crates
 pirc-common = { path = "../pirc-common" }
+
+# Classical key exchange
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+
+# Authenticated encryption
+aes-gcm = "0.10"
+
+# Key derivation
+hkdf = "0.12"
+sha2 = "0.10"
+
+# Post-quantum key encapsulation (ML-KEM / FIPS 203)
+ml-kem = { version = "0.2", features = ["zeroize"] }
+
+# Post-quantum signatures (ML-DSA / FIPS 204)
+ml-dsa = "0.0.4"
+
+# Randomness
+rand = "0.8"
+
+# Secure memory zeroing
+zeroize = { version = "1", features = ["derive"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+
+# Error handling
+thiserror = "2"
+
+[dev-dependencies]
+serde_json = "1"
