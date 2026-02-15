@@ -509,3 +509,270 @@ fn full_key_exchange_protocol_flow_via_app() {
 
     result.expect("full_key_exchange_protocol_flow panicked");
 }
+
+// ── Transparent encrypt/decrypt tests ─────────────────────────
+
+#[test]
+fn transparent_encrypt_decrypt_full_cycle() {
+    // Tests the full path: Alice encrypts via App, Bob decrypts via App.
+    // Uses two App instances with established sessions.
+    let result = std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            let mut alice_app = App::new(ClientConfig::default());
+            let mut bob_app = App::new(ClientConfig::default());
+
+            // Establish session between Alice and Bob
+            let _request = alice_app.encryption.initiate_key_exchange("bob");
+            let bob_bundle = bob_app.encryption.create_pre_key_bundle();
+            let (init_msg, _queued) = alice_app
+                .encryption
+                .handle_bundle_response("bob", &bob_bundle)
+                .expect("bundle response");
+            let _complete = bob_app
+                .encryption
+                .handle_init_message("alice", &init_msg)
+                .expect("init message");
+            alice_app.handle_key_exchange_complete("bob");
+
+            // Both sides should have active sessions
+            assert!(alice_app.encryption.has_session("bob"));
+            assert!(bob_app.encryption.has_session("alice"));
+
+            // Alice encrypts a message
+            let encrypted = alice_app
+                .encryption
+                .encrypt("bob", b"hello from alice")
+                .expect("encrypt");
+
+            // Encode for wire (as the send_encrypted_message method does)
+            let encoded = encode_for_wire(&encrypted.to_bytes());
+
+            // Bob receives and decrypts via handle_encrypted_message
+            bob_app.handle_encrypted_message("alice", &encoded);
+
+            // Verify message appears in Bob's query buffer for alice
+            let query_buf = bob_app
+                .view
+                .buffers()
+                .get(&crate::tui::buffer_manager::BufferId::Query("alice".into()))
+                .expect("query buffer should exist");
+            let last_line = query_buf.iter_lines().last().expect("should have a line");
+            assert_eq!(last_line.content, "hello from alice");
+            assert_eq!(last_line.sender, Some("alice".to_string()));
+            assert_eq!(last_line.line_type, LineType::Message);
+        })
+        .expect("thread spawn failed")
+        .join();
+
+    result.expect("transparent_encrypt_decrypt_full_cycle panicked");
+}
+
+#[test]
+fn decryption_failure_shows_error_in_query_buffer() {
+    let config = ClientConfig::default();
+    let mut app = App::new(config);
+
+    // Create a structurally valid but undecryptable EncryptedMessage
+    let fake_encrypted = pirc_crypto::message::EncryptedMessage {
+        encrypted_header: vec![0xAA; 64],
+        header_nonce: [0x11; 12],
+        ciphertext: vec![0xBB; 128],
+        body_nonce: [0x22; 12],
+    };
+    let encoded = encode_for_wire(&fake_encrypted.to_bytes());
+
+    app.handle_encrypted_message("alice", &encoded);
+
+    // Error should appear in the query buffer for "alice", not status
+    let query_buf = app
+        .view
+        .buffers()
+        .get(&crate::tui::buffer_manager::BufferId::Query("alice".into()))
+        .expect("query buffer for alice should exist");
+    let last_line = query_buf.iter_lines().last().expect("should have a line");
+    assert!(
+        last_line.content.contains("Failed to decrypt"),
+        "expected decrypt error, got: {}",
+        last_line.content
+    );
+    assert_eq!(last_line.line_type, LineType::Error);
+
+    // Status buffer should NOT have the error (App::new doesn't push status messages)
+    let status_buf = app
+        .view
+        .buffers()
+        .get(&crate::tui::buffer_manager::BufferId::Status)
+        .unwrap();
+    assert_eq!(status_buf.len(), 0);
+}
+
+#[test]
+fn outbound_message_requires_connection() {
+    let config = ClientConfig::default();
+    let mut app = App::new(config);
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    // Without a connection, handle_private_msg_command returns early
+    rt.block_on(app.handle_private_msg_command("bob", "secret message"));
+
+    // No query buffer created (returned before echo)
+    let query_buf = app
+        .view
+        .buffers()
+        .get(&crate::tui::buffer_manager::BufferId::Query("bob".into()));
+    assert!(query_buf.is_none());
+
+    // Status shows "Not connected"
+    let status_buf = app
+        .view
+        .buffers()
+        .get(&crate::tui::buffer_manager::BufferId::Status)
+        .unwrap();
+    let last_line = status_buf.iter_lines().last().unwrap();
+    assert!(
+        last_line.content.contains("Not connected"),
+        "expected 'Not connected', got: {}",
+        last_line.content
+    );
+}
+
+#[test]
+fn channel_message_not_encrypted() {
+    let config = ClientConfig::default();
+    let mut app = App::new(config);
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    // /msg #channel hello — should not go through encryption
+    let cmd = ClientCommand::Msg("#channel".into(), "hello".into());
+    rt.block_on(app.handle_command(cmd));
+
+    // No pending exchange for the channel
+    assert!(!app.encryption.has_pending_exchange("#channel"));
+    assert!(!app.encryption.has_session("#channel"));
+}
+
+#[test]
+fn transparent_bidirectional_message_exchange() {
+    // Tests messages flowing in both directions after session establishment.
+    let result = std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            let mut alice_app = App::new(ClientConfig::default());
+            let mut bob_app = App::new(ClientConfig::default());
+
+            // Establish session
+            let _request = alice_app.encryption.initiate_key_exchange("bob");
+            let bob_bundle = bob_app.encryption.create_pre_key_bundle();
+            let (init_msg, _) = alice_app
+                .encryption
+                .handle_bundle_response("bob", &bob_bundle)
+                .expect("bundle response");
+            let _complete = bob_app
+                .encryption
+                .handle_init_message("alice", &init_msg)
+                .expect("init message");
+            alice_app.handle_key_exchange_complete("bob");
+
+            // Alice sends to Bob
+            let ct1 = alice_app
+                .encryption
+                .encrypt("bob", b"msg 1")
+                .expect("encrypt");
+            let wire1 = encode_for_wire(&ct1.to_bytes());
+            bob_app.handle_encrypted_message("alice", &wire1);
+
+            // Bob sends to Alice
+            let ct2 = bob_app
+                .encryption
+                .encrypt("alice", b"msg 2")
+                .expect("encrypt");
+            let wire2 = encode_for_wire(&ct2.to_bytes());
+            alice_app.handle_encrypted_message("bob", &wire2);
+
+            // Alice sends another message to Bob
+            let ct3 = alice_app
+                .encryption
+                .encrypt("bob", b"msg 3")
+                .expect("encrypt");
+            let wire3 = encode_for_wire(&ct3.to_bytes());
+            bob_app.handle_encrypted_message("alice", &wire3);
+
+            // Verify Bob's query buffer has both messages from Alice
+            let bob_query = bob_app
+                .view
+                .buffers()
+                .get(&crate::tui::buffer_manager::BufferId::Query("alice".into()))
+                .expect("bob should have alice query buffer");
+            let lines: Vec<_> = bob_query.iter_lines().collect();
+            assert_eq!(lines.len(), 2);
+            assert_eq!(lines[0].content, "msg 1");
+            assert_eq!(lines[1].content, "msg 3");
+
+            // Verify Alice's query buffer has the message from Bob
+            let alice_query = alice_app
+                .view
+                .buffers()
+                .get(&crate::tui::buffer_manager::BufferId::Query("bob".into()))
+                .expect("alice should have bob query buffer");
+            let lines: Vec<_> = alice_query.iter_lines().collect();
+            assert_eq!(lines.len(), 1);
+            assert_eq!(lines[0].content, "msg 2");
+        })
+        .expect("thread spawn failed")
+        .join();
+
+    result.expect("transparent_bidirectional_message_exchange panicked");
+}
+
+#[test]
+fn handle_encrypted_message_invalid_base64_does_not_panic() {
+    let config = ClientConfig::default();
+    let mut app = App::new(config);
+
+    // Not valid base64 — should be silently ignored (logged, no crash)
+    app.handle_encrypted_message("alice", "not-valid-base64!!!");
+
+    // No query buffer should be created for alice
+    let query_buf = app
+        .view
+        .buffers()
+        .get(&crate::tui::buffer_manager::BufferId::Query("alice".into()));
+    assert!(query_buf.is_none());
+}
+
+#[test]
+fn query_with_message_routes_through_encryption() {
+    let config = ClientConfig::default();
+    let mut app = App::new(config);
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    // /query bob hello — should route through encryption
+    let cmd = ClientCommand::Query("bob".into(), Some("hello".into()));
+    rt.block_on(app.handle_command(cmd));
+
+    // Should show "Not connected" (no connection)
+    let status_buf = app
+        .view
+        .buffers()
+        .get(&crate::tui::buffer_manager::BufferId::Status)
+        .unwrap();
+    let last_line = status_buf.iter_lines().last().unwrap();
+    assert!(
+        last_line.content.contains("Not connected"),
+        "expected 'Not connected', got: {}",
+        last_line.content
+    );
+}

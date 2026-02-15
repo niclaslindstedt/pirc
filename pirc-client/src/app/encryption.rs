@@ -292,7 +292,16 @@ impl App {
             Ok(pt) => pt,
             Err(e) => {
                 warn!("Failed to decrypt message from {sender}: {e}");
-                self.push_status(&format!("Failed to decrypt message from {sender}"));
+                let ts = current_timestamp(&self.config.ui.timestamp_format);
+                self.view.push_message(
+                    &BufferId::Query(sender.to_string()),
+                    BufferLine {
+                        timestamp: ts,
+                        sender: None,
+                        content: format!("Failed to decrypt message from {sender}"),
+                        line_type: LineType::Error,
+                    },
+                );
                 return;
             }
         };
