@@ -4,7 +4,7 @@ build:
 	cargo build --workspace
 
 test:
-	cargo test --workspace
+	RUST_MIN_STACK=16777216 cargo test --workspace
 
 lint:
 	cargo clippy --workspace -- -D warnings

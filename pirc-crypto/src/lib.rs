@@ -8,6 +8,7 @@
 //! - **Key exchange** — [`x25519`] X25519 Diffie-Hellman, [`x3dh`] X3DH + PQ extension
 //! - **Encryption** — [`aead`] AES-256-GCM authenticated encryption
 //! - **Key derivation** — [`kdf`] HKDF-SHA-256
+//! - **Key storage** — [`key_storage`] encrypted-at-rest key storage
 //! - **Post-quantum KEM** — [`kem`] ML-KEM (Kyber) key encapsulation
 //! - **Post-quantum signatures** — [`signing`] ML-DSA (Dilithium) digital signatures
 //! - **Ratchets** — [`dh_ratchet`], [`symmetric_ratchet`], [`pq_ratchet`]
@@ -21,6 +22,7 @@ pub mod error;
 pub mod header;
 pub mod identity;
 pub mod kdf;
+pub mod key_storage;
 pub mod prekey;
 pub mod kem;
 pub mod message;

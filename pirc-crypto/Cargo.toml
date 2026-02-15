@@ -36,6 +36,9 @@ rand = "0.8"
 # Secure memory zeroing
 zeroize = { version = "1", features = ["derive"] }
 
+# Passphrase-based key derivation (Argon2id)
+argon2 = "0.5"
+
 # Wire protocol encoding
 base64 = "0.22"
 

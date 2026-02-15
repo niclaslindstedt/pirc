@@ -19,6 +19,9 @@ use crate::error::{CryptoError, Result};
 /// Size of an ML-KEM-768 encapsulation (public) key in bytes.
 pub const PUBLIC_KEY_LEN: usize = 1184;
 
+/// Size of an ML-KEM-768 decapsulation (secret) key in bytes.
+pub const SECRET_KEY_LEN: usize = 2400;
+
 /// Size of an ML-KEM-768 ciphertext in bytes.
 pub const CIPHERTEXT_LEN: usize = 1088;
 
@@ -64,6 +67,50 @@ impl KemKeyPair {
         let mut bytes = [0u8; SHARED_SECRET_LEN];
         bytes.copy_from_slice(shared.as_slice());
         Ok(KemSharedSecret { bytes })
+    }
+
+    /// Serialize the KEM key pair to bytes.
+    ///
+    /// Format: `[decapsulation_key (2400) | encapsulation_key (1184)]`
+    ///
+    /// # Security
+    ///
+    /// The returned bytes contain secret key material. The caller is
+    /// responsible for zeroizing them when no longer needed.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let dk_bytes = self.dk.as_bytes();
+        let ek_bytes = self.ek.as_bytes();
+        let mut bytes = Vec::with_capacity(SECRET_KEY_LEN + PUBLIC_KEY_LEN);
+        bytes.extend_from_slice(&dk_bytes);
+        bytes.extend_from_slice(&ek_bytes);
+        bytes
+    }
+
+    /// Deserialize a KEM key pair from bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CryptoError::InvalidKey`] if `bytes` is not exactly
+    /// `SECRET_KEY_LEN + PUBLIC_KEY_LEN` bytes.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let expected = SECRET_KEY_LEN + PUBLIC_KEY_LEN;
+        if bytes.len() != expected {
+            return Err(CryptoError::InvalidKey(format!(
+                "KemKeyPair: expected {expected} bytes, got {}",
+                bytes.len()
+            )));
+        }
+
+        let dk_arr = ml_kem::array::Array::try_from(&bytes[..SECRET_KEY_LEN])
+            .map_err(|_| CryptoError::InvalidKey("invalid decapsulation key length".into()))?;
+        let dk = <MlKem768 as KemCore>::DecapsulationKey::from_bytes(&dk_arr);
+
+        let ek_arr = ml_kem::array::Array::try_from(&bytes[SECRET_KEY_LEN..])
+            .map_err(|_| CryptoError::InvalidKey("invalid encapsulation key length".into()))?;
+        let ek = <MlKem768 as KemCore>::EncapsulationKey::from_bytes(&ek_arr);
+
+        Ok(Self { dk, ek })
     }
 }
 

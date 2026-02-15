@@ -17,6 +17,12 @@ use crate::x25519;
 /// key (32 bytes).
 pub const IDENTITY_PUBLIC_KEY_LEN: usize = signing::VERIFYING_KEY_LEN + x25519::KEY_LEN;
 
+/// Size of a serialized [`IdentityKeyPair`] (secret) in bytes.
+///
+/// Composed of: signing key pair (4032 + 1952) + X25519 secret key (32).
+pub const IDENTITY_KEY_PAIR_LEN: usize =
+    signing::SIGNING_KEY_LEN + signing::VERIFYING_KEY_LEN + x25519::KEY_LEN;
+
 /// A user's long-term identity key pair.
 ///
 /// Contains an ML-DSA-65 signing key pair (for signing pre-keys and protocol
@@ -67,6 +73,49 @@ impl IdentityKeyPair {
     #[must_use]
     pub fn dh_key_pair(&self) -> &x25519::KeyPair {
         &self.dh_key
+    }
+
+    /// Serialize the identity key pair to bytes.
+    ///
+    /// Format: `[signing_key_pair (5984) | dh_secret_key (32)]`
+    ///
+    /// # Security
+    ///
+    /// The returned bytes contain secret key material. The caller is
+    /// responsible for zeroizing them when no longer needed.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(IDENTITY_KEY_PAIR_LEN);
+        bytes.extend_from_slice(&self.signing_key.to_bytes());
+        bytes.extend_from_slice(&self.dh_key.secret_key().to_bytes());
+        bytes
+    }
+
+    /// Deserialize an identity key pair from bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CryptoError::InvalidKey`] if `bytes` is not exactly
+    /// [`IDENTITY_KEY_PAIR_LEN`] bytes or the embedded keys are malformed.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() != IDENTITY_KEY_PAIR_LEN {
+            return Err(CryptoError::InvalidKey(format!(
+                "IdentityKeyPair: expected {IDENTITY_KEY_PAIR_LEN} bytes, got {}",
+                bytes.len()
+            )));
+        }
+
+        let sk_len = signing::SIGNING_KEY_LEN + signing::VERIFYING_KEY_LEN;
+        let signing_key = SigningKeyPair::from_bytes(&bytes[..sk_len])?;
+
+        let mut dh_bytes = [0u8; x25519::KEY_LEN];
+        dh_bytes.copy_from_slice(&bytes[sk_len..]);
+        let dh_key = x25519::KeyPair::from_secret_bytes(dh_bytes);
+
+        Ok(Self {
+            signing_key,
+            dh_key,
+        })
     }
 }
 

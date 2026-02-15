@@ -13,6 +13,9 @@ use crate::error::{CryptoError, Result};
 /// Size of an ML-DSA-65 verifying (public) key in bytes.
 pub const VERIFYING_KEY_LEN: usize = 1952;
 
+/// Size of an ML-DSA-65 signing (secret) key in bytes.
+pub const SIGNING_KEY_LEN: usize = 4032;
+
 /// Size of an ML-DSA-65 signature in bytes.
 pub const SIGNATURE_LEN: usize = 3309;
 
@@ -24,7 +27,8 @@ pub const FINGERPRINT_LEN: usize = 32;
 /// The signing key is secret material and is zeroized on drop
 /// (via the `ml-dsa` crate's `zeroize` feature).
 pub struct SigningKeyPair {
-    kp: ml_dsa::KeyPair<MlDsa65>,
+    sk: ml_dsa::SigningKey<MlDsa65>,
+    vk: ml_dsa::VerifyingKey<MlDsa65>,
 }
 
 impl SigningKeyPair {
@@ -33,14 +37,17 @@ impl SigningKeyPair {
     pub fn generate() -> Self {
         let mut rng = rand::rngs::OsRng;
         let kp = MlDsa65::key_gen(&mut rng);
-        Self { kp }
+        Self {
+            sk: kp.signing_key().clone(),
+            vk: kp.verifying_key().clone(),
+        }
     }
 
     /// Return the public (verifying) key.
     #[must_use]
     pub fn verifying_key(&self) -> VerifyingKey {
         VerifyingKey {
-            vk: self.kp.verifying_key().clone(),
+            vk: self.vk.clone(),
         }
     }
 
@@ -53,19 +60,64 @@ impl SigningKeyPair {
     /// Returns [`CryptoError::Signature`] if signing fails.
     pub fn sign(&self, message: &[u8]) -> Result<Signature> {
         let sig = self
-            .kp
-            .signing_key()
+            .sk
             .sign_deterministic(message, &[])
             .map_err(|e| CryptoError::Signature(format!("signing failed: {e}")))?;
         Ok(Signature { sig })
+    }
+
+    /// Serialize the signing key pair to bytes.
+    ///
+    /// Format: `[signing_key (4032) | verifying_key (1952)]`
+    ///
+    /// # Security
+    ///
+    /// The returned bytes contain secret key material. The caller is
+    /// responsible for zeroizing them when no longer needed.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let sk = self.sk.encode();
+        let vk = self.vk.encode();
+        let mut bytes = Vec::with_capacity(SIGNING_KEY_LEN + VERIFYING_KEY_LEN);
+        bytes.extend_from_slice(&sk);
+        bytes.extend_from_slice(&vk);
+        bytes
+    }
+
+    /// Deserialize a signing key pair from bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CryptoError::InvalidKey`] if `bytes` is not exactly
+    /// `SIGNING_KEY_LEN + VERIFYING_KEY_LEN` bytes.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let expected = SIGNING_KEY_LEN + VERIFYING_KEY_LEN;
+        if bytes.len() != expected {
+            return Err(CryptoError::InvalidKey(format!(
+                "SigningKeyPair: expected {expected} bytes, got {}",
+                bytes.len()
+            )));
+        }
+
+        let sk_enc = <ml_dsa::EncodedSigningKey<MlDsa65>>::try_from(&bytes[..SIGNING_KEY_LEN])
+            .map_err(|_| CryptoError::InvalidKey("invalid signing key length".into()))?;
+        let sk = ml_dsa::SigningKey::<MlDsa65>::decode(&sk_enc);
+
+        let vk_enc = <ml_dsa::EncodedVerifyingKey<MlDsa65>>::try_from(
+            &bytes[SIGNING_KEY_LEN..],
+        )
+        .map_err(|_| CryptoError::InvalidKey("invalid verifying key length".into()))?;
+        let vk = ml_dsa::VerifyingKey::<MlDsa65>::decode(&vk_enc);
+
+        Ok(Self { sk, vk })
     }
 }
 
 impl std::fmt::Debug for SigningKeyPair {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SigningKeyPair")
-            .field("signing_key", &"[REDACTED]")
-            .field("verifying_key", &self.verifying_key())
+            .field("sk", &"[REDACTED]")
+            .field("vk", &VerifyingKey { vk: self.vk.clone() })
             .finish()
     }
 }

@@ -126,6 +126,16 @@ impl KeyPair {
     pub fn secret_key(&self) -> SecretKey {
         SecretKey::from_bytes(self.secret.to_bytes())
     }
+
+    /// Reconstruct a key pair from raw secret key bytes.
+    ///
+    /// Derives the public key from the secret key.
+    #[must_use]
+    pub fn from_secret_bytes(secret_bytes: [u8; KEY_LEN]) -> Self {
+        let secret = x25519_dalek::StaticSecret::from(secret_bytes);
+        let public = PublicKey(x25519_dalek::PublicKey::from(&secret));
+        Self { secret, public }
+    }
 }
 
 /// The shared secret resulting from an X25519 Diffie-Hellman key agreement.

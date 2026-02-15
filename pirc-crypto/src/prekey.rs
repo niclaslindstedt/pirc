@@ -101,6 +101,56 @@ impl SignedPreKey {
             timestamp: self.timestamp,
         }
     }
+
+    /// Serialize the signed pre-key (including secret key) to bytes.
+    ///
+    /// Format: `[id (4 LE) | secret_key (32) | signature (3309) | timestamp (8 LE)]`
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(4 + x25519::KEY_LEN + signing::SIGNATURE_LEN + 8);
+        bytes.extend_from_slice(&self.id.to_le_bytes());
+        bytes.extend_from_slice(&self.key_pair.secret_key().to_bytes());
+        bytes.extend_from_slice(&self.signature.to_bytes());
+        bytes.extend_from_slice(&self.timestamp.to_le_bytes());
+        bytes
+    }
+
+    /// Deserialize a signed pre-key from bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CryptoError::Serialization`] if the data is malformed.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let expected = 4 + x25519::KEY_LEN + signing::SIGNATURE_LEN + 8;
+        if bytes.len() != expected {
+            return Err(CryptoError::Serialization(format!(
+                "SignedPreKey: expected {expected} bytes, got {}",
+                bytes.len()
+            )));
+        }
+
+        let mut offset = 0;
+
+        let id = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+        offset += 4;
+
+        let mut sk_bytes = [0u8; x25519::KEY_LEN];
+        sk_bytes.copy_from_slice(&bytes[offset..offset + x25519::KEY_LEN]);
+        let key_pair = x25519::KeyPair::from_secret_bytes(sk_bytes);
+        offset += x25519::KEY_LEN;
+
+        let signature = Signature::from_bytes(&bytes[offset..offset + signing::SIGNATURE_LEN])?;
+        offset += signing::SIGNATURE_LEN;
+
+        let timestamp = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+
+        Ok(Self {
+            id,
+            key_pair,
+            signature,
+            timestamp,
+        })
+    }
 }
 
 impl std::fmt::Debug for SignedPreKey {
@@ -266,6 +316,40 @@ impl OneTimePreKey {
             public_key: self.key_pair.public_key(),
         }
     }
+
+    /// Serialize the one-time pre-key (including secret key) to bytes.
+    ///
+    /// Format: `[id (4 LE) | secret_key (32)]`
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(4 + x25519::KEY_LEN);
+        bytes.extend_from_slice(&self.id.to_le_bytes());
+        bytes.extend_from_slice(&self.key_pair.secret_key().to_bytes());
+        bytes
+    }
+
+    /// Deserialize a one-time pre-key from bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CryptoError::Serialization`] if the data is malformed.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let expected = 4 + x25519::KEY_LEN;
+        if bytes.len() != expected {
+            return Err(CryptoError::Serialization(format!(
+                "OneTimePreKey: expected {expected} bytes, got {}",
+                bytes.len()
+            )));
+        }
+
+        let id = u32::from_le_bytes(bytes[..4].try_into().unwrap());
+
+        let mut sk_bytes = [0u8; x25519::KEY_LEN];
+        sk_bytes.copy_from_slice(&bytes[4..]);
+        let key_pair = x25519::KeyPair::from_secret_bytes(sk_bytes);
+
+        Ok(Self { id, key_pair })
+    }
 }
 
 impl std::fmt::Debug for OneTimePreKey {
@@ -397,6 +481,51 @@ impl KemPreKey {
             public_key: self.kem_pair.public_key(),
             signature: self.signature.clone(),
         }
+    }
+
+    /// Serialize the KEM pre-key (including secret key) to bytes.
+    ///
+    /// Format: `[id (4 LE) | kem_pair (3584) | signature (3309)]`
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let kem_bytes = self.kem_pair.to_bytes();
+        let mut bytes = Vec::with_capacity(4 + kem_bytes.len() + signing::SIGNATURE_LEN);
+        bytes.extend_from_slice(&self.id.to_le_bytes());
+        bytes.extend_from_slice(&kem_bytes);
+        bytes.extend_from_slice(&self.signature.to_bytes());
+        bytes
+    }
+
+    /// Deserialize a KEM pre-key from bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CryptoError::Serialization`] if the data is malformed.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let kem_pair_len = kem::SECRET_KEY_LEN + kem::PUBLIC_KEY_LEN;
+        let expected = 4 + kem_pair_len + signing::SIGNATURE_LEN;
+        if bytes.len() != expected {
+            return Err(CryptoError::Serialization(format!(
+                "KemPreKey: expected {expected} bytes, got {}",
+                bytes.len()
+            )));
+        }
+
+        let mut offset = 0;
+
+        let id = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+        offset += 4;
+
+        let kem_pair = KemKeyPair::from_bytes(&bytes[offset..offset + kem_pair_len])?;
+        offset += kem_pair_len;
+
+        let signature = Signature::from_bytes(&bytes[offset..offset + signing::SIGNATURE_LEN])?;
+
+        Ok(Self {
+            id,
+            kem_pair,
+            signature,
+        })
     }
 }
 
