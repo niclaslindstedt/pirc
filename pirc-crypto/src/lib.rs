@@ -9,6 +9,7 @@
 //! - **Encryption** — [`aead`] AES-256-GCM authenticated encryption
 //! - **Key derivation** — [`kdf`] HKDF-SHA-256
 //! - **Key storage** — [`key_storage`] encrypted-at-rest key storage
+//! - **Key rotation** — [`rotation`] pre-key rotation policy and scheduling
 //! - **Post-quantum KEM** — [`kem`] ML-KEM (Kyber) key encapsulation
 //! - **Post-quantum signatures** — [`signing`] ML-DSA (Dilithium) digital signatures
 //! - **Ratchets** — [`dh_ratchet`], [`symmetric_ratchet`], [`pq_ratchet`]
@@ -28,6 +29,7 @@ pub mod kem;
 pub mod message;
 pub mod pq_ratchet;
 pub mod protocol;
+pub mod rotation;
 pub mod signing;
 pub mod symmetric_ratchet;
 pub mod triple_ratchet;

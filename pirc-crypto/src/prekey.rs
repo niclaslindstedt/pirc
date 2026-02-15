@@ -70,6 +70,12 @@ impl SignedPreKey {
         self.id
     }
 
+    /// Return the generation timestamp.
+    #[must_use]
+    pub fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
     /// Return the X25519 public key.
     #[must_use]
     pub fn public_key(&self) -> x25519::PublicKey {

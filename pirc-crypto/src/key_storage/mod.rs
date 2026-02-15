@@ -3,6 +3,8 @@
 //! All key material is encrypted with AES-256-GCM using a passphrase-derived
 //! key (Argon2id). No plaintext secrets are stored on disk.
 
+mod rotation;
+
 use argon2::{Algorithm, Argon2, Params, Version};
 use rand::RngCore;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -158,6 +160,8 @@ pub struct KeyBundle {
     one_time_pre_keys: Vec<OneTimePreKey>,
     kem_pre_keys: Vec<KemPreKey>,
     next_pre_key_id: u32,
+    /// Creation timestamps for each KEM pre-key (parallel to `kem_pre_keys`).
+    kem_pre_key_timestamps: Vec<u64>,
 }
 
 impl KeyBundle {
@@ -203,6 +207,12 @@ impl KeyBundle {
 
         // Next pre-key ID
         buf.extend_from_slice(&self.next_pre_key_id.to_le_bytes());
+
+        // KEM pre-key timestamps (one per KEM pre-key)
+        Self::write_count(&mut buf, self.kem_pre_key_timestamps.len());
+        for &ts in &self.kem_pre_key_timestamps {
+            buf.extend_from_slice(&ts.to_le_bytes());
+        }
 
         buf
     }
@@ -271,12 +281,33 @@ impl KeyBundle {
         // Next pre-key ID
         let next_pre_key_id = read_u32(&mut offset)?;
 
+        // KEM pre-key timestamps (may be absent in older serialized data)
+        let kem_pre_key_timestamps = if offset + 4 <= data.len() {
+            let ts_count = read_u32(&mut offset)? as usize;
+            let mut timestamps = Vec::with_capacity(ts_count);
+            for _ in 0..ts_count {
+                if offset + 8 > data.len() {
+                    return Err(CryptoError::Serialization(
+                        "unexpected end of data reading KEM timestamps".into(),
+                    ));
+                }
+                let ts = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+                offset += 8;
+                timestamps.push(ts);
+            }
+            timestamps
+        } else {
+            // Backfill with zeros for pre-existing data
+            vec![0; kem_pre_keys.len()]
+        };
+
         Ok(Self {
             identity,
             signed_pre_keys,
             one_time_pre_keys,
             kem_pre_keys,
             next_pre_key_id,
+            kem_pre_key_timestamps,
         })
     }
 }
@@ -289,6 +320,7 @@ impl std::fmt::Debug for KeyBundle {
             .field("one_time_pre_keys", &self.one_time_pre_keys.len())
             .field("kem_pre_keys", &self.kem_pre_keys.len())
             .field("next_pre_key_id", &self.next_pre_key_id)
+            .field("kem_pre_key_timestamps", &self.kem_pre_key_timestamps)
             .finish()
     }
 }
@@ -330,6 +362,7 @@ impl KeyStore {
                 one_time_pre_keys: Vec::new(),
                 kem_pre_keys: vec![kpk],
                 next_pre_key_id: 3,
+                kem_pre_key_timestamps: vec![timestamp],
             },
         })
     }
