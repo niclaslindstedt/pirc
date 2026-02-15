@@ -83,6 +83,7 @@ fn register_user(
         &mut state,
         config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -93,6 +94,7 @@ fn register_user(
         &mut state,
         config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -133,6 +135,7 @@ async fn invite_success_sends_rpl_inviting_and_invite_message() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx1.try_recv().is_ok() {}
 
@@ -146,6 +149,7 @@ async fn invite_success_sends_rpl_inviting_and_invite_message() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     // Alice receives RPL_INVITING.
@@ -192,6 +196,7 @@ async fn invite_adds_target_to_invite_list() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx1.try_recv().is_ok() {}
 
@@ -204,6 +209,7 @@ async fn invite_adds_target_to_invite_list() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     // Bob should be in the invite list.
@@ -249,6 +255,7 @@ async fn invite_non_invite_only_channel_no_op_required() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &join_msg("#test"),
@@ -259,6 +266,7 @@ async fn invite_non_invite_only_channel_no_op_required() {
         &mut state2,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -273,6 +281,7 @@ async fn invite_non_invite_only_channel_no_op_required() {
         &mut state2,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -312,6 +321,7 @@ async fn invited_user_can_join_invite_only_channel() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx1.try_recv().is_ok() {}
     handle_message(
@@ -323,6 +333,7 @@ async fn invited_user_can_join_invite_only_channel() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx1.try_recv().is_ok() {}
 
@@ -336,6 +347,7 @@ async fn invited_user_can_join_invite_only_channel() {
         &mut state2,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     let reply = rx2.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_INVITEONLYCHAN));
@@ -350,6 +362,7 @@ async fn invited_user_can_join_invite_only_channel() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -364,6 +377,7 @@ async fn invited_user_can_join_invite_only_channel() {
         &mut state2,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     // Should get JOIN broadcast, not an error.
@@ -396,7 +410,7 @@ async fn invite_no_params_returns_err_needmoreparams() {
     );
 
     let msg = Message::new(Command::Invite, vec![]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -418,7 +432,7 @@ async fn invite_one_param_returns_err_needmoreparams() {
     );
 
     let msg = Message::new(Command::Invite, vec!["Bob".to_owned()]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -448,6 +462,7 @@ async fn invite_target_does_not_exist_returns_err_nosuchnick() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -460,6 +475,7 @@ async fn invite_target_does_not_exist_returns_err_nosuchnick() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -492,6 +508,7 @@ async fn invite_nonexistent_channel_returns_err_nosuchchannel() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -536,6 +553,7 @@ async fn invite_not_on_channel_returns_err_notonchannel() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -578,6 +596,7 @@ async fn invite_non_op_on_invite_only_channel_returns_err_chanoprivsneeded() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &join_msg("#test"),
@@ -588,6 +607,7 @@ async fn invite_non_op_on_invite_only_channel_returns_err_chanoprivsneeded() {
         &mut state2,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -601,6 +621,7 @@ async fn invite_non_op_on_invite_only_channel_returns_err_chanoprivsneeded() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -615,6 +636,7 @@ async fn invite_non_op_on_invite_only_channel_returns_err_chanoprivsneeded() {
         &mut state2,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -648,6 +670,7 @@ async fn invite_target_already_on_channel_returns_err_useronchannel() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &join_msg("#test"),
@@ -658,6 +681,7 @@ async fn invite_target_already_on_channel_returns_err_useronchannel() {
         &mut state2,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -672,6 +696,7 @@ async fn invite_target_already_on_channel_returns_err_useronchannel() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx1.recv().await.unwrap();
@@ -708,6 +733,7 @@ async fn ban_list_empty() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -721,6 +747,7 @@ async fn ban_list_empty() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -751,6 +778,7 @@ async fn ban_list_with_entries() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -780,6 +808,7 @@ async fn ban_list_with_entries() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -820,6 +849,7 @@ async fn ban_add_mask() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -832,6 +862,7 @@ async fn ban_add_mask() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     // Should receive MODE broadcast.
@@ -880,6 +911,7 @@ async fn ban_remove_mask() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -905,6 +937,7 @@ async fn ban_remove_mask() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     // Should receive MODE broadcast for -b.
@@ -949,6 +982,7 @@ async fn banned_user_cannot_join() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx1.try_recv().is_ok() {}
 
@@ -961,6 +995,7 @@ async fn banned_user_cannot_join() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx1.try_recv().is_ok() {}
 
@@ -974,6 +1009,7 @@ async fn banned_user_cannot_join() {
         &mut state2,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -1035,7 +1071,7 @@ async fn ban_no_params_returns_err_needmoreparams() {
     );
 
     let msg = Message::new(Command::Ban, vec![]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -1065,6 +1101,7 @@ async fn ban_nonexistent_channel_returns_err_nosuchchannel() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1106,6 +1143,7 @@ async fn ban_not_on_channel_returns_err_notonchannel() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1138,6 +1176,7 @@ async fn ban_non_operator_returns_err_chanoprivsneeded() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &join_msg("#test"),
@@ -1148,6 +1187,7 @@ async fn ban_non_operator_returns_err_chanoprivsneeded() {
         &mut state2,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -1162,6 +1202,7 @@ async fn ban_non_operator_returns_err_chanoprivsneeded() {
         &mut state2,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -1202,6 +1243,7 @@ async fn ban_add_broadcasts_to_all_members() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &join_msg("#test"),
@@ -1212,6 +1254,7 @@ async fn ban_add_broadcasts_to_all_members() {
         &mut state2,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -1226,6 +1269,7 @@ async fn ban_add_broadcasts_to_all_members() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     // Both Alice and Bob should receive the MODE broadcast.
@@ -1262,6 +1306,7 @@ async fn ban_invalid_channel_name_returns_err_nosuchchannel() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();

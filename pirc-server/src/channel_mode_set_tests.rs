@@ -70,6 +70,7 @@ fn register_user(
         &mut state,
         config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -80,6 +81,7 @@ fn register_user(
         &mut state,
         config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -113,6 +115,7 @@ async fn mode_set_invite_only() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -125,6 +128,7 @@ async fn mode_set_invite_only() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     // Verify mode was set.
@@ -164,6 +168,7 @@ async fn mode_unset_invite_only() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -184,6 +189,7 @@ async fn mode_unset_invite_only() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -220,6 +226,7 @@ async fn mode_set_multiple_flags() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -232,6 +239,7 @@ async fn mode_set_multiple_flags() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -274,6 +282,7 @@ async fn mode_set_key() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -286,6 +295,7 @@ async fn mode_set_key() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -328,6 +338,7 @@ async fn mode_unset_key() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -348,6 +359,7 @@ async fn mode_unset_key() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -384,6 +396,7 @@ async fn mode_set_limit() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -396,6 +409,7 @@ async fn mode_set_limit() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -438,6 +452,7 @@ async fn mode_unset_limit() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -458,6 +473,7 @@ async fn mode_unset_limit() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -498,6 +514,7 @@ async fn mode_set_operator() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &join_msg("#test"),
@@ -508,6 +525,7 @@ async fn mode_set_operator() {
         &mut state2,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -522,6 +540,7 @@ async fn mode_set_operator() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -569,6 +588,7 @@ async fn mode_unset_operator() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &join_msg("#test"),
@@ -579,6 +599,7 @@ async fn mode_unset_operator() {
         &mut state2,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -603,6 +624,7 @@ async fn mode_unset_operator() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -641,6 +663,7 @@ async fn mode_set_voice() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &join_msg("#test"),
@@ -651,6 +674,7 @@ async fn mode_set_voice() {
         &mut state2,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -665,6 +689,7 @@ async fn mode_set_voice() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -705,6 +730,7 @@ async fn mode_add_ban() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -717,6 +743,7 @@ async fn mode_add_ban() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -756,6 +783,7 @@ async fn mode_remove_ban() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -780,6 +808,7 @@ async fn mode_remove_ban() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();

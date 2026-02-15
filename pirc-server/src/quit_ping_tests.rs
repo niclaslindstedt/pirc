@@ -56,6 +56,7 @@ fn register_user(
         &mut state,
         config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -66,6 +67,7 @@ fn register_user(
         &mut state,
         config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst (RPL_WELCOME, RPL_YOURHOST, RPL_CREATED, ERR_NOMOTD)
@@ -93,7 +95,7 @@ async fn quit_with_message_sends_error_and_removes_user() {
     assert_eq!(registry.connection_count(), 1);
 
     let quit = Message::new(Command::Quit, vec!["Goodbye everyone".to_owned()]);
-    let result = handle_message(&quit, 1, &registry, &channels, &tx, &mut state, &config, None);
+    let result = handle_message(&quit, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     assert!(matches!(result, HandleResult::Quit));
 
@@ -119,7 +121,7 @@ async fn quit_without_message_uses_default() {
         register_user("Bob", "bob", 1, "127.0.0.1", &registry, &channels, &config);
 
     let quit = Message::new(Command::Quit, vec![]);
-    let result = handle_message(&quit, 1, &registry, &channels, &tx, &mut state, &config, None);
+    let result = handle_message(&quit, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     assert!(matches!(result, HandleResult::Quit));
 
@@ -149,11 +151,12 @@ async fn quit_pre_registration_returns_quit() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     assert!(!state.registered);
 
     let quit = Message::new(Command::Quit, vec![]);
-    let result = handle_message(&quit, 1, &registry, &channels, &tx, &mut state, &config, None);
+    let result = handle_message(&quit, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     assert!(matches!(result, HandleResult::Quit));
 }
@@ -176,7 +179,7 @@ async fn quit_sets_registered_false() {
     assert!(state.registered);
 
     let quit = Message::new(Command::Quit, vec!["Bye".to_owned()]);
-    handle_message(&quit, 1, &registry, &channels, &tx, &mut state, &config, None);
+    handle_message(&quit, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     // State should reflect unregistered after quit.
     assert!(!state.registered);
@@ -200,7 +203,7 @@ async fn ping_returns_pong_with_token() {
     );
 
     let ping = Message::new(Command::Ping, vec!["mytoken123".to_owned()]);
-    let result = handle_message(&ping, 1, &registry, &channels, &tx, &mut state, &config, None);
+    let result = handle_message(&ping, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     assert!(matches!(result, HandleResult::Continue));
 
@@ -222,7 +225,7 @@ async fn ping_pre_registration_returns_pong() {
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
     let ping = Message::new(Command::Ping, vec!["preregtoken".to_owned()]);
-    let result = handle_message(&ping, 1, &registry, &channels, &tx, &mut state, &config, None);
+    let result = handle_message(&ping, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     assert!(matches!(result, HandleResult::Continue));
 
@@ -247,7 +250,7 @@ async fn pong_is_absorbed_silently() {
     );
 
     let pong = Message::new(Command::Pong, vec!["pircd".to_owned()]);
-    let result = handle_message(&pong, 1, &registry, &channels, &tx, &mut state, &config, None);
+    let result = handle_message(&pong, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     assert!(matches!(result, HandleResult::Continue));
 
@@ -264,7 +267,7 @@ async fn pong_pre_registration_is_absorbed() {
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
     let pong = Message::new(Command::Pong, vec!["pircd".to_owned()]);
-    let result = handle_message(&pong, 1, &registry, &channels, &tx, &mut state, &config, None);
+    let result = handle_message(&pong, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     assert!(matches!(result, HandleResult::Continue));
     assert!(rx.try_recv().is_err());
@@ -292,7 +295,7 @@ async fn idle_time_updated_on_regular_command() {
 
     // Send a WHOIS command (a regular non-PING/PONG command).
     let whois = Message::new(Command::Whois, vec!["Alice".to_owned()]);
-    handle_message(&whois, 1, &registry, &channels, &tx, &mut state, &config, None);
+    handle_message(&whois, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     // Check that last_active was updated recently.
     let session_arc = registry.get_by_connection(1).unwrap();
@@ -331,7 +334,7 @@ async fn idle_time_not_updated_on_ping() {
 
     // Send a PING (should NOT update last_active).
     let ping = Message::new(Command::Ping, vec!["token".to_owned()]);
-    handle_message(&ping, 1, &registry, &channels, &tx, &mut state, &config, None);
+    handle_message(&ping, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     let session_arc = registry.get_by_connection(1).unwrap();
     let session = session_arc.read().unwrap();
@@ -363,7 +366,7 @@ async fn idle_time_not_updated_on_pong() {
 
     // Send a PONG (should NOT update last_active).
     let pong = Message::new(Command::Pong, vec!["pircd".to_owned()]);
-    handle_message(&pong, 1, &registry, &channels, &tx, &mut state, &config, None);
+    handle_message(&pong, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     let session_arc = registry.get_by_connection(1).unwrap();
     let session = session_arc.read().unwrap();
@@ -388,14 +391,14 @@ async fn regular_commands_return_continue() {
     );
 
     let whois = Message::new(Command::Whois, vec!["Alice".to_owned()]);
-    let result = handle_message(&whois, 1, &registry, &channels, &tx, &mut state, &config, None);
+    let result = handle_message(&whois, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
     assert!(matches!(result, HandleResult::Continue));
 
     let away = Message::new(Command::Away, vec!["brb".to_owned()]);
-    let result = handle_message(&away, 1, &registry, &channels, &tx, &mut state, &config, None);
+    let result = handle_message(&away, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
     assert!(matches!(result, HandleResult::Continue));
 
     let nick = Message::new(Command::Nick, vec!["NewAlice".to_owned()]);
-    let result = handle_message(&nick, 1, &registry, &channels, &tx, &mut state, &config, None);
+    let result = handle_message(&nick, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
     assert!(matches!(result, HandleResult::Continue));
 }

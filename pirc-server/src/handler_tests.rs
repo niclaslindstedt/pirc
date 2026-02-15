@@ -48,6 +48,7 @@ async fn nick_then_user_completes_registration() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     assert!(state.nick.is_some());
     assert!(!state.registered);
@@ -61,6 +62,7 @@ async fn nick_then_user_completes_registration() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     assert!(state.registered);
     assert_eq!(registry.connection_count(), 1);
@@ -100,6 +102,7 @@ async fn user_then_nick_completes_registration() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     assert!(!state.registered);
 
@@ -112,6 +115,7 @@ async fn user_then_nick_completes_registration() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     assert!(state.registered);
     assert_eq!(registry.connection_count(), 1);
@@ -129,7 +133,7 @@ async fn nick_no_param_returns_err() {
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
     let msg = Message::new(Command::Nick, vec![]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NONICKNAMEGIVEN));
@@ -152,6 +156,7 @@ async fn nick_invalid_returns_err() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -195,6 +200,7 @@ async fn nick_in_use_returns_err() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -211,7 +217,7 @@ async fn user_missing_params_returns_err() {
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
     let msg = Message::new(Command::User, vec!["alice".to_owned()]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -235,6 +241,7 @@ async fn user_after_registration_returns_err() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &user_msg("alice", "Alice"),
@@ -245,6 +252,7 @@ async fn user_after_registration_returns_err() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     assert!(state.registered);
 
@@ -261,6 +269,7 @@ async fn user_after_registration_returns_err() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -276,7 +285,7 @@ async fn ping_gets_pong_response() {
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
     let msg = Message::new(Command::Ping, vec!["token123".to_owned()]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Pong);
@@ -300,6 +309,7 @@ async fn welcome_message_contains_nick_and_host() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &user_msg("testuser", "Test User"),
@@ -310,6 +320,7 @@ async fn welcome_message_contains_nick_and_host() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let welcome = rx.recv().await.unwrap();
@@ -338,6 +349,7 @@ async fn registration_race_condition_handled() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &user_msg("user1", "User One"),
@@ -348,6 +360,7 @@ async fn registration_race_condition_handled() {
         &mut state1,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     assert!(state1.registered);
 
@@ -362,6 +375,7 @@ async fn registration_race_condition_handled() {
         &mut state2,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     // Second connection should get ERR_NICKNAMEINUSE when trying nick
@@ -399,6 +413,7 @@ fn register_user(
         &mut state,
         config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -409,6 +424,7 @@ fn register_user(
         &mut state,
         config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst (RPL_WELCOME, RPL_YOURHOST, RPL_CREATED, ERR_NOMOTD)
@@ -440,6 +456,7 @@ async fn nick_change_after_registration_succeeds() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -484,6 +501,7 @@ async fn nick_change_collision_returns_err() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -518,6 +536,7 @@ async fn nick_change_invalid_returns_err() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -552,6 +571,7 @@ async fn nick_change_case_only_succeeds() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -585,7 +605,7 @@ async fn nick_change_no_param_returns_err() {
     );
 
     let msg = Message::new(Command::Nick, vec![]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NONICKNAMEGIVEN));
@@ -609,6 +629,7 @@ async fn nick_change_prefix_has_correct_old_nick() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -638,6 +659,7 @@ async fn motd_text_is_sent_when_configured() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &user_msg("motduser", "Motd User"),
@@ -648,6 +670,7 @@ async fn motd_text_is_sent_when_configured() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     // Skip RPL_WELCOME, RPL_YOURHOST, RPL_CREATED
@@ -719,6 +742,7 @@ async fn away_set_returns_rpl_nowaway() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -760,6 +784,7 @@ async fn away_clear_returns_rpl_unaway() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     let _ = rx.recv().await.unwrap(); // drain RPL_NOWAWAY
 
@@ -773,6 +798,7 @@ async fn away_clear_returns_rpl_unaway() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -816,6 +842,7 @@ async fn away_set_then_update_message() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     let _ = rx.recv().await.unwrap();
 
@@ -828,6 +855,7 @@ async fn away_set_then_update_message() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     let reply = rx.recv().await.unwrap();
     assert_eq!(
@@ -879,6 +907,7 @@ async fn mode_query_own_returns_rpl_umodeis() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -915,6 +944,7 @@ async fn mode_query_other_returns_err_usersdontmatch() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -948,6 +978,7 @@ async fn mode_no_params_returns_err_needmoreparams() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -981,6 +1012,7 @@ async fn mode_set_voiced_on_self() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1022,6 +1054,7 @@ async fn mode_set_operator_self_ignored() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1069,6 +1102,7 @@ async fn mode_remove_operator() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1108,6 +1142,7 @@ async fn mode_unknown_flag_returns_err() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1150,6 +1185,7 @@ async fn mode_set_other_returns_err_usersdontmatch() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1184,6 +1220,7 @@ async fn mode_query_case_insensitive() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1218,6 +1255,7 @@ async fn mode_combined_modestring() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();

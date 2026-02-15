@@ -20,6 +20,7 @@ use pirc_server::raft::transport::{PeerConnections, PeerMap, PeerUpdater, Shared
 use pirc_server::raft::types::LogEntry;
 use pirc_server::migration::{self, SharedUserNodeIndex, UserNodeIndex};
 use pirc_server::raft::{ClusterCommand, ClusterStateMachine, FileStorage, HealthEvent, NodeId, RaftBuilder, RaftHandle};
+use pirc_server::prekey_store::PreKeyBundleStore;
 use pirc_server::registry::UserRegistry;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
@@ -126,6 +127,7 @@ async fn main() {
 
     let registry = Arc::new(UserRegistry::new());
     let channels = Arc::new(ChannelRegistry::new());
+    let prekey_store = Arc::new(PreKeyBundleStore::new());
 
     // Raft cluster initialization
     let cluster_state: Option<ClusterState> = if config.cluster.enabled {
@@ -233,6 +235,7 @@ async fn main() {
                 let conn_config = Arc::clone(&config);
                 let conn_shutdown_controller = Arc::clone(&shutdown_controller);
                 let conn_cluster_ctx = cluster_ctx.clone();
+                let conn_prekey_store = Arc::clone(&prekey_store);
                 tokio::spawn(async move {
                     handle_connection(
                         connection,
@@ -243,6 +246,7 @@ async fn main() {
                         conn_config,
                         conn_shutdown_controller,
                         conn_cluster_ctx,
+                        conn_prekey_store,
                     )
                     .await;
                 });
@@ -284,6 +288,7 @@ async fn handle_connection(
     config: Arc<ServerConfig>,
     shutdown_controller: Arc<ShutdownController>,
     cluster_ctx: Option<Arc<ClusterContext>>,
+    prekey_store: Arc<PreKeyBundleStore>,
 ) {
     let conn_id = connection.info().id;
     info!(conn_id, %peer_addr, "handling connection");
@@ -312,6 +317,7 @@ async fn handle_connection(
                         let handle_result = handler::handle_message(
                             &msg, conn_id, &registry, &channels, &tx, &mut state, &config,
                             cluster_ctx.as_ref().map(|c| c.as_ref()),
+                            &prekey_store,
                         );
 
                         // Drain all queued outbound messages after handling

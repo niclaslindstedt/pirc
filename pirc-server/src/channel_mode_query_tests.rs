@@ -71,6 +71,7 @@ fn register_user(
         &mut state,
         config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -81,6 +82,7 @@ fn register_user(
         &mut state,
         config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -115,6 +117,7 @@ async fn mode_query_returns_channel_modes() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -138,6 +141,7 @@ async fn mode_query_returns_channel_modes() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -175,6 +179,7 @@ async fn mode_query_with_key_and_limit() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -196,6 +201,7 @@ async fn mode_query_with_key_and_limit() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -231,6 +237,7 @@ async fn mode_query_empty_modes() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -243,6 +250,7 @@ async fn mode_query_empty_modes() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -276,6 +284,7 @@ async fn mode_ban_list_query_empty() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -288,6 +297,7 @@ async fn mode_ban_list_query_empty() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -318,6 +328,7 @@ async fn mode_ban_list_query_with_entries() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -342,6 +353,7 @@ async fn mode_ban_list_query_with_entries() {
         &mut state,
         &config,
         None,
+        &Arc::new(PreKeyBundleStore::new()),
     );
 
     let reply = rx.recv().await.unwrap();

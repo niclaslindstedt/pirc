@@ -14,6 +14,7 @@ use pirc_protocol::{Command, Message};
 use pirc_server::channel_registry::ChannelRegistry;
 use pirc_server::config::ServerConfig;
 use pirc_server::handler::{self, PreRegistrationState};
+use pirc_server::prekey_store::PreKeyBundleStore;
 use pirc_server::registry::UserRegistry;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -74,8 +75,10 @@ async fn handle_registration_connection(
     loop {
         match connection.recv_with_shutdown(&mut shutdown).await {
             Ok(Some(msg)) => {
+                let prekey_store = Arc::new(PreKeyBundleStore::new());
                 handler::handle_message(
                     &msg, conn_id, &registry, &channels, &tx, &mut state, &config, None,
+                    &prekey_store,
                 );
                 while let Ok(out_msg) = rx.try_recv() {
                     if connection.send(out_msg).await.is_err() {

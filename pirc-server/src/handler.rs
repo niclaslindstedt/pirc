@@ -31,6 +31,7 @@ use crate::handler_cluster::{
 use crate::handler_oper::{handle_die, handle_kill, handle_oper, handle_restart, handle_wallops};
 #[allow(unused_imports)] // Re-exported for test submodules that use `super::*`
 pub(crate) use crate::handler_oper::{host_matches_mask, is_oper};
+use crate::prekey_store::PreKeyBundleStore;
 use crate::registry::UserRegistry;
 use crate::user::UserSession;
 
@@ -90,6 +91,7 @@ pub fn handle_message(
     state: &mut PreRegistrationState,
     config: &ServerConfig,
     cluster_ctx: Option<&ClusterContext>,
+    prekey_store: &Arc<PreKeyBundleStore>,
 ) -> HandleResult {
     if state.registered {
         // Update idle tracking for non-PING/PONG commands.
@@ -182,6 +184,14 @@ pub fn handle_message(
             Command::Pirc(PircSubcommand::NetworkInfo) => {
                 if let Some(ctx) = cluster_ctx {
                     handler_cluster::handle_network_info(connection_id, registry, sender, ctx);
+                }
+            }
+            Command::Pirc(PircSubcommand::KeyExchange) => {
+                // If the target is "*", this is a self-directed bundle upload.
+                if msg.params.first().is_some_and(|t| t == "*") {
+                    maybe_store_prekey_bundle(msg, connection_id, registry, sender, prekey_store);
+                } else {
+                    handle_key_exchange(msg, connection_id, registry, sender, prekey_store);
                 }
             }
             // PONG and other commands are silently absorbed.
@@ -903,6 +913,186 @@ pub fn handle_cluster_raft(
     }
 }
 
+/// Handle a `PIRC KEYEXCHANGE <target> [data]` message.
+///
+/// The wire format is: `PIRC KEYEXCHANGE <target> <base64-data>`
+///
+/// The server decodes the base64 data to determine the message type:
+/// - **`RequestBundle`**: The sender is requesting the target's pre-key bundle.
+///   The server looks it up in the [`PreKeyBundleStore`] and sends it back.
+/// - **Other variants** (`Bundle`, `InitMessage`, `Complete`): Relayed directly
+///   to the target user. The server does not inspect or decrypt these.
+///
+/// If no data parameter is present, the command is treated as a `RequestBundle`.
+fn handle_key_exchange(
+    msg: &Message,
+    connection_id: u64,
+    registry: &Arc<UserRegistry>,
+    sender: &mpsc::UnboundedSender<Message>,
+    prekey_store: &Arc<PreKeyBundleStore>,
+) {
+    // Get the sender's nickname.
+    let sender_nick = match registry.get_by_connection(connection_id) {
+        Some(session_arc) => {
+            let session = session_arc.read().expect("session lock poisoned");
+            session.nickname.clone()
+        }
+        None => return,
+    };
+
+    // params[0] = target nick, params[1] = base64-encoded key exchange data (optional for RequestBundle)
+    if msg.params.is_empty() {
+        send_numeric(
+            sender,
+            ERR_NEEDMOREPARAMS,
+            &[sender_nick.as_ref(), "KEYEXCHANGE"],
+            "Not enough parameters",
+        );
+        return;
+    }
+
+    let target_str = &msg.params[0];
+    let Ok(target_nick) = Nickname::new(target_str) else {
+        send_numeric(
+            sender,
+            ERR_NOSUCHNICK,
+            &[sender_nick.as_ref(), target_str],
+            "No such nick/channel",
+        );
+        return;
+    };
+
+    // Determine message type: if there's data, decode it; otherwise treat as RequestBundle.
+    let is_request_bundle = if msg.params.len() < 2 {
+        true
+    } else {
+        // Try to decode to check the message type tag.
+        match pirc_crypto::protocol::decode_from_wire(&msg.params[1]) {
+            Ok(bytes) if !bytes.is_empty() && bytes[0] == 0 => true, // TAG_REQUEST_BUNDLE = 0
+            _ => false,
+        }
+    };
+
+    if is_request_bundle {
+        // Look up the target's pre-key bundle in the store.
+        if let Some(bundle_data) = prekey_store.get_bundle(&target_nick) {
+            // Send the bundle back to the requester as:
+            // :server PIRC KEYEXCHANGE <sender_nick> <base64-bundle-data>
+            let encoded = pirc_crypto::protocol::encode_for_wire(&bundle_data);
+            let reply = Message::builder(Command::Pirc(PircSubcommand::KeyExchange))
+                .prefix(Prefix::server(SERVER_NAME))
+                .param(sender_nick.as_ref())
+                .param(&encoded)
+                .build();
+            let _ = sender.send(reply);
+        } else {
+            // Target has no bundle stored.
+            let notice = Message::builder(Command::Notice)
+                .prefix(Prefix::server(SERVER_NAME))
+                .param(sender_nick.as_ref())
+                .trailing(&format!(
+                    "No pre-key bundle available for {target_nick}"
+                ))
+                .build();
+            let _ = sender.send(notice);
+        }
+    } else {
+        // Relay the key exchange message to the target user.
+        if let Some(session_arc) = registry.get_by_nick(&target_nick) {
+            let session = session_arc.read().expect("session lock poisoned");
+            // Forward as: :sender!user@host PIRC KEYEXCHANGE <target> <data>
+            let sender_session = registry
+                .get_by_connection(connection_id)
+                .expect("sender session must exist");
+            let (username, hostname) = {
+                let s = sender_session.read().expect("session lock poisoned");
+                (s.username.clone(), s.hostname.clone())
+            };
+            let relay = Message::builder(Command::Pirc(PircSubcommand::KeyExchange))
+                .prefix(Prefix::User {
+                    nick: sender_nick,
+                    user: username,
+                    host: hostname,
+                })
+                .param(target_nick.as_ref())
+                .param(&msg.params[1])
+                .build();
+            let _ = session.sender.send(relay);
+        } else {
+            send_numeric(
+                sender,
+                ERR_NOSUCHNICK,
+                &[sender_nick.as_ref(), target_str],
+                "No such nick/channel",
+            );
+        }
+    }
+}
+
+/// Handle `PIRC KEYEXCHANGE` for bundle registration (storing a user's pre-key
+/// bundle on the server). Called when a user sends their own bundle to the
+/// server for storage.
+///
+/// Wire format: `PIRC KEYEXCHANGE * <base64-bundle-data>`
+///
+/// When target is `*` (self), the server stores the bundle data in the
+/// [`PreKeyBundleStore`] keyed by the sender's nickname.
+pub(crate) fn maybe_store_prekey_bundle(
+    msg: &Message,
+    connection_id: u64,
+    registry: &Arc<UserRegistry>,
+    sender: &mpsc::UnboundedSender<Message>,
+    prekey_store: &Arc<PreKeyBundleStore>,
+) {
+    // Check if this is a self-directed bundle upload (target = "*")
+    if msg.params.len() < 2 {
+        return;
+    }
+
+    if msg.params[0] != "*" {
+        return;
+    }
+
+    let sender_nick = match registry.get_by_connection(connection_id) {
+        Some(session_arc) => {
+            let session = session_arc.read().expect("session lock poisoned");
+            session.nickname.clone()
+        }
+        None => return,
+    };
+
+    // Decode and validate that this is a Bundle message.
+    let Ok(data) = pirc_crypto::protocol::decode_from_wire(&msg.params[1]) else {
+        let notice = Message::builder(Command::Notice)
+            .prefix(Prefix::server(SERVER_NAME))
+            .param(sender_nick.as_ref())
+            .trailing("Invalid key exchange data encoding")
+            .build();
+        let _ = sender.send(notice);
+        return;
+    };
+
+    // Verify this is a Bundle message (tag byte 1).
+    if data.is_empty() || data[0] != 1 {
+        let notice = Message::builder(Command::Notice)
+            .prefix(Prefix::server(SERVER_NAME))
+            .param(sender_nick.as_ref())
+            .trailing("Expected a Bundle message for registration")
+            .build();
+        let _ = sender.send(notice);
+        return;
+    }
+
+    prekey_store.store_bundle(&sender_nick, data);
+
+    let ack = Message::builder(Command::Notice)
+        .prefix(Prefix::server(SERVER_NAME))
+        .param(sender_nick.as_ref())
+        .trailing("Pre-key bundle registered")
+        .build();
+    let _ = sender.send(ack);
+}
+
 pub(crate) fn send_numeric(
     sender: &mpsc::UnboundedSender<Message>,
     code: u16,
@@ -972,3 +1162,7 @@ mod oper_tests;
 #[cfg(test)]
 #[path = "ctcp_tests.rs"]
 mod ctcp_tests;
+
+#[cfg(test)]
+#[path = "keyexchange_tests.rs"]
+mod keyexchange_tests;

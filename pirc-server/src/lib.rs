@@ -11,6 +11,7 @@ pub mod handler_channel;
 pub mod handler_cluster;
 pub mod handler_oper;
 pub mod migration;
+pub mod prekey_store;
 pub mod raft;
 pub mod registry;
 pub mod user;
