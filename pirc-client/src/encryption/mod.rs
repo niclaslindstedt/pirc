@@ -20,6 +20,17 @@ use pirc_crypto::CryptoError;
 /// Number of one-time pre-keys to generate in a batch.
 const ONE_TIME_PRE_KEY_BATCH_SIZE: u32 = 10;
 
+/// Encryption status for a peer conversation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EncryptionStatus {
+    /// No encryption session or pending exchange.
+    None,
+    /// Key exchange is in progress.
+    Establishing,
+    /// Active encrypted session.
+    Active,
+}
+
 /// Client-side encryption manager.
 ///
 /// Holds long-term identity keys, manages per-peer triple ratchet sessions,
@@ -99,6 +110,18 @@ impl EncryptionManager {
     #[must_use]
     pub fn has_session(&self, peer: &str) -> bool {
         self.sessions.contains_key(peer)
+    }
+
+    /// Get the encryption status for a peer.
+    #[must_use]
+    pub fn encryption_status(&self, peer: &str) -> EncryptionStatus {
+        if self.sessions.contains_key(peer) {
+            EncryptionStatus::Active
+        } else if self.pending_exchanges.contains_key(peer) {
+            EncryptionStatus::Establishing
+        } else {
+            EncryptionStatus::None
+        }
     }
 
     /// Encrypt a message for a peer.
@@ -616,6 +639,53 @@ mod tests {
             s,
             "AB:CD:EF:01:23:45:67:89:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:10:20:30:40:50:60:70:80"
         );
+    }
+
+    // ── Test helper ──────────────────────────────────────────────────
+
+    // ── Encryption status ────────────────────────────────────────────
+
+    #[test]
+    fn encryption_status_none_initially() {
+        let mgr = EncryptionManager::new();
+        assert_eq!(mgr.encryption_status("alice"), EncryptionStatus::None);
+    }
+
+    #[test]
+    fn encryption_status_establishing_during_exchange() {
+        let mut mgr = EncryptionManager::new();
+        let _msg = mgr.initiate_key_exchange("bob");
+        assert_eq!(mgr.encryption_status("bob"), EncryptionStatus::Establishing);
+    }
+
+    #[test]
+    fn encryption_status_active_after_session() {
+        let result = std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| {
+                let (alice, _bob) = establish_session();
+                assert_eq!(alice.encryption_status("bob"), EncryptionStatus::Active);
+            })
+            .expect("thread spawn failed")
+            .join();
+
+        result.expect("encryption_status_active panicked");
+    }
+
+    #[test]
+    fn encryption_status_none_after_removal() {
+        let result = std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| {
+                let (mut alice, _bob) = establish_session();
+                assert_eq!(alice.encryption_status("bob"), EncryptionStatus::Active);
+                alice.remove_session("bob");
+                assert_eq!(alice.encryption_status("bob"), EncryptionStatus::None);
+            })
+            .expect("thread spawn failed")
+            .join();
+
+        result.expect("encryption_status_none_after_removal panicked");
     }
 
     // ── Test helper ──────────────────────────────────────────────────

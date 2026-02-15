@@ -717,15 +717,19 @@ fn transparent_bidirectional_message_exchange() {
             assert_eq!(lines[0].content, "msg 1");
             assert_eq!(lines[1].content, "msg 3");
 
-            // Verify Alice's query buffer has the message from Bob
+            // Verify Alice's query buffer has the session event + message from Bob
             let alice_query = alice_app
                 .view
                 .buffers()
                 .get(&crate::tui::buffer_manager::BufferId::Query("bob".into()))
                 .expect("alice should have bob query buffer");
             let lines: Vec<_> = alice_query.iter_lines().collect();
-            assert_eq!(lines.len(), 1);
-            assert_eq!(lines[0].content, "msg 2");
+            assert_eq!(lines.len(), 2);
+            assert_eq!(
+                lines[0].content,
+                "Encrypted session established with bob"
+            );
+            assert_eq!(lines[1].content, "msg 2");
         })
         .expect("thread spawn failed")
         .join();

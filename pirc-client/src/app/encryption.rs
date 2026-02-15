@@ -192,6 +192,10 @@ impl App {
                 }
 
                 self.push_status(&format!("Encrypted session established with {peer}"));
+                self.push_encryption_event(
+                    peer,
+                    &format!("Encrypted session established with {peer}"),
+                );
             }
             Ok(_) => {
                 warn!("Unexpected key exchange response from handle_init_message for {peer}");
@@ -209,6 +213,7 @@ impl App {
     pub(super) fn handle_key_exchange_complete(&mut self, peer: &str) {
         self.encryption.handle_complete(peer);
         self.push_status(&format!("Encrypted session established with {peer}"));
+        self.push_encryption_event(peer, &format!("Encrypted session established with {peer}"));
     }
 
     /// Initiate a key exchange with a peer and optionally queue a message.
@@ -250,6 +255,10 @@ impl App {
         }
 
         self.push_status(&format!("Establishing encrypted session with {peer}..."));
+        self.push_encryption_event(
+            peer,
+            &format!("Establishing encrypted session with {peer}..."),
+        );
     }
 
     /// Send a `PIRC ENCRYPTED <peer> <base64-data>` message.
@@ -316,6 +325,20 @@ impl App {
                 sender: Some(sender.to_string()),
                 content,
                 line_type: LineType::Message,
+            },
+        );
+    }
+
+    /// Push an encryption lifecycle event as a system message to the query buffer.
+    fn push_encryption_event(&mut self, peer: &str, message: &str) {
+        let ts = current_timestamp(&self.config.ui.timestamp_format);
+        self.view.push_message(
+            &BufferId::Query(peer.to_string()),
+            BufferLine {
+                timestamp: ts,
+                sender: None,
+                content: message.to_string(),
+                line_type: LineType::System,
             },
         );
     }

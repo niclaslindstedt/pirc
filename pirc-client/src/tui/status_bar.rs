@@ -1,3 +1,4 @@
+use crate::encryption::EncryptionStatus;
 use crate::tui::buffer::Buffer;
 use crate::tui::buffer_manager::BufferId;
 use crate::tui::layout::Rect;
@@ -14,6 +15,13 @@ pub const STYLE_STATUS_CHANNEL: Style = Style::new().reverse(true);
 
 /// Style for the away indicator (red + bold on reverse background).
 pub const STYLE_STATUS_AWAY: Style = Style::new().fg(Color::Red).bold(true).reverse(true);
+
+/// Style for the E2E encryption indicator (green + bold on reverse background).
+pub const STYLE_STATUS_E2E: Style = Style::new().fg(Color::Green).bold(true).reverse(true);
+
+/// Style for the E2E establishing indicator (yellow + bold on reverse background).
+pub const STYLE_STATUS_E2E_ESTABLISHING: Style =
+    Style::new().fg(Color::Yellow).bold(true).reverse(true);
 
 /// Input data for rendering the status bar.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +42,8 @@ pub struct StatusBarInfo {
     pub away: bool,
     /// Scroll position info, e.g. "Scrolled: +42".
     pub scroll_info: Option<String>,
+    /// Encryption status for the active buffer (only meaningful for query buffers).
+    pub encryption_status: EncryptionStatus,
 }
 
 /// Render the status bar into the given buffer region.
@@ -141,6 +151,19 @@ fn build_left_text(info: &StatusBarInfo, max_width: usize) -> Vec<(String, Style
         }
     }
 
+    // Encryption status (only for query buffers)
+    if matches!(info.buffer_id, BufferId::Query(_)) {
+        match info.encryption_status {
+            EncryptionStatus::Active => {
+                segments.push((" [E2E]".to_string(), STYLE_STATUS_E2E));
+            }
+            EncryptionStatus::Establishing => {
+                segments.push((" [E2E: establishing]".to_string(), STYLE_STATUS_E2E_ESTABLISHING));
+            }
+            EncryptionStatus::None => {}
+        }
+    }
+
     segments
 }
 
@@ -191,6 +214,7 @@ mod tests {
             lag: None,
             away: false,
             scroll_info: None,
+            encryption_status: EncryptionStatus::None,
         }
     }
 
@@ -455,6 +479,7 @@ mod tests {
             lag: None,
             away: false,
             scroll_info: None,
+            encryption_status: EncryptionStatus::None,
         };
         let text = render_to_string(40, &info);
         assert!(text.contains("[me]"), "should show nick: {text}");
@@ -472,6 +497,7 @@ mod tests {
             lag: None,
             away: false,
             scroll_info: None,
+            encryption_status: EncryptionStatus::None,
         };
         let text = render_to_string(40, &info);
         assert!(text.contains("[alice]"), "should show nick: {text}");
@@ -504,5 +530,174 @@ mod tests {
                 cell.style
             );
         }
+    }
+
+    // --- Encryption status indicator ---
+
+    #[test]
+    fn test_e2e_active_shown_for_query() {
+        let info = StatusBarInfo {
+            nick: "alice".to_string(),
+            buffer_label: "bob".to_string(),
+            buffer_id: BufferId::Query("bob".to_string()),
+            topic: None,
+            user_count: None,
+            lag: None,
+            away: false,
+            scroll_info: None,
+            encryption_status: EncryptionStatus::Active,
+        };
+        let text = render_to_string(60, &info);
+        assert!(
+            text.contains("[E2E]"),
+            "should show E2E indicator for encrypted query: {text}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_establishing_shown_for_query() {
+        let info = StatusBarInfo {
+            nick: "alice".to_string(),
+            buffer_label: "bob".to_string(),
+            buffer_id: BufferId::Query("bob".to_string()),
+            topic: None,
+            user_count: None,
+            lag: None,
+            away: false,
+            scroll_info: None,
+            encryption_status: EncryptionStatus::Establishing,
+        };
+        let text = render_to_string(60, &info);
+        assert!(
+            text.contains("[E2E: establishing]"),
+            "should show establishing indicator: {text}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_none_hidden_for_query() {
+        let info = StatusBarInfo {
+            nick: "alice".to_string(),
+            buffer_label: "bob".to_string(),
+            buffer_id: BufferId::Query("bob".to_string()),
+            topic: None,
+            user_count: None,
+            lag: None,
+            away: false,
+            scroll_info: None,
+            encryption_status: EncryptionStatus::None,
+        };
+        let text = render_to_string(60, &info);
+        assert!(
+            !text.contains("E2E"),
+            "should not show E2E when status is None: {text}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_not_shown_for_channel() {
+        let info = StatusBarInfo {
+            nick: "alice".to_string(),
+            buffer_label: "#general".to_string(),
+            buffer_id: BufferId::Channel("#general".to_string()),
+            topic: None,
+            user_count: None,
+            lag: None,
+            away: false,
+            scroll_info: None,
+            encryption_status: EncryptionStatus::Active,
+        };
+        let text = render_to_string(60, &info);
+        assert!(
+            !text.contains("E2E"),
+            "should not show E2E for channel buffers: {text}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_not_shown_for_status() {
+        let info = StatusBarInfo {
+            nick: "alice".to_string(),
+            buffer_label: "Status".to_string(),
+            buffer_id: BufferId::Status,
+            topic: None,
+            user_count: None,
+            lag: None,
+            away: false,
+            scroll_info: None,
+            encryption_status: EncryptionStatus::Active,
+        };
+        let text = render_to_string(60, &info);
+        assert!(
+            !text.contains("E2E"),
+            "should not show E2E for status buffer: {text}"
+        );
+    }
+
+    #[test]
+    fn test_e2e_style_is_green_bold() {
+        let info = StatusBarInfo {
+            nick: "alice".to_string(),
+            buffer_label: "bob".to_string(),
+            buffer_id: BufferId::Query("bob".to_string()),
+            topic: None,
+            user_count: None,
+            lag: None,
+            away: false,
+            scroll_info: None,
+            encryption_status: EncryptionStatus::Active,
+        };
+        let mut buf = Buffer::new(60, 1);
+        let region = Rect::new(0, 0, 60, 1);
+        render_status_bar(&mut buf, &region, &info);
+        // Find 'E' in "[E2E]"
+        for col in 0..60 {
+            if buf.get(col, 0).ch == 'E'
+                && col + 2 < 60
+                && buf.get(col + 1, 0).ch == '2'
+                && buf.get(col + 2, 0).ch == 'E'
+            {
+                let cell = buf.get(col, 0);
+                assert!(cell.style.bold, "E2E should be bold");
+                assert_eq!(cell.style.fg, Some(Color::Green), "E2E should be green");
+                return;
+            }
+        }
+        panic!("Could not find E2E indicator in rendered output");
+    }
+
+    #[test]
+    fn test_e2e_establishing_style_is_yellow_bold() {
+        let info = StatusBarInfo {
+            nick: "alice".to_string(),
+            buffer_label: "bob".to_string(),
+            buffer_id: BufferId::Query("bob".to_string()),
+            topic: None,
+            user_count: None,
+            lag: None,
+            away: false,
+            scroll_info: None,
+            encryption_status: EncryptionStatus::Establishing,
+        };
+        let mut buf = Buffer::new(60, 1);
+        let region = Rect::new(0, 0, 60, 1);
+        render_status_bar(&mut buf, &region, &info);
+        // Find "establishing" text
+        for col in 0..50 {
+            if buf.get(col, 0).ch == 'e'
+                && col + 1 < 60
+                && buf.get(col + 1, 0).ch == 's'
+            {
+                let cell = buf.get(col, 0);
+                assert!(cell.style.bold, "establishing should be bold");
+                assert_eq!(
+                    cell.style.fg,
+                    Some(Color::Yellow),
+                    "establishing should be yellow"
+                );
+                return;
+            }
+        }
+        panic!("Could not find establishing indicator in rendered output");
     }
 }

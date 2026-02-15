@@ -896,12 +896,37 @@ impl App {
 
     /// Render the current view state to the terminal.
     fn render<W: io::Write>(&mut self, renderer: &mut Renderer<W>) -> io::Result<()> {
+        // Sync encryption states for all open query buffers
+        self.sync_encryption_states();
+
         self.view.render(renderer.back_buffer());
 
         // Render input line at the bottom
         self.render_input_line(renderer.back_buffer());
 
         renderer.flush()
+    }
+
+    /// Update the view coordinator with current encryption states for all query buffers.
+    fn sync_encryption_states(&mut self) {
+        let query_nicks: Vec<String> = self
+            .view
+            .buffers()
+            .buffer_list()
+            .into_iter()
+            .filter_map(|(id, _, _, _)| {
+                if let BufferId::Query(nick) = id {
+                    Some(nick)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for nick in query_nicks {
+            let status = self.encryption.encryption_status(&nick);
+            self.view.set_encryption_status(nick, status);
+        }
     }
 
     /// Render the input line into the screen buffer.

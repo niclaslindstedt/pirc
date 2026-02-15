@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use crate::client_command::{ClientCommand, CommandError};
+use crate::encryption::EncryptionStatus;
 use crate::tui::buffer::Buffer;
 use crate::tui::buffer_manager::{BufferId, BufferManager};
 use crate::tui::chat_renderer::render_chat_area;
@@ -41,6 +44,7 @@ pub struct ViewCoordinator {
     height: u16,
     nick: String,
     lag: Option<u32>,
+    encryption_states: HashMap<String, EncryptionStatus>,
 }
 
 impl ViewCoordinator {
@@ -56,6 +60,7 @@ impl ViewCoordinator {
             height,
             nick: "pirc_user".to_string(),
             lag: None,
+            encryption_states: HashMap::new(),
         }
     }
 
@@ -74,6 +79,15 @@ impl ViewCoordinator {
     /// Set the current server lag for status bar display.
     pub fn set_lag(&mut self, lag: Option<u32>) {
         self.lag = lag;
+    }
+
+    /// Update the encryption status for a peer (query buffer nick).
+    pub fn set_encryption_status(&mut self, peer: String, status: EncryptionStatus) {
+        if status == EncryptionStatus::None {
+            self.encryption_states.remove(&peer);
+        } else {
+            self.encryption_states.insert(peer, status);
+        }
     }
 
     /// Return a reference to the buffer manager.
@@ -215,11 +229,22 @@ impl ViewCoordinator {
             .buffers
             .buffer_list()
             .into_iter()
-            .map(|(id, label, unread, activity)| TabInfo {
-                label: label.to_string(),
-                is_active: id == active_id,
-                unread_count: unread,
-                has_activity: activity,
+            .map(|(id, label, unread, activity)| {
+                let encryption_status = match &id {
+                    BufferId::Query(nick) => self
+                        .encryption_states
+                        .get(nick)
+                        .copied()
+                        .unwrap_or(EncryptionStatus::None),
+                    _ => EncryptionStatus::None,
+                };
+                TabInfo {
+                    label: label.to_string(),
+                    is_active: id == active_id,
+                    unread_count: unread,
+                    has_activity: activity,
+                    encryption_status,
+                }
             })
             .collect();
         render_tab_bar(buf, &layout.channel_tabs, &tabs);
@@ -234,6 +259,14 @@ impl ViewCoordinator {
         );
 
         // Status bar
+        let encryption_status = match &active_id {
+            BufferId::Query(nick) => self
+                .encryption_states
+                .get(nick)
+                .copied()
+                .unwrap_or(EncryptionStatus::None),
+            _ => EncryptionStatus::None,
+        };
         let info = StatusBarInfo {
             nick: self.nick.clone(),
             buffer_label: active_id.to_string(),
@@ -243,6 +276,7 @@ impl ViewCoordinator {
             lag: self.lag,
             away: false,
             scroll_info: None,
+            encryption_status,
         };
         render_status_bar(buf, &layout.status_bar, &info);
 
