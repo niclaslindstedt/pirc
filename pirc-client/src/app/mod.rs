@@ -2,10 +2,9 @@ use std::io::{self, Write};
 use std::net::ToSocketAddrs;
 use std::time::Duration;
 
-use pirc_crypto::protocol::{encode_for_wire, KeyExchangeMessage};
 use pirc_network::connection::AsyncTransport;
 use pirc_network::{Connection, Connector, ShutdownController, ShutdownSignal};
-use pirc_protocol::{Command, Message, PircSubcommand};
+use pirc_protocol::{Command, Message};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::{info, warn};
@@ -402,6 +401,20 @@ impl App {
             return;
         }
 
+        // Handle /msg with E2E encryption
+        if let ClientCommand::Msg(ref target, ref message) = cmd {
+            if !target.starts_with('#') && !target.starts_with('&') {
+                self.handle_private_msg_command(target, message).await;
+                return;
+            }
+        }
+
+        // Handle /query with message — route through encryption
+        if let ClientCommand::Query(ref nick, Some(ref message)) = cmd {
+            self.handle_private_msg_command(nick, message).await;
+            return;
+        }
+
         // Determine context (current channel name) for to_message
         let context = self.current_channel_context();
         if let Some(msg) = cmd.to_message(context.as_deref()) {
@@ -489,12 +502,23 @@ impl App {
     ) {
         use crate::tui::buffer_manager::BufferId;
 
-        let channel = match target {
+        match target {
             BufferId::Status => {
                 self.push_status("Cannot send messages to the status buffer");
                 return;
             }
-            BufferId::Channel(name) | BufferId::Query(name) => name.clone(),
+            BufferId::Query(name) => {
+                // Query messages go through encryption
+                let name = name.clone();
+                self.handle_private_msg_command(&name, text).await;
+                return;
+            }
+            BufferId::Channel(_) => {}
+        }
+
+        let channel = match target {
+            BufferId::Channel(name) => name.clone(),
+            _ => return,
         };
 
         let msg = Message::new(
@@ -617,6 +641,11 @@ impl App {
                     // Fall through to message routing below
                 }
             }
+        }
+
+        // Handle PIRC encryption-related commands before general routing.
+        if self.handle_pirc_message(msg).await {
+            return;
         }
 
         // Route the message to the appropriate buffer(s).
@@ -855,30 +884,6 @@ impl App {
         self.push_status(&format!("Rejoining {} channel(s)...", channels.len()));
     }
 
-    /// Generate and upload our pre-key bundle to the server.
-    ///
-    /// Sends `PIRC KEYEXCHANGE * <base64-bundle>` where `*` as target
-    /// signals "store my bundle" to the server.
-    async fn upload_pre_key_bundle(&mut self) {
-        let bundle = self.encryption.create_pre_key_bundle();
-        let bundle_msg = KeyExchangeMessage::Bundle(Box::new(bundle));
-        let encoded = encode_for_wire(&bundle_msg.to_bytes());
-
-        let msg = Message::new(
-            Command::Pirc(PircSubcommand::KeyExchange),
-            vec!["*".to_string(), encoded],
-        );
-
-        if let Some(ref mut conn) = self.connection {
-            if let Err(e) = conn.send(msg).await {
-                warn!("Failed to upload pre-key bundle: {e}");
-                self.push_status(&format!("Failed to upload encryption keys: {e}"));
-                return;
-            }
-            info!("Pre-key bundle uploaded");
-        }
-    }
-
     /// Push a status message to the status buffer.
     fn push_status(&mut self, text: &str) {
         self.view.push_status_message(BufferLine {
@@ -963,6 +968,8 @@ fn current_timestamp(format: &str) -> String {
     // Fallback: just use epoch seconds
     secs.to_string()
 }
+
+mod encryption;
 
 #[cfg(test)]
 mod tests;

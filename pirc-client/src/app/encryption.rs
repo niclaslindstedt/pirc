@@ -1,0 +1,388 @@
+//! Key exchange protocol handling for the App.
+//!
+//! Contains methods on [`App`] that handle incoming PIRC KEYEXCHANGE,
+//! KEYEXCHANGE-ACK, KEYEXCHANGE-COMPLETE, and ENCRYPTED messages,
+//! as well as outgoing key exchange initiation for private messages.
+
+use pirc_crypto::message::EncryptedMessage;
+use pirc_crypto::protocol::{decode_from_wire, encode_for_wire, KeyExchangeMessage};
+use pirc_network::connection::AsyncTransport;
+use pirc_protocol::{Command, Message, Prefix, PircSubcommand};
+use tracing::{info, warn};
+
+use super::{current_timestamp, App};
+use crate::tui::buffer_manager::BufferId;
+use crate::tui::message_buffer::{BufferLine, LineType};
+
+impl App {
+    /// Generate and upload our pre-key bundle to the server.
+    ///
+    /// Sends `PIRC KEYEXCHANGE * <base64-bundle>` where `*` as target
+    /// signals "store my bundle" to the server.
+    pub(super) async fn upload_pre_key_bundle(&mut self) {
+        let bundle = self.encryption.create_pre_key_bundle();
+        let bundle_msg = KeyExchangeMessage::Bundle(Box::new(bundle));
+        let encoded = encode_for_wire(&bundle_msg.to_bytes());
+
+        let msg = Message::new(
+            Command::Pirc(PircSubcommand::KeyExchange),
+            vec!["*".to_string(), encoded],
+        );
+
+        if let Some(ref mut conn) = self.connection {
+            if let Err(e) = conn.send(msg).await {
+                warn!("Failed to upload pre-key bundle: {e}");
+                self.push_status(&format!("Failed to upload encryption keys: {e}"));
+                return;
+            }
+            info!("Pre-key bundle uploaded");
+        }
+    }
+
+    /// Handle PIRC subcommand messages related to encryption.
+    ///
+    /// Returns `true` if the message was handled, `false` if it should be
+    /// passed to the general message router.
+    pub(super) async fn handle_pirc_message(&mut self, msg: &Message) -> bool {
+        let sender = match &msg.prefix {
+            Some(Prefix::User { nick, .. }) => nick.as_ref().to_string(),
+            _ => return false,
+        };
+
+        match &msg.command {
+            Command::Pirc(PircSubcommand::KeyExchange) => {
+                if let Some(data) = msg.params.get(1) {
+                    self.handle_key_exchange_message(&sender, data).await;
+                }
+                true
+            }
+            Command::Pirc(PircSubcommand::KeyExchangeComplete) => {
+                self.handle_key_exchange_complete(&sender);
+                true
+            }
+            Command::Pirc(PircSubcommand::Encrypted) => {
+                if let Some(data) = msg.params.get(1) {
+                    self.handle_encrypted_message(&sender, data);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Handle an incoming `PIRC KEYEXCHANGE <sender> <data>` message.
+    ///
+    /// Decodes the wire data, determines the key exchange message variant,
+    /// and dispatches to the appropriate handler.
+    pub(super) async fn handle_key_exchange_message(&mut self, sender: &str, data: &str) {
+        let bytes = match decode_from_wire(data) {
+            Ok(b) => b,
+            Err(e) => {
+                warn!("Failed to decode key exchange data from {sender}: {e}");
+                return;
+            }
+        };
+
+        let ke_msg = match KeyExchangeMessage::from_bytes(&bytes) {
+            Ok(m) => m,
+            Err(e) => {
+                warn!("Failed to parse key exchange message from {sender}: {e}");
+                return;
+            }
+        };
+
+        match ke_msg {
+            KeyExchangeMessage::RequestBundle => {
+                self.handle_request_bundle(sender).await;
+            }
+            KeyExchangeMessage::Bundle(bundle) => {
+                self.handle_bundle_response(sender, &bundle).await;
+            }
+            KeyExchangeMessage::InitMessage(init) => {
+                self.handle_init_message(sender, &init).await;
+            }
+            KeyExchangeMessage::Complete => {
+                self.handle_key_exchange_complete(sender);
+            }
+        }
+    }
+
+    /// Handle a `RequestBundle` — someone wants our pre-key bundle.
+    ///
+    /// Generates our bundle and sends it back to the requester.
+    async fn handle_request_bundle(&mut self, requester: &str) {
+        let bundle = self.encryption.create_pre_key_bundle();
+        let bundle_msg = KeyExchangeMessage::Bundle(Box::new(bundle));
+        let encoded = encode_for_wire(&bundle_msg.to_bytes());
+
+        let msg = Message::new(
+            Command::Pirc(PircSubcommand::KeyExchange),
+            vec![requester.to_string(), encoded],
+        );
+
+        if let Some(ref mut conn) = self.connection {
+            if let Err(e) = conn.send(msg).await {
+                warn!("Failed to send bundle to {requester}: {e}");
+            }
+        }
+    }
+
+    /// Handle a `Bundle` response — we requested a peer's bundle and got it.
+    ///
+    /// Performs X3DH, creates a session, sends the init message, and
+    /// encrypts+sends any queued messages.
+    async fn handle_bundle_response(
+        &mut self,
+        peer: &str,
+        bundle: &pirc_crypto::prekey::PreKeyBundle,
+    ) {
+        let (init_msg, encrypted_queued) = match self.encryption.handle_bundle_response(peer, bundle)
+        {
+            Ok(result) => result,
+            Err(e) => {
+                warn!("X3DH failed with {peer}: {e}");
+                self.push_status(&format!("Key exchange with {peer} failed: {e}"));
+                return;
+            }
+        };
+
+        // Send the X3DH init message to the peer
+        let init_ke = KeyExchangeMessage::InitMessage(Box::new(init_msg));
+        let encoded = encode_for_wire(&init_ke.to_bytes());
+
+        let msg = Message::new(
+            Command::Pirc(PircSubcommand::KeyExchange),
+            vec![peer.to_string(), encoded],
+        );
+
+        if let Some(ref mut conn) = self.connection {
+            if let Err(e) = conn.send(msg).await {
+                warn!("Failed to send init message to {peer}: {e}");
+                self.push_status(&format!("Failed to send key exchange to {peer}: {e}"));
+                return;
+            }
+        }
+
+        // Send any queued encrypted messages
+        for encrypted in &encrypted_queued {
+            self.send_encrypted_message(peer, encrypted).await;
+        }
+    }
+
+    /// Handle an `InitMessage` — a peer completed X3DH and sent us the init data.
+    ///
+    /// Creates our session and sends `PIRC KEYEXCHANGE-COMPLETE` back.
+    async fn handle_init_message(
+        &mut self,
+        peer: &str,
+        init: &pirc_crypto::x3dh::X3DHInitMessage,
+    ) {
+        match self.encryption.handle_init_message(peer, init) {
+            Ok(KeyExchangeMessage::Complete) => {
+                // Send KEYEXCHANGE-COMPLETE to peer
+                let msg = Message::new(
+                    Command::Pirc(PircSubcommand::KeyExchangeComplete),
+                    vec![peer.to_string()],
+                );
+
+                if let Some(ref mut conn) = self.connection {
+                    if let Err(e) = conn.send(msg).await {
+                        warn!("Failed to send KEYEXCHANGE-COMPLETE to {peer}: {e}");
+                    }
+                }
+
+                self.push_status(&format!("Encrypted session established with {peer}"));
+            }
+            Ok(_) => {
+                warn!("Unexpected key exchange response from handle_init_message for {peer}");
+            }
+            Err(e) => {
+                warn!("Failed to handle init message from {peer}: {e}");
+                self.push_status(&format!("Key exchange with {peer} failed: {e}"));
+            }
+        }
+    }
+
+    /// Handle a `PIRC KEYEXCHANGE-COMPLETE` — the peer acknowledges session establishment.
+    ///
+    /// Promotes our pending session to active.
+    pub(super) fn handle_key_exchange_complete(&mut self, peer: &str) {
+        self.encryption.handle_complete(peer);
+        self.push_status(&format!("Encrypted session established with {peer}"));
+    }
+
+    /// Initiate a key exchange with a peer and optionally queue a message.
+    ///
+    /// Called when sending a private message to a peer with no active session.
+    /// Sends `PIRC KEYEXCHANGE <peer> <request-bundle>` to the server.
+    pub(super) async fn initiate_key_exchange(
+        &mut self,
+        peer: &str,
+        queued_message: Option<&str>,
+    ) {
+        // Don't re-initiate if already pending
+        if self.encryption.has_pending_exchange(peer) {
+            if let Some(text) = queued_message {
+                self.encryption.queue_message(peer, text.as_bytes().to_vec());
+            }
+            return;
+        }
+
+        let ke_msg = self.encryption.initiate_key_exchange(peer);
+        let encoded = encode_for_wire(&ke_msg.to_bytes());
+
+        let msg = Message::new(
+            Command::Pirc(PircSubcommand::KeyExchange),
+            vec![peer.to_string(), encoded],
+        );
+
+        if let Some(ref mut conn) = self.connection {
+            if let Err(e) = conn.send(msg).await {
+                warn!("Failed to send key exchange request to {peer}: {e}");
+                self.push_status(&format!("Failed to initiate encryption with {peer}: {e}"));
+                return;
+            }
+        }
+
+        // Queue the message if provided
+        if let Some(text) = queued_message {
+            self.encryption.queue_message(peer, text.as_bytes().to_vec());
+        }
+
+        self.push_status(&format!("Establishing encrypted session with {peer}..."));
+    }
+
+    /// Send a `PIRC ENCRYPTED <peer> <base64-data>` message.
+    async fn send_encrypted_message(&mut self, peer: &str, encrypted: &EncryptedMessage) {
+        let encoded = encode_for_wire(&encrypted.to_bytes());
+
+        let msg = Message::new(
+            Command::Pirc(PircSubcommand::Encrypted),
+            vec![peer.to_string(), encoded],
+        );
+
+        if let Some(ref mut conn) = self.connection {
+            if let Err(e) = conn.send(msg).await {
+                warn!("Failed to send encrypted message to {peer}: {e}");
+            }
+        }
+    }
+
+    /// Handle an incoming `PIRC ENCRYPTED <sender> <data>` message.
+    ///
+    /// Decrypts the message and displays it in the query buffer.
+    pub(super) fn handle_encrypted_message(&mut self, sender: &str, data: &str) {
+        let bytes = match decode_from_wire(data) {
+            Ok(b) => b,
+            Err(e) => {
+                warn!("Failed to decode encrypted message from {sender}: {e}");
+                return;
+            }
+        };
+
+        let encrypted = match EncryptedMessage::from_bytes(&bytes) {
+            Ok(m) => m,
+            Err(e) => {
+                warn!("Failed to parse encrypted message from {sender}: {e}");
+                return;
+            }
+        };
+
+        let plaintext = match self.encryption.decrypt(sender, &encrypted) {
+            Ok(pt) => pt,
+            Err(e) => {
+                warn!("Failed to decrypt message from {sender}: {e}");
+                self.push_status(&format!("Failed to decrypt message from {sender}"));
+                return;
+            }
+        };
+
+        let content = String::from_utf8_lossy(&plaintext).to_string();
+        let ts = current_timestamp(&self.config.ui.timestamp_format);
+
+        self.view.push_message(
+            &BufferId::Query(sender.to_string()),
+            BufferLine {
+                timestamp: ts,
+                sender: Some(sender.to_string()),
+                content,
+                line_type: LineType::Message,
+            },
+        );
+    }
+
+    /// Handle a `/msg <nick> <text>` or `/query <nick> <text>` to a user.
+    ///
+    /// Routes through encryption: if a session exists, encrypts; if not,
+    /// initiates key exchange and queues the message.
+    pub(super) async fn handle_private_msg_command(&mut self, target: &str, message: &str) {
+        if self.connection.is_none() {
+            self.push_status("Not connected");
+            return;
+        }
+
+        // Try to send encrypted; this handles session, pending, and initiation
+        let handled = self.send_private_message(target, message).await;
+
+        // Echo the message locally in the query buffer
+        let nick = self.connection_mgr.nick().to_string();
+        let ts = current_timestamp(&self.config.ui.timestamp_format);
+        self.view.push_message(
+            &BufferId::Query(target.to_string()),
+            BufferLine {
+                timestamp: ts,
+                sender: Some(nick),
+                content: message.to_string(),
+                line_type: LineType::Message,
+            },
+        );
+
+        if !handled {
+            // Encryption not available — fall back to plaintext PRIVMSG
+            let msg = Message::new(
+                Command::Privmsg,
+                vec![target.to_string(), message.to_string()],
+            );
+            if let Some(ref mut conn) = self.connection {
+                if let Err(e) = conn.send(msg).await {
+                    self.push_status(&format!("Send error: {e}"));
+                }
+            }
+        }
+    }
+
+    /// Send a private message to a peer, encrypting if a session exists.
+    ///
+    /// If no session exists, initiates a key exchange and queues the message.
+    /// Returns `true` if the message was handled (encrypted or queued),
+    /// `false` if encryption is not available and the caller should send plaintext.
+    pub(super) async fn send_private_message(&mut self, peer: &str, text: &str) -> bool {
+        // If we have an active session, encrypt and send
+        if self.encryption.has_session(peer) {
+            match self.encryption.encrypt(peer, text.as_bytes()) {
+                Ok(encrypted) => {
+                    self.send_encrypted_message(peer, &encrypted).await;
+                    return true;
+                }
+                Err(e) => {
+                    warn!("Encryption failed for {peer}: {e}");
+                    self.push_status(&format!("Encryption failed for {peer}: {e}"));
+                    return false;
+                }
+            }
+        }
+
+        // If exchange is pending, queue the message
+        if self.encryption.has_pending_exchange(peer) {
+            self.encryption.queue_message(peer, text.as_bytes().to_vec());
+            self.push_status(&format!(
+                "Message to {peer} queued (key exchange in progress)"
+            ));
+            return true;
+        }
+
+        // No session and no pending exchange — initiate key exchange
+        self.initiate_key_exchange(peer, Some(text)).await;
+        true
+    }
+}
