@@ -19,7 +19,7 @@ fn chan(s: &str) -> ChannelName {
 
 /// Helper: apply a command directly to the registries.
 fn apply(cmd: &ClusterCommand, registry: &UserRegistry, channels: &ChannelRegistry) {
-    apply_command(cmd, registry, channels);
+    apply_command(cmd, registry, channels, None);
 }
 
 // ---- UserRegistered ----
@@ -37,6 +37,7 @@ fn user_registered_creates_session() {
             realname: "Alice W".into(),
             hostname: "host.example.com".into(),
             signon_time: 1_700_000_000,
+            home_node: None,
         },
         &registry,
         &channels,
@@ -64,6 +65,7 @@ fn user_registered_idempotent_skips_duplicate() {
         realname: "Alice W".into(),
         hostname: "host".into(),
         signon_time: 100,
+        home_node: None,
     };
 
     apply(&cmd, &registry, &channels);
@@ -88,6 +90,7 @@ fn nick_changed_updates_registry() {
             realname: "Alice".into(),
             hostname: "host".into(),
             signon_time: 100,
+            home_node: None,
         },
         &registry,
         &channels,
@@ -119,6 +122,7 @@ fn nick_changed_idempotent_when_already_changed() {
             realname: "Alice".into(),
             hostname: "host".into(),
             signon_time: 100,
+            home_node: None,
         },
         &registry,
         &channels,
@@ -153,6 +157,7 @@ fn user_quit_removes_from_registry_and_channels() {
             realname: "Alice".into(),
             hostname: "host".into(),
             signon_time: 100,
+            home_node: None,
         },
         &registry,
         &channels,
@@ -216,6 +221,7 @@ fn user_away_sets_and_clears_message() {
             realname: "Alice".into(),
             hostname: "host".into(),
             signon_time: 100,
+            home_node: None,
         },
         &registry,
         &channels,
@@ -579,6 +585,7 @@ fn oper_granted_adds_operator_mode() {
             realname: "Admin".into(),
             hostname: "host".into(),
             signon_time: 100,
+            home_node: None,
         },
         &registry,
         &channels,
@@ -649,7 +656,7 @@ async fn commit_consumer_processes_entries_from_channel() {
     let registry = Arc::new(UserRegistry::new());
     let channels = Arc::new(ChannelRegistry::new());
 
-    let handle = spawn_commit_consumer(rx, Arc::clone(&registry), Arc::clone(&channels));
+    let handle = spawn_commit_consumer(rx, Arc::clone(&registry), Arc::clone(&channels), None, None);
 
     // Send a UserRegistered entry.
     tx.send(LogEntry {
@@ -662,6 +669,7 @@ async fn commit_consumer_processes_entries_from_channel() {
             realname: "Test".into(),
             hostname: "host".into(),
             signon_time: 100,
+            home_node: None,
         },
     })
     .unwrap();

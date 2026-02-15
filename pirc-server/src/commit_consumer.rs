@@ -4,11 +4,12 @@ use std::sync::Arc;
 use pirc_common::{ChannelMode, ChannelName, Nickname};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::channel::{BanEntry, MemberStatus};
 use crate::channel_registry::ChannelRegistry;
-use crate::raft::types::LogEntry;
+use crate::migration::{self, SharedUserNodeIndex};
+use crate::raft::types::{LogEntry, NodeId};
 use crate::raft::ClusterCommand;
 use crate::registry::UserRegistry;
 use crate::user::UserSession;
@@ -16,11 +17,16 @@ use crate::user::UserSession;
 /// Spawn the commit consumer task that reads committed Raft log entries
 /// and applies them to the local `UserRegistry` and `ChannelRegistry`.
 ///
+/// Also updates the `UserNodeIndex` for migration tracking and handles
+/// `UserMigrated` commands by removing stale dummy sessions.
+///
 /// Returns a `JoinHandle` so the caller can track the task lifetime.
 pub fn spawn_commit_consumer(
     mut commit_rx: mpsc::UnboundedReceiver<LogEntry<ClusterCommand>>,
     registry: Arc<UserRegistry>,
     channels: Arc<ChannelRegistry>,
+    user_node_index: Option<SharedUserNodeIndex>,
+    self_id: Option<NodeId>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         while let Some(entry) = commit_rx.recv().await {
@@ -29,7 +35,13 @@ pub fn spawn_commit_consumer(
                 term = entry.term.as_u64(),
                 "applying committed entry to local state"
             );
-            apply_command(&entry.command, &registry, &channels);
+            apply_command(&entry.command, &registry, &channels, self_id);
+
+            // Update the user-node index for migration tracking.
+            if let Some(ref index) = user_node_index {
+                let mut idx = index.write().await;
+                migration::update_user_node_index(&mut idx, &entry.command);
+            }
         }
         debug!("commit consumer shutting down: channel closed");
     })
@@ -43,6 +55,7 @@ fn apply_command(
     command: &ClusterCommand,
     registry: &UserRegistry,
     channels: &ChannelRegistry,
+    self_id: Option<NodeId>,
 ) {
     match command {
         ClusterCommand::UserRegistered {
@@ -52,6 +65,7 @@ fn apply_command(
             realname,
             hostname,
             signon_time,
+            ..
         } => {
             apply_user_registered(
                 registry,
@@ -143,10 +157,15 @@ fn apply_command(
             apply_oper_granted(registry, nickname);
         }
 
-        // Server topology and user migration are handled by other subsystems.
+        ClusterCommand::UserMigrated {
+            nickname, to_node, ..
+        } => {
+            apply_user_migrated(registry, channels, nickname, *to_node, self_id);
+        }
+
+        // Server topology is handled by other subsystems.
         ClusterCommand::ServerAdded { .. }
         | ClusterCommand::ServerRemoved { .. }
-        | ClusterCommand::UserMigrated { .. }
         | ClusterCommand::Noop { .. } => {}
     }
 }
@@ -426,6 +445,46 @@ fn apply_invite_added(channels: &ChannelRegistry, channel: &str, nickname: &str)
     if let Some(ch_arc) = channels.get(&chan_name) {
         let mut ch = ch_arc.write().expect("channel lock poisoned");
         ch.invite_list.insert(nick);
+    }
+}
+
+/// Handle a `UserMigrated` command.
+///
+/// Removes the existing dummy session for the migrated user so that if the
+/// user reconnects to this node, they can re-register with the same nickname.
+/// The replicated state (channel memberships, modes, away status) is preserved
+/// in the Raft state machine and will be restored on reconnection.
+fn apply_user_migrated(
+    registry: &UserRegistry,
+    _channels: &ChannelRegistry,
+    nickname: &str,
+    to_node: NodeId,
+    self_id: Option<NodeId>,
+) {
+    let Ok(nick) = Nickname::new(nickname) else {
+        return;
+    };
+
+    // Remove the existing dummy session from the registry so the nickname
+    // is free for the reconnecting client.
+    if let Some(session_arc) = registry.get_by_nick(&nick) {
+        let conn_id = session_arc.read().expect("session lock poisoned").connection_id;
+        registry.remove_by_connection(conn_id);
+
+        info!(
+            nickname,
+            to_node = to_node.as_u64(),
+            "removed session for migrated user"
+        );
+    }
+
+    // If this is the target node, the user will reconnect here.
+    // Log for visibility.
+    if self_id == Some(to_node) {
+        info!(
+            nickname,
+            "this node is migration target — awaiting reconnection"
+        );
     }
 }
 

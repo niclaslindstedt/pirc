@@ -155,6 +155,7 @@ impl ClusterStateMachine {
         realname: &str,
         hostname: &str,
         signon_time: u64,
+        home_node: Option<NodeId>,
     ) {
         let key = nickname.to_ascii_lowercase();
         self.users.insert(
@@ -167,7 +168,7 @@ impl ClusterStateMachine {
                 modes: HashSet::new(),
                 away_message: None,
                 signon_time,
-                home_node: None,
+                home_node,
                 is_oper: false,
             },
         );
@@ -228,8 +229,8 @@ impl StateMachine<ClusterCommand> for ClusterStateMachine {
     fn apply(&mut self, command: &ClusterCommand) {
         match command {
             ClusterCommand::UserRegistered {
-                nickname, username, realname, hostname, signon_time, ..
-            } => self.apply_user_registered(nickname, username, realname, hostname, *signon_time),
+                nickname, username, realname, hostname, signon_time, home_node, ..
+            } => self.apply_user_registered(nickname, username, realname, hostname, *signon_time, *home_node),
 
             ClusterCommand::NickChanged { old_nick, new_nick } => {
                 self.apply_nick_changed(old_nick, new_nick);

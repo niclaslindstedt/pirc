@@ -15,7 +15,8 @@ use pirc_server::handler_cluster::ClusterContext;
 use pirc_server::raft::rpc::RaftMessage;
 use pirc_server::raft::transport::{PeerConnections, PeerMap, PeerUpdater, SharedPeerMap};
 use pirc_server::raft::types::LogEntry;
-use pirc_server::raft::{ClusterCommand, ClusterStateMachine, FileStorage, NodeId, RaftBuilder, RaftHandle};
+use pirc_server::migration::{self, SharedUserNodeIndex, UserNodeIndex};
+use pirc_server::raft::{ClusterCommand, ClusterStateMachine, FileStorage, HealthEvent, NodeId, RaftBuilder, RaftHandle};
 use pirc_server::registry::UserRegistry;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
@@ -46,6 +47,10 @@ struct ClusterState {
     cluster_service: Arc<ClusterService>,
     cluster_context: Arc<ClusterContext>,
     commit_rx: mpsc::UnboundedReceiver<LogEntry<ClusterCommand>>,
+    health_event_rx: mpsc::UnboundedReceiver<HealthEvent>,
+    user_node_index: SharedUserNodeIndex,
+    self_id: NodeId,
+    peer_ids: Vec<NodeId>,
     _raft_shutdown: pirc_server::raft::ShutdownSender,
     _task_handles: Vec<tokio::task::JoinHandle<()>>,
 }
@@ -122,7 +127,7 @@ async fn main() {
     let cluster_ctx: Option<Arc<ClusterContext>> =
         cluster_state.as_ref().map(|s| Arc::clone(&s.cluster_context));
 
-    // Spawn the commit consumer that syncs Raft state to local registries.
+    // Spawn the commit consumer and migration service.
     let mut cluster_state = cluster_state;
     if let Some(ref mut state) = cluster_state {
         let commit_rx = std::mem::replace(
@@ -133,9 +138,26 @@ async fn main() {
             commit_rx,
             Arc::clone(&registry),
             Arc::clone(&channels),
+            Some(Arc::clone(&state.user_node_index)),
+            Some(state.self_id),
         );
         state._task_handles.push(consumer_handle);
         info!("commit consumer started");
+
+        // Spawn the migration service that handles user migration on node failure.
+        let health_event_rx = std::mem::replace(
+            &mut state.health_event_rx,
+            mpsc::unbounded_channel().1,
+        );
+        let migration_handle = migration::spawn_migration_service(
+            health_event_rx,
+            Arc::clone(&state.raft_handle),
+            Arc::clone(&state.user_node_index),
+            state.self_id,
+            state.peer_ids.clone(),
+        );
+        state._task_handles.push(migration_handle);
+        info!("migration service started");
     }
 
     // Keep cluster_state alive for the lifetime of the server.
@@ -339,8 +361,10 @@ async fn init_bootstrap(
             .await?;
 
     let commit_rx = handle.take_commit_rx();
+    let health_event_rx = handle.take_health_event_rx();
     let handle = Arc::new(handle);
     let mut handles = Vec::new();
+    let user_node_index: SharedUserNodeIndex = Arc::new(RwLock::new(UserNodeIndex::new()));
 
     // Empty peer map — single-node bootstrap has no peers initially.
     let peer_map = PeerMap::new(vec![]);
@@ -408,6 +432,10 @@ async fn init_bootstrap(
         cluster_service,
         cluster_context,
         commit_rx,
+        health_event_rx,
+        user_node_index,
+        self_id: node_id,
+        peer_ids: vec![],
         _raft_shutdown: shutdown_sender,
         _task_handles: handles,
     })
@@ -471,7 +499,7 @@ async fn init_join(
             config.cluster.heartbeat_interval_ms.unwrap_or(50),
         ),
         node_id: assigned_id,
-        peers: peer_ids,
+        peers: peer_ids.clone(),
         ..pirc_server::raft::RaftConfig::default()
     };
 
@@ -488,8 +516,10 @@ async fn init_join(
             .await?;
 
     let commit_rx = handle.take_commit_rx();
+    let health_event_rx = handle.take_health_event_rx();
     let handle = Arc::new(handle);
     let mut handles = Vec::new();
+    let user_node_index: SharedUserNodeIndex = Arc::new(RwLock::new(UserNodeIndex::new()));
 
     // Build persisted peers before peer_map_entries is consumed.
     let persisted_peers: Vec<PersistedPeer> = peer_map_entries
@@ -563,6 +593,10 @@ async fn init_join(
         cluster_service,
         cluster_context,
         commit_rx,
+        health_event_rx,
+        user_node_index,
+        self_id: assigned_id,
+        peer_ids: peer_ids.clone(),
         _raft_shutdown: shutdown_sender,
         _task_handles: handles,
     })
@@ -635,7 +669,7 @@ async fn init_rejoin(
             config.cluster.heartbeat_interval_ms.unwrap_or(50),
         ),
         node_id,
-        peers: peer_ids,
+        peers: peer_ids.clone(),
         ..pirc_server::raft::RaftConfig::default()
     };
 
@@ -650,8 +684,10 @@ async fn init_rejoin(
             .await?;
 
     let commit_rx = handle.take_commit_rx();
+    let health_event_rx = handle.take_health_event_rx();
     let handle = Arc::new(handle);
     let mut handles = Vec::new();
+    let user_node_index: SharedUserNodeIndex = Arc::new(RwLock::new(UserNodeIndex::new()));
 
     let peer_map = PeerMap::new(peer_map_entries);
     let shared_peer_map: SharedPeerMap = Arc::new(RwLock::new(peer_map.clone()));
@@ -710,6 +746,10 @@ async fn init_rejoin(
         cluster_service,
         cluster_context,
         commit_rx,
+        health_event_rx,
+        user_node_index,
+        self_id: node_id,
+        peer_ids: peer_ids.clone(),
         _raft_shutdown: shutdown_sender,
         _task_handles: handles,
     })

@@ -15,6 +15,7 @@ fn register_alice(sm: &mut ClusterStateMachine) {
         realname: "Alice Wonderland".into(),
         hostname: "example.com".into(),
         signon_time: 1_700_000_000,
+        home_node: None,
     });
 }
 
@@ -26,6 +27,7 @@ fn register_bob(sm: &mut ClusterStateMachine) {
         realname: "Bob Builder".into(),
         hostname: "bob.example.com".into(),
         signon_time: 1_700_000_001,
+        home_node: None,
     });
 }
 

@@ -20,6 +20,9 @@ pub enum ClusterCommand {
         hostname: String,
         /// Unix timestamp (seconds since epoch).
         signon_time: u64,
+        /// The node where this user is homed. Used for migration tracking.
+        #[serde(default)]
+        home_node: Option<NodeId>,
     },
 
     /// A user changed their nickname.
@@ -174,6 +177,17 @@ mod tests {
             realname: "Alice Wonderland".into(),
             hostname: "example.com".into(),
             signon_time: 1_700_000_000,
+            home_node: Some(NodeId::new(1)),
+        });
+        // Also test with None home_node for backward compatibility.
+        roundtrip(&ClusterCommand::UserRegistered {
+            connection_id: 43,
+            nickname: "bob".into(),
+            username: "bob".into(),
+            realname: "Bob".into(),
+            hostname: "example.com".into(),
+            signon_time: 1_700_000_000,
+            home_node: None,
         });
     }
 
