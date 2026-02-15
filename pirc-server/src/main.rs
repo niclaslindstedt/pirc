@@ -11,6 +11,7 @@ use pirc_server::channel_registry::ChannelRegistry;
 use pirc_server::cluster::{ClusterService, InviteKeyStore, PersistedClusterState, PersistedPeer};
 use pirc_server::config::{ClusterStartupMode, ServerConfig};
 use pirc_server::handler::{self, HandleResult, PreRegistrationState};
+use pirc_server::handler_cluster::ClusterContext;
 use pirc_server::raft::rpc::RaftMessage;
 use pirc_server::raft::transport::{PeerConnections, PeerMap, PeerUpdater, SharedPeerMap};
 use pirc_server::raft::{FileStorage, NodeId, NullStateMachine, RaftBuilder, RaftHandle};
@@ -36,12 +37,13 @@ fn parse_config_path() -> Option<PathBuf> {
 
 /// Aggregated cluster state returned by [`init_raft_cluster`].
 ///
-/// All fields are held alive for the lifetime of the server. Some are accessed
-/// later by command handlers (T139) or during shutdown.
+/// All fields are held alive for the lifetime of the server. The
+/// `cluster_context` is shared with connection handlers for operator commands.
 #[allow(dead_code)]
 struct ClusterState {
     raft_handle: Arc<RaftHandle<String>>,
     cluster_service: Arc<ClusterService>,
+    cluster_context: Arc<ClusterContext>,
     _raft_shutdown: pirc_server::raft::ShutdownSender,
     _task_handles: Vec<tokio::task::JoinHandle<()>>,
 }
@@ -103,7 +105,7 @@ async fn main() {
     let channels = Arc::new(ChannelRegistry::new());
 
     // Raft cluster initialization
-    let _cluster_state: Option<ClusterState> = if config.cluster.enabled {
+    let cluster_state: Option<ClusterState> = if config.cluster.enabled {
         match init_raft_cluster(&config, &shutdown_signal).await {
             Ok(state) => Some(state),
             Err(e) => {
@@ -114,6 +116,11 @@ async fn main() {
     } else {
         None
     };
+
+    let cluster_ctx: Option<Arc<ClusterContext>> =
+        cluster_state.as_ref().map(|s| Arc::clone(&s.cluster_context));
+    // Keep cluster_state alive for the lifetime of the server.
+    let _cluster_state = cluster_state;
 
     let config = Arc::new(config);
 
@@ -126,6 +133,7 @@ async fn main() {
                 let conn_channels = Arc::clone(&channels);
                 let conn_config = Arc::clone(&config);
                 let conn_shutdown_controller = Arc::clone(&shutdown_controller);
+                let conn_cluster_ctx = cluster_ctx.clone();
                 tokio::spawn(async move {
                     handle_connection(
                         connection,
@@ -135,6 +143,7 @@ async fn main() {
                         conn_channels,
                         conn_config,
                         conn_shutdown_controller,
+                        conn_cluster_ctx,
                     )
                     .await;
                 });
@@ -164,6 +173,7 @@ async fn handle_connection(
     channels: Arc<ChannelRegistry>,
     config: Arc<ServerConfig>,
     shutdown_controller: Arc<ShutdownController>,
+    cluster_ctx: Option<Arc<ClusterContext>>,
 ) {
     let conn_id = connection.info().id;
     info!(conn_id, %peer_addr, "handling connection");
@@ -191,6 +201,7 @@ async fn handle_connection(
 
                         let handle_result = handler::handle_message(
                             &msg, conn_id, &registry, &channels, &tx, &mut state, &config,
+                            cluster_ctx.as_ref().map(|c| c.as_ref()),
                         );
 
                         // Drain all queued outbound messages after handling
@@ -364,10 +375,18 @@ async fn init_bootstrap(
     persisted.save(&data_dir)?;
     info!("persisted initial cluster state");
 
+    let cluster_context = Arc::new(ClusterContext {
+        invite_keys: Arc::clone(&invite_keys),
+        raft_handle: Arc::clone(&handle),
+        shared_peer_map: Arc::clone(&shared_peer_map),
+        self_id: node_id,
+    });
+
     info!("cluster bootstrapped as master");
     Ok(ClusterState {
         raft_handle: handle,
         cluster_service,
+        cluster_context,
         _raft_shutdown: shutdown_sender,
         _task_handles: handles,
     })
@@ -509,10 +528,18 @@ async fn init_join(
     persisted.save(&data_dir)?;
     info!("persisted cluster state after join");
 
+    let cluster_context = Arc::new(ClusterContext {
+        invite_keys: Arc::clone(&invite_keys),
+        raft_handle: Arc::clone(&handle),
+        shared_peer_map: Arc::clone(&shared_peer_map),
+        self_id: assigned_id,
+    });
+
     info!("joined cluster successfully");
     Ok(ClusterState {
         raft_handle: handle,
         cluster_service,
+        cluster_context,
         _raft_shutdown: shutdown_sender,
         _task_handles: handles,
     })
@@ -646,10 +673,18 @@ async fn init_rejoin(
         next_node_id_start,
     ));
 
+    let cluster_context = Arc::new(ClusterContext {
+        invite_keys: Arc::clone(&invite_keys),
+        raft_handle: Arc::clone(&handle),
+        shared_peer_map: Arc::clone(&shared_peer_map),
+        self_id: node_id,
+    });
+
     info!("cluster rejoin initialized");
     Ok(ClusterState {
         raft_handle: handle,
         cluster_service,
+        cluster_context,
         _raft_shutdown: shutdown_sender,
         _task_handles: handles,
     })

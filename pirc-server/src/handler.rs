@@ -24,6 +24,9 @@ use crate::handler_channel::{
     handle_names, handle_notice, handle_part, handle_privmsg, handle_topic,
     remove_user_from_all_channels,
 };
+use crate::handler_cluster::{
+    self, ClusterContext,
+};
 use crate::handler_oper::{handle_die, handle_kill, handle_oper, handle_restart, handle_wallops};
 #[allow(unused_imports)] // Re-exported for test submodules that use `super::*`
 pub(crate) use crate::handler_oper::{host_matches_mask, is_oper};
@@ -76,6 +79,7 @@ pub enum HandleResult {
 ///
 /// Returns [`HandleResult::Quit`] when the client sends QUIT, signalling the
 /// connection loop to stop reading and clean up.
+#[allow(clippy::too_many_arguments)]
 pub fn handle_message(
     msg: &Message,
     connection_id: u64,
@@ -84,6 +88,7 @@ pub fn handle_message(
     sender: &mpsc::UnboundedSender<Message>,
     state: &mut PreRegistrationState,
     config: &ServerConfig,
+    cluster_ctx: Option<&ClusterContext>,
 ) -> HandleResult {
     if state.registered {
         // Update idle tracking for non-PING/PONG commands.
@@ -143,6 +148,40 @@ pub fn handle_message(
             Command::Ping => handle_ping(msg, sender),
             Command::Pirc(PircSubcommand::ClusterRaft) => {
                 debug!(conn_id = connection_id, "received PIRC CLUSTER RAFT on client connection");
+            }
+            Command::Pirc(PircSubcommand::InviteKeyGenerate) => {
+                if let Some(ctx) = cluster_ctx {
+                    handler_cluster::handle_invite_key_generate(
+                        msg, connection_id, registry, sender, ctx,
+                    );
+                }
+            }
+            Command::Pirc(PircSubcommand::InviteKeyList) => {
+                if let Some(ctx) = cluster_ctx {
+                    handler_cluster::handle_invite_key_list(connection_id, registry, sender, ctx);
+                }
+            }
+            Command::Pirc(PircSubcommand::InviteKeyRevoke) => {
+                if let Some(ctx) = cluster_ctx {
+                    handler_cluster::handle_invite_key_revoke(
+                        msg, connection_id, registry, sender, ctx,
+                    );
+                }
+            }
+            Command::Pirc(PircSubcommand::ClusterStatus) => {
+                if let Some(ctx) = cluster_ctx {
+                    handler_cluster::handle_cluster_status(connection_id, registry, sender, ctx);
+                }
+            }
+            Command::Pirc(PircSubcommand::ClusterMembers) => {
+                if let Some(ctx) = cluster_ctx {
+                    handler_cluster::handle_cluster_members(connection_id, registry, sender, ctx);
+                }
+            }
+            Command::Pirc(PircSubcommand::NetworkInfo) => {
+                if let Some(ctx) = cluster_ctx {
+                    handler_cluster::handle_network_info(connection_id, registry, sender, ctx);
+                }
             }
             // PONG and other commands are silently absorbed.
             _ => {}

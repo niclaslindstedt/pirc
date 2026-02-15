@@ -73,6 +73,7 @@ fn register_user(
         &tx,
         &mut state,
         config,
+        None,
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -82,6 +83,7 @@ fn register_user(
         &tx,
         &mut state,
         config,
+        None,
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -114,6 +116,7 @@ async fn mode_nonexistent_channel() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let reply = rx.recv().await.unwrap();
@@ -155,6 +158,7 @@ async fn mode_not_on_channel() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let reply = rx.recv().await.unwrap();
@@ -186,6 +190,7 @@ async fn mode_non_operator_cannot_set() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
     handle_message(
         &join_msg("#test"),
@@ -195,6 +200,7 @@ async fn mode_non_operator_cannot_set() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -208,6 +214,7 @@ async fn mode_non_operator_cannot_set() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -243,6 +250,7 @@ async fn mode_unknown_mode_char() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -254,6 +262,7 @@ async fn mode_unknown_mode_char() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let reply = rx.recv().await.unwrap();
@@ -283,6 +292,7 @@ async fn mode_user_not_in_channel_for_op() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -295,6 +305,7 @@ async fn mode_user_not_in_channel_for_op() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let reply = rx.recv().await.unwrap();
@@ -337,6 +348,7 @@ async fn mode_change_broadcasts_to_all_members() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
     handle_message(
         &join_msg("#test"),
@@ -346,6 +358,7 @@ async fn mode_change_broadcasts_to_all_members() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
     handle_message(
         &join_msg("#test"),
@@ -355,6 +368,7 @@ async fn mode_change_broadcasts_to_all_members() {
         &tx3,
         &mut state3,
         &config,
+        None,
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -369,6 +383,7 @@ async fn mode_change_broadcasts_to_all_members() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
 
     // All three should receive the MODE broadcast.
@@ -414,6 +429,7 @@ async fn mode_set_all_flag_modes() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -426,6 +442,7 @@ async fn mode_set_all_flag_modes() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -463,6 +480,7 @@ async fn mode_unset_all_flag_modes() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -487,6 +505,7 @@ async fn mode_unset_all_flag_modes() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -522,6 +541,7 @@ async fn mode_mixed_add_remove() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -542,6 +562,7 @@ async fn mode_mixed_add_remove() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let chan_name = ChannelName::new("#test").unwrap();

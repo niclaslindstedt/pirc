@@ -70,6 +70,7 @@ fn register_user(
         &tx,
         &mut state,
         config,
+        None,
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -79,6 +80,7 @@ fn register_user(
         &tx,
         &mut state,
         config,
+        None,
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -112,6 +114,7 @@ async fn mode_query_returns_channel_modes() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -134,6 +137,7 @@ async fn mode_query_returns_channel_modes() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let reply = rx.recv().await.unwrap();
@@ -170,6 +174,7 @@ async fn mode_query_with_key_and_limit() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -190,6 +195,7 @@ async fn mode_query_with_key_and_limit() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let reply = rx.recv().await.unwrap();
@@ -224,6 +230,7 @@ async fn mode_query_empty_modes() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -235,6 +242,7 @@ async fn mode_query_empty_modes() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let reply = rx.recv().await.unwrap();
@@ -267,6 +275,7 @@ async fn mode_ban_list_query_empty() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -278,6 +287,7 @@ async fn mode_ban_list_query_empty() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let reply = rx.recv().await.unwrap();
@@ -307,6 +317,7 @@ async fn mode_ban_list_query_with_entries() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -330,6 +341,7 @@ async fn mode_ban_list_query_with_entries() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let reply = rx.recv().await.unwrap();

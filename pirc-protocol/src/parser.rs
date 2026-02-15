@@ -106,8 +106,9 @@ fn parse_pirc_command(prefix: Option<Prefix>, remainder: &str) -> Result<Message
         None => (remainder, ""),
     };
 
-    // Check for namespaced subcommands (CLUSTER, P2P) first
-    if sub_str == "CLUSTER" || sub_str == "P2P" {
+    // Check for namespaced subcommands (CLUSTER, INVITE-KEY, NETWORK, P2P) first
+    if sub_str == "CLUSTER" || sub_str == "P2P" || sub_str == "INVITE-KEY" || sub_str == "NETWORK"
+    {
         let after_sub = after_sub.trim_start();
         if after_sub.is_empty() {
             return Err(ProtocolError::UnknownCommand(format!(

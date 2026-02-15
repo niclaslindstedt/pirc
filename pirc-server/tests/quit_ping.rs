@@ -76,7 +76,7 @@ async fn handle_connection(
         match connection.recv_with_shutdown(&mut shutdown).await {
             Ok(Some(msg)) => {
                 let result = handler::handle_message(
-                    &msg, conn_id, &registry, &channels, &tx, &mut state, &config,
+                    &msg, conn_id, &registry, &channels, &tx, &mut state, &config, None,
                 );
                 while let Ok(out_msg) = rx.try_recv() {
                     if connection.send(out_msg).await.is_err() {

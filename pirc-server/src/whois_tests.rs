@@ -55,6 +55,7 @@ fn register_user(
         &tx,
         &mut state,
         config,
+        None,
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -64,6 +65,7 @@ fn register_user(
         &tx,
         &mut state,
         config,
+        None,
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst (RPL_WELCOME, RPL_YOURHOST, RPL_CREATED, ERR_NOMOTD)
@@ -102,6 +104,7 @@ async fn whois_existing_user_returns_reply_sequence() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     // RPL_WHOISUSER (311)
@@ -160,6 +163,7 @@ async fn whois_nonexistent_nick_returns_nosuchnick() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let reply = rx.recv().await.unwrap();
@@ -185,7 +189,7 @@ async fn whois_no_param_returns_nonicknamegiven() {
     );
 
     let msg = Message::new(Command::Whois, vec![]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NONICKNAMEGIVEN));
@@ -224,6 +228,7 @@ async fn whois_away_user_includes_rpl_away() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     // RPL_WHOISUSER (311)
@@ -281,6 +286,7 @@ async fn whois_operator_includes_rpl_whoisoperator() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     // RPL_WHOISUSER (311)
@@ -332,6 +338,7 @@ async fn whois_idle_time_is_reasonable() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     // Skip to RPL_WHOISIDLE

@@ -75,6 +75,7 @@ fn register_user(
         &tx,
         &mut state,
         config,
+        None,
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -84,6 +85,7 @@ fn register_user(
         &tx,
         &mut state,
         config,
+        None,
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -128,6 +130,7 @@ async fn privmsg_channel_delivered_to_members_except_sender() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
     handle_message(
         &join_msg("#general"),
@@ -137,6 +140,7 @@ async fn privmsg_channel_delivered_to_members_except_sender() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
     handle_message(
         &join_msg("#general"),
@@ -146,6 +150,7 @@ async fn privmsg_channel_delivered_to_members_except_sender() {
         &tx3,
         &mut state3,
         &config,
+        None,
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -160,6 +165,7 @@ async fn privmsg_channel_delivered_to_members_except_sender() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
 
     // Alice should NOT receive her own message.
@@ -209,6 +215,7 @@ async fn notice_channel_delivered_to_members_except_sender() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
     handle_message(
         &join_msg("#general"),
@@ -218,6 +225,7 @@ async fn notice_channel_delivered_to_members_except_sender() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -231,6 +239,7 @@ async fn notice_channel_delivered_to_members_except_sender() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
 
     // Alice should NOT receive her own notice.
@@ -270,6 +279,7 @@ async fn privmsg_moderated_channel_normal_user_blocked() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
     handle_message(
         &join_msg("#moderated"),
@@ -279,6 +289,7 @@ async fn privmsg_moderated_channel_normal_user_blocked() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -300,6 +311,7 @@ async fn privmsg_moderated_channel_normal_user_blocked() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -334,6 +346,7 @@ async fn privmsg_moderated_channel_voiced_user_allowed() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
     handle_message(
         &join_msg("#moderated"),
@@ -343,6 +356,7 @@ async fn privmsg_moderated_channel_voiced_user_allowed() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -367,6 +381,7 @@ async fn privmsg_moderated_channel_voiced_user_allowed() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
 
     // Alice should receive Bob's message.
@@ -400,6 +415,7 @@ async fn privmsg_moderated_channel_operator_allowed() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
     handle_message(
         &join_msg("#moderated"),
@@ -409,6 +425,7 @@ async fn privmsg_moderated_channel_operator_allowed() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -430,6 +447,7 @@ async fn privmsg_moderated_channel_operator_allowed() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
 
     // Bob should receive Alice's message.
@@ -466,6 +484,7 @@ async fn privmsg_no_external_messages_blocks_non_member() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
     while rx1.try_recv().is_ok() {}
 
@@ -486,6 +505,7 @@ async fn privmsg_no_external_messages_blocks_non_member() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -520,6 +540,7 @@ async fn privmsg_no_external_messages_allows_member() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
     handle_message(
         &join_msg("#private"),
@@ -529,6 +550,7 @@ async fn privmsg_no_external_messages_allows_member() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -550,6 +572,7 @@ async fn privmsg_no_external_messages_allows_member() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
 
     // Alice should receive the message.
@@ -584,6 +607,7 @@ async fn privmsg_without_no_external_allows_non_member() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
     while rx1.try_recv().is_ok() {}
 
@@ -596,6 +620,7 @@ async fn privmsg_without_no_external_allows_non_member() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
 
     // Alice should receive the message.
@@ -632,6 +657,7 @@ async fn privmsg_user_to_user_delivered() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
 
     // Bob should receive the message.
@@ -674,6 +700,7 @@ async fn notice_user_to_user_delivered() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
 
     // Bob should receive the notice.
@@ -711,6 +738,7 @@ async fn privmsg_nonexistent_user_returns_err_nosuchnick() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
 
     let reply = rx1.recv().await.unwrap();
@@ -740,6 +768,7 @@ async fn notice_nonexistent_user_returns_err_nosuchnick() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
 
     let reply = rx1.recv().await.unwrap();
@@ -771,6 +800,7 @@ async fn privmsg_nonexistent_channel_returns_err_cannotsendtochan() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
 
     let reply = rx1.recv().await.unwrap();
@@ -795,7 +825,7 @@ async fn privmsg_no_params_returns_err_needmoreparams() {
     );
 
     let msg = Message::new(Command::Privmsg, vec![]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -817,7 +847,7 @@ async fn privmsg_one_param_returns_err_needmoreparams() {
     );
 
     let msg = Message::new(Command::Privmsg, vec!["Bob".to_owned()]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -851,6 +881,7 @@ async fn privmsg_to_away_user_sends_rpl_away() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
     while rx2.try_recv().is_ok() {}
 
@@ -863,6 +894,7 @@ async fn privmsg_to_away_user_sends_rpl_away() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
 
     // Alice should receive RPL_AWAY.
@@ -904,6 +936,7 @@ async fn notice_to_away_user_does_not_send_rpl_away() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
     while rx2.try_recv().is_ok() {}
 
@@ -916,6 +949,7 @@ async fn notice_to_away_user_does_not_send_rpl_away() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
 
     // Alice should NOT receive RPL_AWAY for NOTICE.
@@ -964,6 +998,7 @@ async fn privmsg_moderated_and_no_external_both_enforced() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
     handle_message(
         &join_msg("#strict"),
@@ -973,6 +1008,7 @@ async fn privmsg_moderated_and_no_external_both_enforced() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -995,6 +1031,7 @@ async fn privmsg_moderated_and_no_external_both_enforced() {
         &tx3,
         &mut state3,
         &config,
+        None,
     );
     let reply = rx3.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_CANNOTSENDTOCHAN));
@@ -1008,6 +1045,7 @@ async fn privmsg_moderated_and_no_external_both_enforced() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
     let reply = rx2.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_CANNOTSENDTOCHAN));
@@ -1021,6 +1059,7 @@ async fn privmsg_moderated_and_no_external_both_enforced() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
     let reply = rx2.recv().await.unwrap();
     assert_eq!(reply.command, Command::Privmsg);

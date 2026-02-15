@@ -47,6 +47,22 @@ pub enum PircSubcommand {
     ClusterMigrate,
     /// Raft consensus protocol message: `PIRC CLUSTER RAFT <raft-message>`.
     ClusterRaft,
+    /// Query cluster status: `PIRC CLUSTER STATUS`.
+    ClusterStatus,
+    /// List cluster members: `PIRC CLUSTER MEMBERS`.
+    ClusterMembers,
+
+    // ---- Invite-key management ----
+    /// Generate an invite key: `PIRC INVITE-KEY GENERATE [ttl]`.
+    InviteKeyGenerate,
+    /// List active invite keys: `PIRC INVITE-KEY LIST`.
+    InviteKeyList,
+    /// Revoke an invite key: `PIRC INVITE-KEY REVOKE <token>`.
+    InviteKeyRevoke,
+
+    // ---- Network ----
+    /// Network info query: `PIRC NETWORK INFO`.
+    NetworkInfo,
 
     // ---- P2P (signaling) ----
     /// P2P connection offer: `PIRC P2P OFFER <target> <sdp-or-signal-data>`.
@@ -83,6 +99,14 @@ impl PircSubcommand {
             Self::ClusterHeartbeat => "CLUSTER HEARTBEAT",
             Self::ClusterMigrate => "CLUSTER MIGRATE",
             Self::ClusterRaft => "CLUSTER RAFT",
+            Self::ClusterStatus => "CLUSTER STATUS",
+            Self::ClusterMembers => "CLUSTER MEMBERS",
+            // Invite-key
+            Self::InviteKeyGenerate => "INVITE-KEY GENERATE",
+            Self::InviteKeyList => "INVITE-KEY LIST",
+            Self::InviteKeyRevoke => "INVITE-KEY REVOKE",
+            // Network
+            Self::NetworkInfo => "NETWORK INFO",
             // P2P
             Self::P2pOffer => "P2P OFFER",
             Self::P2pAnswer => "P2P ANSWER",
@@ -123,6 +147,18 @@ impl PircSubcommand {
                 "HEARTBEAT" => Some(Self::ClusterHeartbeat),
                 "MIGRATE" => Some(Self::ClusterMigrate),
                 "RAFT" => Some(Self::ClusterRaft),
+                "STATUS" => Some(Self::ClusterStatus),
+                "MEMBERS" => Some(Self::ClusterMembers),
+                _ => None,
+            },
+            "INVITE-KEY" => match inner {
+                "GENERATE" => Some(Self::InviteKeyGenerate),
+                "LIST" => Some(Self::InviteKeyList),
+                "REVOKE" => Some(Self::InviteKeyRevoke),
+                _ => None,
+            },
+            "NETWORK" => match inner {
+                "INFO" => Some(Self::NetworkInfo),
                 _ => None,
             },
             "P2P" => match inner {
@@ -147,6 +183,12 @@ impl PircSubcommand {
                 | Self::ClusterHeartbeat
                 | Self::ClusterMigrate
                 | Self::ClusterRaft
+                | Self::ClusterStatus
+                | Self::ClusterMembers
+                | Self::InviteKeyGenerate
+                | Self::InviteKeyList
+                | Self::InviteKeyRevoke
+                | Self::NetworkInfo
                 | Self::P2pOffer
                 | Self::P2pAnswer
                 | Self::P2pIce

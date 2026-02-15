@@ -69,6 +69,7 @@ fn register_user(
         &tx,
         &mut state,
         config,
+        None,
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -78,6 +79,7 @@ fn register_user(
         &tx,
         &mut state,
         config,
+        None,
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -110,6 +112,7 @@ async fn mode_set_invite_only() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -121,6 +124,7 @@ async fn mode_set_invite_only() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     // Verify mode was set.
@@ -159,6 +163,7 @@ async fn mode_unset_invite_only() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -178,6 +183,7 @@ async fn mode_unset_invite_only() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -213,6 +219,7 @@ async fn mode_set_multiple_flags() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -224,6 +231,7 @@ async fn mode_set_multiple_flags() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -265,6 +273,7 @@ async fn mode_set_key() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -276,6 +285,7 @@ async fn mode_set_key() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -317,6 +327,7 @@ async fn mode_unset_key() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -336,6 +347,7 @@ async fn mode_unset_key() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -371,6 +383,7 @@ async fn mode_set_limit() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -382,6 +395,7 @@ async fn mode_set_limit() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -423,6 +437,7 @@ async fn mode_unset_limit() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -442,6 +457,7 @@ async fn mode_unset_limit() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -481,6 +497,7 @@ async fn mode_set_operator() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
     handle_message(
         &join_msg("#test"),
@@ -490,6 +507,7 @@ async fn mode_set_operator() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -503,6 +521,7 @@ async fn mode_set_operator() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -549,6 +568,7 @@ async fn mode_unset_operator() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
     handle_message(
         &join_msg("#test"),
@@ -558,6 +578,7 @@ async fn mode_unset_operator() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -581,6 +602,7 @@ async fn mode_unset_operator() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -618,6 +640,7 @@ async fn mode_set_voice() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
     handle_message(
         &join_msg("#test"),
@@ -627,6 +650,7 @@ async fn mode_set_voice() {
         &tx2,
         &mut state2,
         &config,
+        None,
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -640,6 +664,7 @@ async fn mode_set_voice() {
         &tx1,
         &mut state1,
         &config,
+        None,
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -679,6 +704,7 @@ async fn mode_add_ban() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -690,6 +716,7 @@ async fn mode_add_ban() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -728,6 +755,7 @@ async fn mode_remove_ban() {
         &tx,
         &mut state,
         &config,
+        None,
     );
     while rx.try_recv().is_ok() {}
 
@@ -751,6 +779,7 @@ async fn mode_remove_ban() {
         &tx,
         &mut state,
         &config,
+        None,
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
