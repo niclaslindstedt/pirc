@@ -29,6 +29,7 @@ use crate::handler_cluster::{
     self, ClusterContext,
 };
 use crate::handler_oper::{handle_die, handle_kill, handle_oper, handle_restart, handle_wallops};
+use crate::handler_relay::handle_relay;
 #[allow(unused_imports)] // Re-exported for test submodules that use `super::*`
 pub(crate) use crate::handler_oper::{host_matches_mask, is_oper};
 use crate::prekey_store::PreKeyBundleStore;
@@ -193,6 +194,14 @@ pub fn handle_message(
                 } else {
                     handle_key_exchange(msg, connection_id, registry, sender, prekey_store);
                 }
+            }
+            Command::Pirc(
+                ref sub @ (PircSubcommand::Encrypted
+                | PircSubcommand::KeyExchangeAck
+                | PircSubcommand::KeyExchangeComplete
+                | PircSubcommand::Fingerprint),
+            ) => {
+                handle_relay(sub, msg, connection_id, registry, sender);
             }
             // PONG and other commands are silently absorbed.
             _ => {}
@@ -1166,3 +1175,7 @@ mod ctcp_tests;
 #[cfg(test)]
 #[path = "keyexchange_tests.rs"]
 mod keyexchange_tests;
+
+#[cfg(test)]
+#[path = "relay_tests.rs"]
+mod relay_tests;
