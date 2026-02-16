@@ -11,6 +11,7 @@
 //! - **Error handling** — [`error`] error types for P2P operations
 
 pub mod connectivity;
+pub mod encrypted_transport;
 pub mod error;
 pub mod ice;
 pub mod session;
@@ -27,6 +28,7 @@ pub use ice::{
 };
 pub use session::{P2pSession, P2pSessionEvent, SessionState};
 pub use stun::{discover_reflexive_address, StunAttribute, StunMessage, TransactionId};
+pub use encrypted_transport::{EncryptedP2pTransport, TransportCipher};
 pub use transport::{P2pTransport, TurnRelayTransport, UdpTransport, MAX_PAYLOAD_SIZE};
 pub use turn::{
     allocate, channel_bind, compute_long_term_key, create_permission, decode_channel_data,

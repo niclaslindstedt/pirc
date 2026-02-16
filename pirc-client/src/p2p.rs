@@ -7,10 +7,12 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
+use pirc_p2p::encrypted_transport::EncryptedP2pTransport;
 use pirc_p2p::ice::{GathererConfig, IceCandidate};
 use pirc_p2p::session::{P2pSession, P2pSessionEvent, SessionState};
+use pirc_p2p::TransportCipher;
 use pirc_protocol::{Command, Message, PircSubcommand};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::config::P2pConfig;
 
@@ -20,12 +22,15 @@ pub struct SignalingMessage {
     pub message: Message,
 }
 
-/// Manager for all active P2P sessions.
+/// Manager for all active P2P sessions and encrypted transports.
 pub struct P2pManager {
     /// Active sessions keyed by peer nick.
     sessions: HashMap<String, P2pSession>,
     /// Gatherer config derived from client P2P configuration.
     gatherer_config: GathererConfig,
+    /// Encrypted transports keyed by peer nick, established after a
+    /// session reaches the Connected state and a cipher is provided.
+    transports: HashMap<String, EncryptedP2pTransport>,
 }
 
 impl P2pManager {
@@ -47,6 +52,7 @@ impl P2pManager {
         Self {
             sessions: HashMap::new(),
             gatherer_config,
+            transports: HashMap::new(),
         }
     }
 
@@ -192,16 +198,93 @@ impl P2pManager {
     pub fn handle_failed(&mut self, sender: &str, reason: &str) {
         debug!(sender, reason, "received P2P FAILED from peer");
         self.sessions.remove(sender);
+        self.transports.remove(sender);
     }
 
     /// Removes and cleans up a session for the given peer.
     pub fn remove_session(&mut self, nick: &str) {
         self.sessions.remove(nick);
+        self.transports.remove(nick);
     }
 
-    /// Removes all sessions (e.g., on disconnect).
+    /// Removes all sessions and transports (e.g., on disconnect).
     pub fn clear(&mut self) {
         self.sessions.clear();
+        self.transports.clear();
+    }
+
+    // ── Encrypted transport management ──────────────────────────────
+
+    /// Registers an encrypted transport for a peer.
+    ///
+    /// Call this after a P2P session reaches the Connected state and an
+    /// encryption cipher is available. The [`EncryptedP2pTransport`]
+    /// wraps the raw [`P2pTransport`] with the given cipher so all data
+    /// is E2E encrypted.
+    pub fn set_transport(&mut self, nick: &str, transport: EncryptedP2pTransport) {
+        info!(nick, direct = transport.is_direct(), "P2P encrypted transport registered");
+        self.transports.insert(nick.to_string(), transport);
+    }
+
+    /// Returns whether a peer has an active encrypted P2P transport.
+    #[must_use]
+    pub fn has_transport(&self, nick: &str) -> bool {
+        self.transports.contains_key(nick)
+    }
+
+    /// Sends data to a peer over the encrypted P2P transport.
+    ///
+    /// Returns `Ok(true)` if the data was sent over P2P, `Ok(false)` if
+    /// no P2P transport is available (caller should fall back to server
+    /// relay), or `Err` if the P2P send failed (transport is removed and
+    /// caller should fall back).
+    pub async fn send_p2p(&mut self, nick: &str, data: &[u8]) -> Result<bool, String> {
+        let Some(transport) = self.transports.get(nick) else {
+            return Ok(false);
+        };
+
+        match transport.send(data).await {
+            Ok(()) => Ok(true),
+            Err(e) => {
+                warn!(nick, %e, "P2P send failed, removing transport for fallback");
+                self.transports.remove(nick);
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Receives data from a peer's encrypted P2P transport.
+    ///
+    /// Returns the decrypted payload, or an error if receive/decrypt fails.
+    /// On error the transport is removed so the caller can fall back.
+    pub async fn recv_p2p(&mut self, nick: &str) -> Result<Vec<u8>, String> {
+        let Some(transport) = self.transports.get(nick) else {
+            return Err("no P2P transport for peer".into());
+        };
+
+        match transport.recv().await {
+            Ok(data) => Ok(data),
+            Err(e) => {
+                warn!(nick, %e, "P2P recv failed, removing transport for fallback");
+                self.transports.remove(nick);
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Creates an encrypted P2P transport for a connected peer.
+    ///
+    /// Wraps the given raw [`P2pTransport`] with the provided cipher and
+    /// registers it. This is a convenience method combining transport
+    /// creation and registration.
+    pub fn register_encrypted_transport(
+        &mut self,
+        nick: &str,
+        raw_transport: pirc_p2p::P2pTransport,
+        cipher: Box<dyn TransportCipher>,
+    ) {
+        let encrypted = EncryptedP2pTransport::new(raw_transport, cipher);
+        self.set_transport(nick, encrypted);
     }
 }
 
@@ -465,7 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn clear_removes_all_sessions() {
+    fn clear_removes_all_sessions_and_transports() {
         let config = default_config();
         let mut mgr = P2pManager::new(&config);
 
@@ -478,6 +561,128 @@ mod tests {
         mgr.clear();
         assert!(mgr.session_state("bob").is_none());
         assert!(mgr.session_state("alice").is_none());
+        assert!(!mgr.has_transport("bob"));
+        assert!(!mgr.has_transport("alice"));
+    }
+
+    // --- Encrypted transport management tests ---
+
+    #[test]
+    fn has_transport_false_by_default() {
+        let mgr = P2pManager::new(&default_config());
+        assert!(!mgr.has_transport("bob"));
+    }
+
+    #[tokio::test]
+    async fn register_and_use_encrypted_transport() {
+        use pirc_p2p::transport::{P2pTransport, UdpTransport};
+        use std::sync::Arc;
+        use tokio::net::UdpSocket;
+
+        let sock_a = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let sock_b = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+
+        let addr_a = sock_a.local_addr().unwrap();
+        let addr_b = sock_b.local_addr().unwrap();
+
+        sock_a.connect(addr_b).await.unwrap();
+        sock_b.connect(addr_a).await.unwrap();
+
+        let transport_a = P2pTransport::Direct(UdpTransport::new(Arc::new(sock_a)));
+        let transport_b = P2pTransport::Direct(UdpTransport::new(Arc::new(sock_b)));
+
+        let mut mgr_a = P2pManager::new(&default_config());
+        let mut mgr_b = P2pManager::new(&default_config());
+
+        mgr_a.register_encrypted_transport("bob", transport_a, Box::new(XorCipher(0x42)));
+        mgr_b.register_encrypted_transport("alice", transport_b, Box::new(XorCipher(0x42)));
+
+        assert!(mgr_a.has_transport("bob"));
+        assert!(mgr_b.has_transport("alice"));
+
+        // Send from A to B
+        let sent = mgr_a.send_p2p("bob", b"hello bob").await.unwrap();
+        assert!(sent);
+
+        let received = mgr_b.recv_p2p("alice").await.unwrap();
+        assert_eq!(received, b"hello bob");
+    }
+
+    #[tokio::test]
+    async fn send_p2p_returns_false_without_transport() {
+        let mut mgr = P2pManager::new(&default_config());
+        let result = mgr.send_p2p("bob", b"hello").await.unwrap();
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn recv_p2p_errors_without_transport() {
+        let mut mgr = P2pManager::new(&default_config());
+        let result = mgr.recv_p2p("bob").await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn handle_failed_removes_transport() {
+        let config = default_config();
+        let mut mgr = P2pManager::new(&config);
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(mgr.initiate("bob"));
+
+        // Simulate adding a transport (using a mock)
+        rt.block_on(async {
+            use pirc_p2p::transport::{P2pTransport, UdpTransport};
+            use std::sync::Arc;
+            use tokio::net::UdpSocket;
+
+            let sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+            sock.connect("127.0.0.1:1234").await.unwrap();
+            let transport = P2pTransport::Direct(UdpTransport::new(Arc::new(sock)));
+            mgr.register_encrypted_transport("bob", transport, Box::new(XorCipher(0)));
+        });
+
+        assert!(mgr.has_transport("bob"));
+        mgr.handle_failed("bob", "timeout");
+        assert!(!mgr.has_transport("bob"));
+    }
+
+    #[test]
+    fn remove_session_also_removes_transport() {
+        let config = default_config();
+        let mut mgr = P2pManager::new(&config);
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(mgr.initiate("bob"));
+
+        rt.block_on(async {
+            use pirc_p2p::transport::{P2pTransport, UdpTransport};
+            use std::sync::Arc;
+            use tokio::net::UdpSocket;
+
+            let sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+            sock.connect("127.0.0.1:1234").await.unwrap();
+            let transport = P2pTransport::Direct(UdpTransport::new(Arc::new(sock)));
+            mgr.register_encrypted_transport("bob", transport, Box::new(XorCipher(0)));
+        });
+
+        assert!(mgr.has_transport("bob"));
+        mgr.remove_session("bob");
+        assert!(!mgr.has_transport("bob"));
+        assert!(mgr.session_state("bob").is_none());
+    }
+
+    /// Simple XOR cipher for tests.
+    struct XorCipher(u8);
+
+    impl TransportCipher for XorCipher {
+        fn encrypt(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, String> {
+            Ok(plaintext.iter().map(|b| b ^ self.0).collect())
+        }
+
+        fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, String> {
+            Ok(ciphertext.iter().map(|b| b ^ self.0).collect())
+        }
     }
 
     // --- Event-to-message conversion tests ---

@@ -6,6 +6,7 @@ mod connection_state;
 pub mod encryption;
 mod message_handler;
 pub mod p2p;
+pub mod p2p_crypto;
 mod registration;
 mod tui;
 
