@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 # Async runtime
-tokio = { version = "1", features = ["net", "time", "rt", "macros"] }
+tokio = { version = "1", features = ["net", "time", "rt", "macros", "sync"] }
 
 # Logging
 tracing = "0.1"

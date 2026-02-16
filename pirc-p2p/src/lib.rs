@@ -7,6 +7,7 @@
 //! - **ICE** — [`ice`] ICE-lite candidate gathering and connectivity types
 //! - **Connectivity** — [`connectivity`] ICE connectivity checks and UDP hole-punching
 //! - **Session** — [`session`] P2P session state machine for connection lifecycle
+//! - **Transport** — [`transport`] framed UDP transport for P2P data exchange
 //! - **Error handling** — [`error`] error types for P2P operations
 
 pub mod connectivity;
@@ -14,6 +15,7 @@ pub mod error;
 pub mod ice;
 pub mod session;
 pub mod stun;
+pub mod transport;
 pub mod turn;
 
 pub use connectivity::{
@@ -25,6 +27,7 @@ pub use ice::{
 };
 pub use session::{P2pSession, P2pSessionEvent, SessionState};
 pub use stun::{discover_reflexive_address, StunAttribute, StunMessage, TransactionId};
+pub use transport::{P2pTransport, TurnRelayTransport, UdpTransport, MAX_PAYLOAD_SIZE};
 pub use turn::{
     allocate, channel_bind, compute_long_term_key, create_permission, decode_channel_data,
     encode_channel_data, parse_data_indication, send_to_peer, Allocation, TurnAttribute,
