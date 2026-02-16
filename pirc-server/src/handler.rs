@@ -29,6 +29,7 @@ use crate::handler_cluster::{
     self, ClusterContext,
 };
 use crate::handler_oper::{handle_die, handle_kill, handle_oper, handle_restart, handle_wallops};
+use crate::handler_p2p::handle_p2p_relay;
 use crate::handler_relay::handle_relay;
 #[allow(unused_imports)] // Re-exported for test submodules that use `super::*`
 pub(crate) use crate::handler_oper::{host_matches_mask, is_oper};
@@ -211,6 +212,15 @@ pub fn handle_message(
                 | PircSubcommand::Fingerprint),
             ) => {
                 handle_relay(sub, msg, connection_id, registry, sender, offline_store);
+            }
+            Command::Pirc(
+                ref sub @ (PircSubcommand::P2pOffer
+                | PircSubcommand::P2pAnswer
+                | PircSubcommand::P2pIce
+                | PircSubcommand::P2pEstablished
+                | PircSubcommand::P2pFailed),
+            ) => {
+                handle_p2p_relay(sub, msg, connection_id, registry, sender);
             }
             // PONG and other commands are silently absorbed.
             _ => {}
@@ -1230,6 +1240,10 @@ mod keyexchange_tests;
 #[cfg(test)]
 #[path = "relay_tests.rs"]
 mod relay_tests;
+
+#[cfg(test)]
+#[path = "p2p_relay_tests.rs"]
+mod p2p_relay_tests;
 
 #[cfg(test)]
 #[path = "offline_delivery_tests.rs"]
