@@ -5,13 +5,18 @@
 //! - **STUN** — [`stun`] RFC 5389 binding requests for server-reflexive address discovery
 //! - **TURN** — [`turn`] RFC 5766 relay client for NAT traversal fallback
 //! - **ICE** — [`ice`] ICE-lite candidate gathering and connectivity types
+//! - **Connectivity** — [`connectivity`] ICE connectivity checks and UDP hole-punching
 //! - **Error handling** — [`error`] error types for P2P operations
 
+pub mod connectivity;
 pub mod error;
 pub mod ice;
 pub mod stun;
 pub mod turn;
 
+pub use connectivity::{
+    compute_pair_priority, form_pairs, CandidatePair, ConnectivityChecker, IceRole, PairState,
+};
 pub use error::{P2pError, Result};
 pub use ice::{
     compute_priority, CandidateGatherer, CandidateType, GathererConfig, IceCandidate,
