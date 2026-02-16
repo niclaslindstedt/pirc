@@ -14,6 +14,9 @@ use std::fmt;
 ///   `CLUSTER SYNC`, `CLUSTER HEARTBEAT`, `CLUSTER MIGRATE`, `CLUSTER RAFT`
 /// - **P2P** (signaling): `P2P OFFER`, `P2P ANSWER`, `P2P ICE`,
 ///   `P2P ESTABLISHED`, `P2P FAILED`
+/// - **Group** (group chat): `GROUP CREATE`, `GROUP INVITE`, `GROUP JOIN`,
+///   `GROUP LEAVE`, `GROUP MSG`, `GROUP MEMBERS`, `GROUP KEYEX`,
+///   `GROUP P2P-OFFER`, `GROUP P2P-ANSWER`, `GROUP P2P-ICE`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PircSubcommand {
     // ---- Core ----
@@ -75,6 +78,28 @@ pub enum PircSubcommand {
     P2pEstablished,
     /// P2P connection failed: `PIRC P2P FAILED <target> <reason>`.
     P2pFailed,
+
+    // ---- Group (group chat) ----
+    /// Create a new group: `PIRC GROUP CREATE <group_id> <group_name>`.
+    GroupCreate,
+    /// Invite a user to a group: `PIRC GROUP INVITE <group_id> <target_nick>`.
+    GroupInvite,
+    /// Accept a group invitation: `PIRC GROUP JOIN <group_id>`.
+    GroupJoin,
+    /// Leave a group: `PIRC GROUP LEAVE <group_id>`.
+    GroupLeave,
+    /// Encrypted group message: `PIRC GROUP MSG <group_id> <encrypted_payload>`.
+    GroupMessage,
+    /// Server sends member list: `PIRC GROUP MEMBERS <group_id> <nick1> <nick2> ...`.
+    GroupMembers,
+    /// Group key exchange signaling: `PIRC GROUP KEYEX <group_id> <target> <data>`.
+    GroupKeyExchange,
+    /// Group P2P connection offer: `PIRC GROUP P2P-OFFER <group_id> <target> <signal_data>`.
+    GroupP2pOffer,
+    /// Group P2P connection answer: `PIRC GROUP P2P-ANSWER <group_id> <target> <signal_data>`.
+    GroupP2pAnswer,
+    /// Group P2P ICE candidate: `PIRC GROUP P2P-ICE <group_id> <target> <candidate_data>`.
+    GroupP2pIce,
 }
 
 impl PircSubcommand {
@@ -113,6 +138,17 @@ impl PircSubcommand {
             Self::P2pIce => "P2P ICE",
             Self::P2pEstablished => "P2P ESTABLISHED",
             Self::P2pFailed => "P2P FAILED",
+            // Group
+            Self::GroupCreate => "GROUP CREATE",
+            Self::GroupInvite => "GROUP INVITE",
+            Self::GroupJoin => "GROUP JOIN",
+            Self::GroupLeave => "GROUP LEAVE",
+            Self::GroupMessage => "GROUP MSG",
+            Self::GroupMembers => "GROUP MEMBERS",
+            Self::GroupKeyExchange => "GROUP KEYEX",
+            Self::GroupP2pOffer => "GROUP P2P-OFFER",
+            Self::GroupP2pAnswer => "GROUP P2P-ANSWER",
+            Self::GroupP2pIce => "GROUP P2P-ICE",
         }
     }
 
@@ -169,6 +205,19 @@ impl PircSubcommand {
                 "FAILED" => Some(Self::P2pFailed),
                 _ => None,
             },
+            "GROUP" => match inner {
+                "CREATE" => Some(Self::GroupCreate),
+                "INVITE" => Some(Self::GroupInvite),
+                "JOIN" => Some(Self::GroupJoin),
+                "LEAVE" => Some(Self::GroupLeave),
+                "MSG" => Some(Self::GroupMessage),
+                "MEMBERS" => Some(Self::GroupMembers),
+                "KEYEX" => Some(Self::GroupKeyExchange),
+                "P2P-OFFER" => Some(Self::GroupP2pOffer),
+                "P2P-ANSWER" => Some(Self::GroupP2pAnswer),
+                "P2P-ICE" => Some(Self::GroupP2pIce),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -194,6 +243,16 @@ impl PircSubcommand {
                 | Self::P2pIce
                 | Self::P2pEstablished
                 | Self::P2pFailed
+                | Self::GroupCreate
+                | Self::GroupInvite
+                | Self::GroupJoin
+                | Self::GroupLeave
+                | Self::GroupMessage
+                | Self::GroupMembers
+                | Self::GroupKeyExchange
+                | Self::GroupP2pOffer
+                | Self::GroupP2pAnswer
+                | Self::GroupP2pIce
         )
     }
 }
@@ -673,6 +732,104 @@ mod tests {
         assert!(PircSubcommand::P2pIce.is_namespaced());
         assert!(PircSubcommand::P2pEstablished.is_namespaced());
         assert!(PircSubcommand::P2pFailed.is_namespaced());
+    }
+
+    // ---- PircSubcommand: Group ----
+
+    #[test]
+    fn pirc_group_subcommand_as_str() {
+        assert_eq!(PircSubcommand::GroupCreate.as_str(), "GROUP CREATE");
+        assert_eq!(PircSubcommand::GroupInvite.as_str(), "GROUP INVITE");
+        assert_eq!(PircSubcommand::GroupJoin.as_str(), "GROUP JOIN");
+        assert_eq!(PircSubcommand::GroupLeave.as_str(), "GROUP LEAVE");
+        assert_eq!(PircSubcommand::GroupMessage.as_str(), "GROUP MSG");
+        assert_eq!(PircSubcommand::GroupMembers.as_str(), "GROUP MEMBERS");
+        assert_eq!(PircSubcommand::GroupKeyExchange.as_str(), "GROUP KEYEX");
+        assert_eq!(PircSubcommand::GroupP2pOffer.as_str(), "GROUP P2P-OFFER");
+        assert_eq!(PircSubcommand::GroupP2pAnswer.as_str(), "GROUP P2P-ANSWER");
+        assert_eq!(PircSubcommand::GroupP2pIce.as_str(), "GROUP P2P-ICE");
+    }
+
+    #[test]
+    fn pirc_group_subcommand_from_namespace() {
+        assert_eq!(
+            PircSubcommand::from_namespace("GROUP", "CREATE"),
+            Some(PircSubcommand::GroupCreate)
+        );
+        assert_eq!(
+            PircSubcommand::from_namespace("GROUP", "INVITE"),
+            Some(PircSubcommand::GroupInvite)
+        );
+        assert_eq!(
+            PircSubcommand::from_namespace("GROUP", "JOIN"),
+            Some(PircSubcommand::GroupJoin)
+        );
+        assert_eq!(
+            PircSubcommand::from_namespace("GROUP", "LEAVE"),
+            Some(PircSubcommand::GroupLeave)
+        );
+        assert_eq!(
+            PircSubcommand::from_namespace("GROUP", "MSG"),
+            Some(PircSubcommand::GroupMessage)
+        );
+        assert_eq!(
+            PircSubcommand::from_namespace("GROUP", "MEMBERS"),
+            Some(PircSubcommand::GroupMembers)
+        );
+        assert_eq!(
+            PircSubcommand::from_namespace("GROUP", "KEYEX"),
+            Some(PircSubcommand::GroupKeyExchange)
+        );
+        assert_eq!(
+            PircSubcommand::from_namespace("GROUP", "P2P-OFFER"),
+            Some(PircSubcommand::GroupP2pOffer)
+        );
+        assert_eq!(
+            PircSubcommand::from_namespace("GROUP", "P2P-ANSWER"),
+            Some(PircSubcommand::GroupP2pAnswer)
+        );
+        assert_eq!(
+            PircSubcommand::from_namespace("GROUP", "P2P-ICE"),
+            Some(PircSubcommand::GroupP2pIce)
+        );
+        assert_eq!(PircSubcommand::from_namespace("GROUP", "UNKNOWN"), None);
+    }
+
+    #[test]
+    fn pirc_group_subcommand_display() {
+        assert_eq!(PircSubcommand::GroupCreate.to_string(), "GROUP CREATE");
+        assert_eq!(PircSubcommand::GroupInvite.to_string(), "GROUP INVITE");
+        assert_eq!(PircSubcommand::GroupJoin.to_string(), "GROUP JOIN");
+        assert_eq!(PircSubcommand::GroupLeave.to_string(), "GROUP LEAVE");
+        assert_eq!(PircSubcommand::GroupMessage.to_string(), "GROUP MSG");
+        assert_eq!(PircSubcommand::GroupMembers.to_string(), "GROUP MEMBERS");
+        assert_eq!(
+            PircSubcommand::GroupKeyExchange.to_string(),
+            "GROUP KEYEX"
+        );
+        assert_eq!(
+            PircSubcommand::GroupP2pOffer.to_string(),
+            "GROUP P2P-OFFER"
+        );
+        assert_eq!(
+            PircSubcommand::GroupP2pAnswer.to_string(),
+            "GROUP P2P-ANSWER"
+        );
+        assert_eq!(PircSubcommand::GroupP2pIce.to_string(), "GROUP P2P-ICE");
+    }
+
+    #[test]
+    fn pirc_group_is_namespaced() {
+        assert!(PircSubcommand::GroupCreate.is_namespaced());
+        assert!(PircSubcommand::GroupInvite.is_namespaced());
+        assert!(PircSubcommand::GroupJoin.is_namespaced());
+        assert!(PircSubcommand::GroupLeave.is_namespaced());
+        assert!(PircSubcommand::GroupMessage.is_namespaced());
+        assert!(PircSubcommand::GroupMembers.is_namespaced());
+        assert!(PircSubcommand::GroupKeyExchange.is_namespaced());
+        assert!(PircSubcommand::GroupP2pOffer.is_namespaced());
+        assert!(PircSubcommand::GroupP2pAnswer.is_namespaced());
+        assert!(PircSubcommand::GroupP2pIce.is_namespaced());
     }
 
     // ---- PircSubcommand: unknown namespace ----

@@ -107,7 +107,11 @@ fn parse_pirc_command(prefix: Option<Prefix>, remainder: &str) -> Result<Message
     };
 
     // Check for namespaced subcommands (CLUSTER, INVITE-KEY, NETWORK, P2P) first
-    if sub_str == "CLUSTER" || sub_str == "P2P" || sub_str == "INVITE-KEY" || sub_str == "NETWORK"
+    if sub_str == "CLUSTER"
+        || sub_str == "P2P"
+        || sub_str == "INVITE-KEY"
+        || sub_str == "NETWORK"
+        || sub_str == "GROUP"
     {
         let after_sub = after_sub.trim_start();
         if after_sub.is_empty() {
@@ -241,3 +245,7 @@ fn parse_params(input: &str) -> Result<Vec<String>, ProtocolError> {
 #[cfg(test)]
 #[path = "parser_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "parser_tests_pirc.rs"]
+mod tests_pirc;

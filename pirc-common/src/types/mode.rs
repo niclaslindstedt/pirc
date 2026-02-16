@@ -84,6 +84,27 @@ impl fmt::Display for UserMode {
     }
 }
 
+/// Role of a member within a group chat.
+///
+/// Ordering reflects privilege: `Member < Admin`.
+/// The derived `Ord` implementation respects variant declaration order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum GroupMemberRole {
+    /// Regular group member.
+    Member,
+    /// Group administrator with management privileges.
+    Admin,
+}
+
+impl fmt::Display for GroupMemberRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Member => f.write_str("member"),
+            Self::Admin => f.write_str("admin"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,5 +375,51 @@ mod tests {
                 &UserMode::Admin,
             ]
         );
+    }
+
+    // ---- GroupMemberRole ----
+
+    #[test]
+    fn group_member_role_display() {
+        assert_eq!(GroupMemberRole::Member.to_string(), "member");
+        assert_eq!(GroupMemberRole::Admin.to_string(), "admin");
+    }
+
+    #[test]
+    fn group_member_role_equality() {
+        assert_eq!(GroupMemberRole::Member, GroupMemberRole::Member);
+        assert_eq!(GroupMemberRole::Admin, GroupMemberRole::Admin);
+        assert_ne!(GroupMemberRole::Member, GroupMemberRole::Admin);
+    }
+
+    #[test]
+    fn group_member_role_ordering() {
+        assert!(GroupMemberRole::Member < GroupMemberRole::Admin);
+    }
+
+    #[test]
+    fn group_member_role_copy() {
+        let role = GroupMemberRole::Admin;
+        let copied = role;
+        assert_eq!(role, copied);
+    }
+
+    #[test]
+    fn group_member_role_hash() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(GroupMemberRole::Member);
+        set.insert(GroupMemberRole::Admin);
+        set.insert(GroupMemberRole::Member);
+        assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn group_member_role_serde_roundtrip() {
+        for role in [GroupMemberRole::Member, GroupMemberRole::Admin] {
+            let json = serde_json::to_string(&role).unwrap();
+            let deserialized: GroupMemberRole = serde_json::from_str(&json).unwrap();
+            assert_eq!(role, deserialized);
+        }
     }
 }
