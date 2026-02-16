@@ -21,6 +21,10 @@ pub enum P2pError {
     #[error("TURN request to {0} timed out")]
     TurnTimeout(SocketAddr),
 
+    /// ICE protocol error.
+    #[error("ICE error: {0}")]
+    Ice(String),
+
     /// Network I/O error.
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
