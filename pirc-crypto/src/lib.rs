@@ -14,12 +14,14 @@
 //! - **Post-quantum signatures** — [`signing`] ML-DSA (Dilithium) digital signatures
 //! - **Ratchets** — [`dh_ratchet`], [`symmetric_ratchet`], [`pq_ratchet`]
 //! - **Session** — [`triple_ratchet`] combined session state machine
+//! - **Group encryption** — [`group_key`] pairwise group key management
 //! - **Wire format** — [`header`] encryption and [`message`] types
 //! - **Protocol** — [`protocol`] wire protocol encoding for key exchange
 
 pub mod aead;
 pub mod dh_ratchet;
 pub mod error;
+pub mod group_key;
 pub mod header;
 pub mod identity;
 pub mod kdf;
