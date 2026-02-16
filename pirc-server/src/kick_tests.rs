@@ -80,6 +80,7 @@ fn register_user(
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -92,6 +93,7 @@ fn register_user(
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -130,6 +132,7 @@ async fn kick_success_broadcasts_to_all_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#general"),
@@ -142,6 +145,7 @@ async fn kick_success_broadcasts_to_all_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -158,6 +162,7 @@ async fn kick_success_broadcasts_to_all_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Alice receives KICK broadcast.
@@ -217,6 +222,7 @@ async fn kick_with_reason() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#general"),
@@ -229,6 +235,7 @@ async fn kick_with_reason() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -245,6 +252,7 @@ async fn kick_with_reason() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Alice receives KICK with reason.
@@ -287,6 +295,7 @@ async fn kick_empty_channel_is_cleaned_up() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#temp"),
@@ -299,6 +308,7 @@ async fn kick_empty_channel_is_cleaned_up() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -317,6 +327,7 @@ async fn kick_empty_channel_is_cleaned_up() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -338,6 +349,7 @@ async fn kick_empty_channel_is_cleaned_up() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
 
@@ -374,6 +386,7 @@ async fn kick_last_member_cleans_up_channel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#temp"),
@@ -386,6 +399,7 @@ async fn kick_last_member_cleans_up_channel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -403,6 +417,7 @@ async fn kick_last_member_cleans_up_channel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -439,6 +454,7 @@ async fn kick_last_member_cleans_up_channel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx2.try_recv().is_ok() {}
     while rx3.try_recv().is_ok() {}
@@ -456,6 +472,7 @@ async fn kick_last_member_cleans_up_channel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx2.try_recv().is_ok() {}
     while rx3.try_recv().is_ok() {}
@@ -491,6 +508,7 @@ async fn kick_last_member_cleans_up_channel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx3.try_recv().is_ok() {}
     while rx4.try_recv().is_ok() {}
@@ -508,6 +526,7 @@ async fn kick_last_member_cleans_up_channel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx3.try_recv().is_ok() {}
     while rx4.try_recv().is_ok() {}
@@ -543,7 +562,7 @@ async fn kick_no_params_returns_err_needmoreparams() {
     );
 
     let msg = Message::new(Command::Kick, vec![]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()), &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -565,7 +584,7 @@ async fn kick_one_param_returns_err_needmoreparams() {
     );
 
     let msg = Message::new(Command::Kick, vec!["#general".to_owned()]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()), &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -597,6 +616,7 @@ async fn kick_nonexistent_channel_returns_err_nosuchchannel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -629,6 +649,7 @@ async fn kick_invalid_channel_name_returns_err_nosuchchannel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -676,6 +697,7 @@ async fn kick_not_on_channel_returns_err_notonchannel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -711,6 +733,7 @@ async fn kick_non_operator_returns_err_chanoprivsneeded() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#general"),
@@ -723,6 +746,7 @@ async fn kick_non_operator_returns_err_chanoprivsneeded() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -739,6 +763,7 @@ async fn kick_non_operator_returns_err_chanoprivsneeded() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -782,6 +807,7 @@ async fn kick_target_not_on_channel_returns_err_usernotinchannel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
 
@@ -797,6 +823,7 @@ async fn kick_target_not_on_channel_returns_err_usernotinchannel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx1.recv().await.unwrap();
@@ -841,6 +868,7 @@ async fn kick_voiced_user_cannot_kick() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#general"),
@@ -853,6 +881,7 @@ async fn kick_voiced_user_cannot_kick() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#general"),
@@ -865,6 +894,7 @@ async fn kick_voiced_user_cannot_kick() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -891,6 +921,7 @@ async fn kick_voiced_user_cannot_kick() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -945,6 +976,7 @@ async fn kick_broadcasts_to_third_party_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#general"),
@@ -957,6 +989,7 @@ async fn kick_broadcasts_to_third_party_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#general"),
@@ -969,6 +1002,7 @@ async fn kick_broadcasts_to_third_party_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -986,6 +1020,7 @@ async fn kick_broadcasts_to_third_party_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Charlie (third-party) also receives the KICK broadcast.

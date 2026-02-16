@@ -77,6 +77,7 @@ fn register_user(
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -89,6 +90,7 @@ fn register_user(
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -125,6 +127,7 @@ async fn topic_query_no_topic_returns_rpl_notopic() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -140,6 +143,7 @@ async fn topic_query_no_topic_returns_rpl_notopic() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -174,6 +178,7 @@ async fn topic_query_with_topic_returns_rpl_topic_and_whotime() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -197,6 +202,7 @@ async fn topic_query_with_topic_returns_rpl_topic_and_whotime() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -240,6 +246,7 @@ async fn topic_set_broadcasts_to_channel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#general"),
@@ -252,6 +259,7 @@ async fn topic_set_broadcasts_to_channel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -268,6 +276,7 @@ async fn topic_set_broadcasts_to_channel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Alice receives TOPIC broadcast.
@@ -324,6 +333,7 @@ async fn topic_set_by_normal_user_without_topic_protected() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#general"),
@@ -336,6 +346,7 @@ async fn topic_set_by_normal_user_without_topic_protected() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -352,6 +363,7 @@ async fn topic_set_by_normal_user_without_topic_protected() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Bob receives TOPIC broadcast.
@@ -397,6 +409,7 @@ async fn topic_clear_with_empty_trailing() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -412,6 +425,7 @@ async fn topic_clear_with_empty_trailing() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -435,6 +449,7 @@ async fn topic_clear_with_empty_trailing() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Should receive TOPIC broadcast with empty trailing.
@@ -481,6 +496,7 @@ async fn topic_protected_mode_denies_normal_user() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#general"),
@@ -493,6 +509,7 @@ async fn topic_protected_mode_denies_normal_user() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -517,6 +534,7 @@ async fn topic_protected_mode_denies_normal_user() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -556,6 +574,7 @@ async fn topic_protected_mode_allows_operator() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -579,6 +598,7 @@ async fn topic_protected_mode_allows_operator() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -611,7 +631,7 @@ async fn topic_no_params_returns_err_needmoreparams() {
     );
 
     let msg = Message::new(Command::Topic, vec![]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()), &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -643,6 +663,7 @@ async fn topic_nonexistent_channel_returns_err_nosuchchannel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -675,6 +696,7 @@ async fn topic_invalid_channel_name_returns_err_nosuchchannel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -719,6 +741,7 @@ async fn topic_not_on_channel_returns_err_notonchannel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -763,6 +786,7 @@ async fn topic_set_not_on_channel_returns_err_notonchannel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -798,6 +822,7 @@ async fn topic_protected_voiced_user_denied() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#general"),
@@ -810,6 +835,7 @@ async fn topic_protected_voiced_user_denied() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -836,6 +862,7 @@ async fn topic_protected_voiced_user_denied() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx2.recv().await.unwrap();

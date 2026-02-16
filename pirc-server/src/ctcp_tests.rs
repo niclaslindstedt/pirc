@@ -70,6 +70,7 @@ fn register_user(
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -82,6 +83,7 @@ fn register_user(
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -119,6 +121,7 @@ async fn ctcp_action_to_channel_preserves_delimiters() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#general"),
@@ -131,6 +134,7 @@ async fn ctcp_action_to_channel_preserves_delimiters() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -148,6 +152,7 @@ async fn ctcp_action_to_channel_preserves_delimiters() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Bob should receive the message with \x01 delimiters preserved.
@@ -189,6 +194,7 @@ async fn ctcp_action_to_user_preserves_delimiters() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Bob should receive the message with \x01 delimiters preserved.
@@ -233,6 +239,7 @@ async fn ctcp_version_request_passes_through() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -273,6 +280,7 @@ async fn ctcp_ping_request_passes_through() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -313,6 +321,7 @@ async fn ctcp_version_reply_via_notice_passes_through() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -351,6 +360,7 @@ async fn ctcp_ping_reply_via_notice_passes_through() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -390,6 +400,7 @@ async fn ctcp_preserves_soh_bytes_exactly() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -446,6 +457,7 @@ async fn ctcp_action_channel_broadcast_to_all_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#test"),
@@ -458,6 +470,7 @@ async fn ctcp_action_channel_broadcast_to_all_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#test"),
@@ -470,6 +483,7 @@ async fn ctcp_action_channel_broadcast_to_all_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -488,6 +502,7 @@ async fn ctcp_action_channel_broadcast_to_all_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Alice should NOT receive her own action.

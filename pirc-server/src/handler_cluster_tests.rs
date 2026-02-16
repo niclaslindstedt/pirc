@@ -9,6 +9,7 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 use crate::channel_registry::ChannelRegistry;
 use crate::cluster::InviteKeyStore;
 use crate::config::ServerConfig;
+use crate::group_registry::GroupRegistry;
 use crate::degraded_mode::DegradedModeState;
 use crate::handler::{handle_message, PreRegistrationState};
 use crate::offline_store::OfflineMessageStore;
@@ -71,6 +72,7 @@ fn register_user(
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -83,6 +85,7 @@ fn register_user(
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     assert!(state.registered);
     while rx.try_recv().is_ok() {}
@@ -168,6 +171,7 @@ async fn invite_key_generate_requires_oper() {
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -190,6 +194,7 @@ async fn invite_key_generate_success() {
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -217,6 +222,7 @@ async fn invite_key_generate_with_custom_ttl() {
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -242,6 +248,7 @@ async fn invite_key_list_requires_oper() {
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -264,6 +271,7 @@ async fn invite_key_list_empty() {
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -293,6 +301,7 @@ async fn invite_key_list_shows_keys() {
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -321,6 +330,7 @@ async fn invite_key_revoke_requires_oper() {
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -352,6 +362,7 @@ async fn invite_key_revoke_success() {
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -378,6 +389,7 @@ async fn invite_key_revoke_not_found() {
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -401,6 +413,7 @@ async fn invite_key_revoke_missing_param() {
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -425,6 +438,7 @@ async fn cluster_status_shows_info() {
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -452,6 +466,7 @@ async fn cluster_members_shows_peers() {
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -481,6 +496,7 @@ async fn network_info_shows_servers_and_users() {
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -566,6 +582,7 @@ async fn commands_without_cluster_ctx_are_noop() {
             &msg, 1, &registry, &channels, &tx, &mut state, &config, None,
             &Arc::new(PreKeyBundleStore::new()),
             &Arc::new(OfflineMessageStore::default()),
+        &Arc::new(GroupRegistry::new()),
         );
     }
 

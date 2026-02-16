@@ -73,6 +73,7 @@ fn register_user(
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -85,6 +86,7 @@ fn register_user(
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -121,6 +123,7 @@ async fn mode_query_returns_channel_modes() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -146,6 +149,7 @@ async fn mode_query_returns_channel_modes() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -185,6 +189,7 @@ async fn mode_query_with_key_and_limit() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -208,6 +213,7 @@ async fn mode_query_with_key_and_limit() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -245,6 +251,7 @@ async fn mode_query_empty_modes() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -259,6 +266,7 @@ async fn mode_query_empty_modes() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -294,6 +302,7 @@ async fn mode_ban_list_query_empty() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -308,6 +317,7 @@ async fn mode_ban_list_query_empty() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -340,6 +350,7 @@ async fn mode_ban_list_query_with_entries() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -366,6 +377,7 @@ async fn mode_ban_list_query_with_entries() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.recv().await.unwrap();

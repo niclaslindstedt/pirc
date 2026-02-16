@@ -8,6 +8,7 @@ use crate::config::ServerConfig;
 use crate::handler::{handle_message, PreRegistrationState};
 use crate::offline_store::OfflineMessageStore;
 use crate::prekey_store::PreKeyBundleStore;
+use crate::group_registry::GroupRegistry;
 use crate::registry::UserRegistry;
 
 fn make_config() -> ServerConfig {
@@ -58,6 +59,7 @@ fn register_user(
 ) {
     let (tx, mut rx) = make_sender();
     let mut state = PreRegistrationState::new(hostname.to_owned());
+    let group_registry = Arc::new(GroupRegistry::new());
     handle_message(
         &nick_msg(nick),
         connection_id,
@@ -69,6 +71,7 @@ fn register_user(
         None,
         prekey_store,
         offline_store,
+        &group_registry,
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -81,6 +84,7 @@ fn register_user(
         None,
         prekey_store,
         offline_store,
+        &group_registry,
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -112,6 +116,7 @@ async fn p2p_offer_relay_to_target() {
 
     handle_message(
         &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     let relay = rx_bob.recv().await.unwrap();
@@ -142,7 +147,7 @@ async fn p2p_offer_target_offline_returns_nosuchnick() {
         vec!["Ghost".to_owned(), "sdp-data".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NOSUCHNICK));
@@ -162,7 +167,7 @@ async fn p2p_offer_no_params_returns_needmoreparams() {
 
     let msg = Message::new(Command::Pirc(PircSubcommand::P2pOffer), vec![]);
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NEEDMOREPARAMS));
@@ -192,6 +197,7 @@ async fn p2p_answer_relay_to_target() {
 
     handle_message(
         &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     let relay = rx_bob.recv().await.unwrap();
@@ -222,7 +228,7 @@ async fn p2p_answer_target_offline_returns_nosuchnick() {
         vec!["Ghost".to_owned(), "sdp-data".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NOSUCHNICK));
@@ -252,6 +258,7 @@ async fn p2p_ice_relay_to_target() {
 
     handle_message(
         &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     let relay = rx_bob.recv().await.unwrap();
@@ -282,7 +289,7 @@ async fn p2p_ice_target_offline_returns_nosuchnick() {
         vec!["Ghost".to_owned(), "candidate-data".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NOSUCHNICK));
@@ -302,7 +309,7 @@ async fn p2p_ice_no_params_returns_needmoreparams() {
 
     let msg = Message::new(Command::Pirc(PircSubcommand::P2pIce), vec![]);
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NEEDMOREPARAMS));
@@ -332,6 +339,7 @@ async fn p2p_established_relay_to_target() {
 
     handle_message(
         &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     let relay = rx_bob.recv().await.unwrap();
@@ -361,7 +369,7 @@ async fn p2p_established_target_offline_returns_nosuchnick() {
         vec!["Ghost".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NOSUCHNICK));
@@ -391,6 +399,7 @@ async fn p2p_failed_relay_to_target() {
 
     handle_message(
         &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     let relay = rx_bob.recv().await.unwrap();
@@ -421,7 +430,7 @@ async fn p2p_failed_target_offline_returns_nosuchnick() {
         vec!["Ghost".to_owned(), "no-connectivity".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NOSUCHNICK));
@@ -446,7 +455,7 @@ async fn p2p_offer_does_not_queue_offline() {
         vec!["Ghost".to_owned(), "sdp-data".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     // Should get ERR_NOSUCHNICK, not an offline notice.
     let reply = rx.recv().await.unwrap();
@@ -483,6 +492,7 @@ async fn p2p_ice_payload_forwarded_verbatim() {
 
     handle_message(
         &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     let relay = rx_bob.recv().await.unwrap();
@@ -513,6 +523,7 @@ async fn p2p_bidirectional_offer_answer() {
     );
     handle_message(
         &offer, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     let relay = rx_bob.recv().await.unwrap();
@@ -528,6 +539,7 @@ async fn p2p_bidirectional_offer_answer() {
     );
     handle_message(
         &answer, 2, &registry, &channels, &tx_bob, &mut state_bob, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     let relay = rx_alice.recv().await.unwrap();

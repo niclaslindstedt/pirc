@@ -66,6 +66,7 @@ fn register_user(
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -78,6 +79,7 @@ fn register_user(
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -133,6 +135,7 @@ async fn list_empty_returns_only_listend() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.try_recv().unwrap();
@@ -168,6 +171,7 @@ async fn list_shows_channels_with_members_and_topics() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {} // drain JOIN replies
 
@@ -189,6 +193,7 @@ async fn list_shows_channels_with_members_and_topics() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.try_recv().unwrap();
@@ -229,6 +234,7 @@ async fn list_hides_secret_channels_from_non_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_a.try_recv().is_ok() {}
 
@@ -253,6 +259,7 @@ async fn list_hides_secret_channels_from_non_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Bob should only see RPL_LISTEND, no RPL_LIST for #secret.
@@ -286,6 +293,7 @@ async fn list_shows_secret_channels_to_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -306,6 +314,7 @@ async fn list_shows_secret_channels_to_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.try_recv().unwrap();
@@ -342,6 +351,7 @@ async fn list_with_filter_shows_only_matching_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
     handle_message(
@@ -355,6 +365,7 @@ async fn list_with_filter_shows_only_matching_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -370,6 +381,7 @@ async fn list_with_filter_shows_only_matching_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.try_recv().unwrap();
@@ -406,6 +418,7 @@ async fn list_channel_with_no_topic_has_empty_trailing() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -420,6 +433,7 @@ async fn list_channel_with_no_topic_has_empty_trailing() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.try_recv().unwrap();
@@ -458,6 +472,7 @@ async fn names_specific_channel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -472,6 +487,7 @@ async fn names_specific_channel() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.try_recv().unwrap();
@@ -510,6 +526,7 @@ async fn names_nonexistent_channel_sends_endofnames() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx.try_recv().unwrap();
@@ -542,6 +559,7 @@ async fn names_no_args_lists_user_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_a.try_recv().is_ok() {}
 
@@ -559,6 +577,7 @@ async fn names_no_args_lists_user_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_b.try_recv().is_ok() {}
 
@@ -574,6 +593,7 @@ async fn names_no_args_lists_user_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Alice should get NAMREPLY + ENDOFNAMES for #mychannel only.
@@ -627,6 +647,7 @@ async fn names_shows_prefixes_for_operators_and_voiced() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_a.try_recv().is_ok() {}
     handle_message(
@@ -640,6 +661,7 @@ async fn names_shows_prefixes_for_operators_and_voiced() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_b.try_recv().is_ok() {}
     while rx_a.try_recv().is_ok() {} // drain Bob's JOIN from Alice
@@ -654,6 +676,7 @@ async fn names_shows_prefixes_for_operators_and_voiced() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_c.try_recv().is_ok() {}
     while rx_a.try_recv().is_ok() {} // drain Carol's JOIN from Alice
@@ -678,6 +701,7 @@ async fn names_shows_prefixes_for_operators_and_voiced() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let reply = rx_a.try_recv().unwrap();
@@ -734,6 +758,7 @@ async fn quit_removes_user_from_all_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
     handle_message(
@@ -747,12 +772,13 @@ async fn quit_removes_user_from_all_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
     // QUIT.
     let quit = Message::new(Command::Quit, vec!["Goodbye".to_owned()]);
-    let result = handle_message(&quit, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
+    let result = handle_message(&quit, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()), &Arc::new(GroupRegistry::new()));
 
     assert!(matches!(result, HandleResult::Quit));
 
@@ -791,6 +817,7 @@ async fn quit_broadcasts_to_channel_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_a.try_recv().is_ok() {}
     handle_message(
@@ -804,13 +831,14 @@ async fn quit_broadcasts_to_channel_members() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_b.try_recv().is_ok() {}
     while rx_a.try_recv().is_ok() {} // drain Bob's JOIN from Alice
 
     // Alice quits.
     let quit = Message::new(Command::Quit, vec!["Leaving".to_owned()]);
-    handle_message(&quit, 1, &registry, &channels, &tx_a, &mut state_a, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
+    handle_message(&quit, 1, &registry, &channels, &tx_a, &mut state_a, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()), &Arc::new(GroupRegistry::new()));
 
     // Bob should receive the QUIT message.
     let reply = rx_b.try_recv().unwrap();
@@ -851,6 +879,7 @@ async fn quit_broadcasts_once_per_user_across_shared_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_a.try_recv().is_ok() {}
     handle_message(
@@ -864,6 +893,7 @@ async fn quit_broadcasts_once_per_user_across_shared_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_b.try_recv().is_ok() {}
     while rx_a.try_recv().is_ok() {}
@@ -879,6 +909,7 @@ async fn quit_broadcasts_once_per_user_across_shared_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_a.try_recv().is_ok() {}
     handle_message(
@@ -892,13 +923,14 @@ async fn quit_broadcasts_once_per_user_across_shared_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_b.try_recv().is_ok() {}
     while rx_a.try_recv().is_ok() {}
 
     // Alice quits.
     let quit = Message::new(Command::Quit, vec!["Bye".to_owned()]);
-    handle_message(&quit, 1, &registry, &channels, &tx_a, &mut state_a, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
+    handle_message(&quit, 1, &registry, &channels, &tx_a, &mut state_a, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()), &Arc::new(GroupRegistry::new()));
 
     // Bob should receive exactly ONE QUIT message (deduplicated across channels).
     let reply = rx_b.try_recv().unwrap();
@@ -938,6 +970,7 @@ async fn quit_cleans_up_empty_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_a.try_recv().is_ok() {}
     handle_message(
@@ -951,6 +984,7 @@ async fn quit_cleans_up_empty_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_a.try_recv().is_ok() {}
     handle_message(
@@ -964,13 +998,14 @@ async fn quit_cleans_up_empty_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_b.try_recv().is_ok() {}
     while rx_a.try_recv().is_ok() {}
 
     // Alice quits.
     let quit = Message::new(Command::Quit, vec!["Gone".to_owned()]);
-    handle_message(&quit, 1, &registry, &channels, &tx_a, &mut state_a, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
+    handle_message(&quit, 1, &registry, &channels, &tx_a, &mut state_a, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()), &Arc::new(GroupRegistry::new()));
 
     // #alone should be cleaned up (empty).
     assert!(channels.get(&channel_name("#alone")).is_none());
@@ -1010,6 +1045,7 @@ async fn names_comma_separated_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
     handle_message(
@@ -1023,6 +1059,7 @@ async fn names_comma_separated_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -1038,6 +1075,7 @@ async fn names_comma_separated_channels() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Should get NAMREPLY + ENDOFNAMES for each channel.
@@ -1084,6 +1122,7 @@ async fn list_multiple_channels_shows_correct_member_counts() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_a.try_recv().is_ok() {}
     handle_message(
@@ -1097,6 +1136,7 @@ async fn list_multiple_channels_shows_correct_member_counts() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_b.try_recv().is_ok() {}
     while rx_a.try_recv().is_ok() {}
@@ -1111,6 +1151,7 @@ async fn list_multiple_channels_shows_correct_member_counts() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx_b.try_recv().is_ok() {}
 
@@ -1125,6 +1166,7 @@ async fn list_multiple_channels_shows_correct_member_counts() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Collect RPL_LIST replies.

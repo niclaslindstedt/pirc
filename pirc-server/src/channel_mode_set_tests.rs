@@ -72,6 +72,7 @@ fn register_user(
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -84,6 +85,7 @@ fn register_user(
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -119,6 +121,7 @@ async fn mode_set_invite_only() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -133,6 +136,7 @@ async fn mode_set_invite_only() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Verify mode was set.
@@ -174,6 +178,7 @@ async fn mode_unset_invite_only() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -196,6 +201,7 @@ async fn mode_unset_invite_only() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -234,6 +240,7 @@ async fn mode_set_multiple_flags() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -248,6 +255,7 @@ async fn mode_set_multiple_flags() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -292,6 +300,7 @@ async fn mode_set_key() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -306,6 +315,7 @@ async fn mode_set_key() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -350,6 +360,7 @@ async fn mode_unset_key() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -372,6 +383,7 @@ async fn mode_unset_key() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -410,6 +422,7 @@ async fn mode_set_limit() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -424,6 +437,7 @@ async fn mode_set_limit() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -468,6 +482,7 @@ async fn mode_unset_limit() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -490,6 +505,7 @@ async fn mode_unset_limit() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -532,6 +548,7 @@ async fn mode_set_operator() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#test"),
@@ -544,6 +561,7 @@ async fn mode_set_operator() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -560,6 +578,7 @@ async fn mode_set_operator() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -609,6 +628,7 @@ async fn mode_unset_operator() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#test"),
@@ -621,6 +641,7 @@ async fn mode_unset_operator() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -647,6 +668,7 @@ async fn mode_unset_operator() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -687,6 +709,7 @@ async fn mode_set_voice() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     handle_message(
         &join_msg("#test"),
@@ -699,6 +722,7 @@ async fn mode_set_voice() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -715,6 +739,7 @@ async fn mode_set_voice() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -757,6 +782,7 @@ async fn mode_add_ban() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -771,6 +797,7 @@ async fn mode_add_ban() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -812,6 +839,7 @@ async fn mode_remove_ban() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -838,6 +866,7 @@ async fn mode_remove_ban() {
         None,
         &Arc::new(PreKeyBundleStore::new()),
         &Arc::new(OfflineMessageStore::default()),
+    &Arc::new(GroupRegistry::new()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();

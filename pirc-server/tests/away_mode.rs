@@ -86,6 +86,7 @@ async fn handle_connection(
                     &msg, conn_id, &registry, &channels, &tx, &mut state, &config, None,
                     &prekey_store,
                     &offline_store,
+                &Arc::new(pirc_server::group_registry::GroupRegistry::new()),
                 );
                 while let Ok(out_msg) = rx.try_recv() {
                     if connection.send(out_msg).await.is_err() {

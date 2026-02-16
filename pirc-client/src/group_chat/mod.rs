@@ -160,6 +160,75 @@ impl GroupChatManager {
         }
     }
 
+    // ── Join / Leave handling ────────────────────────────────────────
+
+    /// Handles a new member joining a group.
+    ///
+    /// Adds the member to both the key manager and mesh. The caller
+    /// is responsible for initiating key exchange and P2P connections
+    /// with the new member afterwards.
+    ///
+    /// Returns `true` if the member was added (group exists and member
+    /// was not already tracked), `false` otherwise.
+    pub fn handle_member_join(&mut self, group_id: GroupId, nickname: &str) -> bool {
+        let Some(state) = self.groups.get_mut(&group_id) else {
+            warn!(group_id = group_id.as_u64(), nickname, "handle_member_join: group not found");
+            return false;
+        };
+
+        // Check if member is already tracked
+        if state.key_manager.member_state(nickname).is_some() {
+            debug!(group_id = group_id.as_u64(), nickname, "member already in group");
+            return false;
+        }
+
+        info!(group_id = group_id.as_u64(), nickname, "new member joined group");
+        state.key_manager.add_member(nickname);
+        state.mesh.add_member(nickname.to_owned());
+        true
+    }
+
+    /// Handles a member leaving a group.
+    ///
+    /// Removes the member from both the key manager (discarding their
+    /// pairwise session) and the mesh (tearing down P2P transport).
+    /// The triple ratchet's forward secrecy ensures the departed member
+    /// cannot decrypt future messages.
+    ///
+    /// Returns `true` if the member was removed, `false` if the group
+    /// doesn't exist or the member wasn't tracked.
+    pub fn handle_member_leave(&mut self, group_id: GroupId, nickname: &str) -> bool {
+        let Some(state) = self.groups.get_mut(&group_id) else {
+            warn!(group_id = group_id.as_u64(), nickname, "handle_member_leave: group not found");
+            return false;
+        };
+
+        if state.key_manager.member_state(nickname).is_none() {
+            debug!(group_id = group_id.as_u64(), nickname, "member not in group, nothing to remove");
+            return false;
+        }
+
+        info!(group_id = group_id.as_u64(), nickname, "member left group");
+        state.key_manager.remove_member(nickname);
+        state.mesh.remove_member(nickname);
+        true
+    }
+
+    /// Returns the nicknames of all members in a group (all encryption states).
+    #[must_use]
+    pub fn group_members(&self, group_id: GroupId) -> Vec<String> {
+        self.groups
+            .get(&group_id)
+            .map(|s| {
+                s.key_manager
+                    .members()
+                    .into_iter()
+                    .map(|(nick, _)| nick)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     // ── Query ────────────────────────────────────────────────────────
 
     /// Returns the encryption state for a member.

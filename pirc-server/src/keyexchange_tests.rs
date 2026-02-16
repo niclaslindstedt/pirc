@@ -9,6 +9,7 @@ use crate::config::ServerConfig;
 use crate::handler::{handle_message, PreRegistrationState};
 use crate::offline_store::OfflineMessageStore;
 use crate::prekey_store::PreKeyBundleStore;
+use crate::group_registry::GroupRegistry;
 use crate::registry::UserRegistry;
 
 fn make_config() -> ServerConfig {
@@ -59,6 +60,7 @@ fn register_user(
 ) {
     let (tx, mut rx) = make_sender();
     let mut state = PreRegistrationState::new(hostname.to_owned());
+    let group_registry = Arc::new(GroupRegistry::new());
     handle_message(
         &nick_msg(nick),
         connection_id,
@@ -70,6 +72,7 @@ fn register_user(
         None,
         prekey_store,
         offline_store,
+        &group_registry,
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -82,6 +85,7 @@ fn register_user(
         None,
         prekey_store,
         offline_store,
+        &group_registry,
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -112,7 +116,7 @@ async fn store_bundle_via_keyexchange_self() {
         vec!["*".to_owned(), encoded],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     // Should receive acknowledgment notice.
     let reply = rx.recv().await.unwrap();
@@ -142,7 +146,7 @@ async fn store_bundle_invalid_encoding_sends_error() {
         vec!["*".to_owned(), "not-valid-base64!!!".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Notice);
@@ -170,7 +174,7 @@ async fn store_bundle_wrong_tag_sends_error() {
         vec!["*".to_owned(), encoded],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Notice);
@@ -207,7 +211,7 @@ async fn request_bundle_returns_stored_bundle() {
         vec!["Bob".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     // Alice should receive Bob's bundle back.
     let reply = rx.recv().await.unwrap();
@@ -247,7 +251,7 @@ async fn request_bundle_with_explicit_request_tag() {
         vec!["Bob".to_owned(), encoded],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert!(matches!(reply.command, Command::Pirc(PircSubcommand::KeyExchange)));
@@ -273,7 +277,7 @@ async fn request_bundle_missing_sends_notice() {
         vec!["Bob".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Notice);
@@ -307,7 +311,7 @@ async fn relay_init_message_to_target() {
         vec!["Bob".to_owned(), encoded.clone()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     // Bob should receive the relayed message.
     let relay = rx_bob.recv().await.unwrap();
@@ -347,7 +351,7 @@ async fn relay_complete_message_to_target() {
         vec!["Bob".to_owned(), encoded.clone()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let relay = rx_bob.recv().await.unwrap();
     assert!(matches!(relay.command, Command::Pirc(PircSubcommand::KeyExchange)));
@@ -379,7 +383,7 @@ async fn relay_bundle_message_to_target() {
         vec!["Bob".to_owned(), encoded.clone()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let relay = rx_bob.recv().await.unwrap();
     assert!(matches!(relay.command, Command::Pirc(PircSubcommand::KeyExchange)));
@@ -409,7 +413,7 @@ async fn relay_to_nonexistent_target_sends_nosuchnick() {
         vec!["Ghost".to_owned(), encoded],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Notice);
@@ -433,7 +437,7 @@ async fn keyexchange_no_params_sends_need_more_params() {
         vec![],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NEEDMOREPARAMS));

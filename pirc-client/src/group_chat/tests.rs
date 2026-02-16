@@ -745,3 +745,163 @@ async fn member_disconnected_updates_state() {
         Some(PeerConnectionState::Disconnected)
     );
 }
+
+// ── handle_member_join ──────────────────────────────────────────
+
+#[test]
+fn handle_member_join_adds_to_group() {
+    let mut mgr = GroupChatManager::new();
+    let gid = GroupId::new(1);
+    mgr.add_group(gid);
+
+    assert!(mgr.handle_member_join(gid, "alice"));
+    assert_eq!(
+        mgr.member_encryption_state(gid, "alice"),
+        Some(GroupEncryptionState::Pending)
+    );
+    assert_eq!(
+        mgr.member_connection_state(gid, "alice"),
+        Some(PeerConnectionState::Connecting)
+    );
+}
+
+#[test]
+fn handle_member_join_duplicate_returns_false() {
+    let mut mgr = GroupChatManager::new();
+    let gid = GroupId::new(1);
+    mgr.add_group(gid);
+
+    assert!(mgr.handle_member_join(gid, "alice"));
+    assert!(!mgr.handle_member_join(gid, "alice"));
+}
+
+#[test]
+fn handle_member_join_nonexistent_group_returns_false() {
+    let mut mgr = GroupChatManager::new();
+    assert!(!mgr.handle_member_join(GroupId::new(999), "alice"));
+}
+
+// ── handle_member_leave ─────────────────────────────────────────
+
+#[test]
+fn handle_member_leave_removes_from_group() {
+    let mut mgr = GroupChatManager::new();
+    let gid = GroupId::new(1);
+    mgr.add_group(gid);
+    mgr.add_member(gid, "alice");
+    let (session, _) = create_test_session_pair();
+    mgr.set_member_session(gid, "alice", session);
+
+    assert!(mgr.handle_member_leave(gid, "alice"));
+    assert!(mgr.member_encryption_state(gid, "alice").is_none());
+    assert!(mgr.member_connection_state(gid, "alice").is_none());
+}
+
+#[test]
+fn handle_member_leave_nonexistent_member_returns_false() {
+    let mut mgr = GroupChatManager::new();
+    let gid = GroupId::new(1);
+    mgr.add_group(gid);
+
+    assert!(!mgr.handle_member_leave(gid, "ghost"));
+}
+
+#[test]
+fn handle_member_leave_nonexistent_group_returns_false() {
+    let mut mgr = GroupChatManager::new();
+    assert!(!mgr.handle_member_leave(GroupId::new(999), "alice"));
+}
+
+#[tokio::test]
+async fn handle_member_leave_cleans_up_encryption_and_mesh() {
+    let mut mgr = GroupChatManager::new();
+    let gid = GroupId::new(1);
+    mgr.add_group(gid);
+
+    mgr.add_member(gid, "alice");
+    let (session, _) = create_test_session_pair();
+    mgr.set_member_session(gid, "alice", session);
+    mgr.member_connected(gid, "alice", mock_transport().await);
+
+    assert!(mgr.all_encryption_ready(gid));
+    assert!(!mgr.connected_members(gid).is_empty());
+
+    assert!(mgr.handle_member_leave(gid, "alice"));
+
+    // Both encryption and mesh should be cleaned up
+    assert!(mgr.member_encryption_state(gid, "alice").is_none());
+    assert!(mgr.connected_members(gid).is_empty());
+}
+
+#[tokio::test]
+async fn join_leave_encryption_roundtrip() {
+    // Simulate: me has alice as member, bob joins, then alice leaves
+    let (me_to_alice, _alice_from_me) = create_test_session_pair();
+    let (me_to_bob, bob_from_me) = create_test_session_pair();
+
+    let gid = GroupId::new(1);
+
+    let mut me_mgr = GroupChatManager::new();
+    me_mgr.add_group(gid);
+    me_mgr.add_member(gid, "alice");
+    me_mgr.set_member_session(gid, "alice", me_to_alice);
+    me_mgr.member_degraded(gid, "alice", "test".into());
+
+    // Bob joins
+    assert!(me_mgr.handle_member_join(gid, "bob"));
+    me_mgr.set_member_session(gid, "bob", me_to_bob);
+    me_mgr.member_degraded(gid, "bob", "test".into());
+
+    // Send a message — both alice and bob should get copies
+    let (deliveries, _) = me_mgr.send_message(gid, b"hello all").await.unwrap();
+    assert_eq!(deliveries.len(), 2);
+
+    // Alice leaves
+    assert!(me_mgr.handle_member_leave(gid, "alice"));
+
+    // Now send again — only bob should get a copy
+    let (deliveries, relays) = me_mgr.send_message(gid, b"after alice left").await.unwrap();
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(deliveries[0].recipient, "bob");
+
+    // Bob can decrypt the message
+    let mut bob_mgr = GroupChatManager::new();
+    bob_mgr.add_group(gid);
+    bob_mgr.add_member(gid, "me");
+    bob_mgr.set_member_session(gid, "me", bob_from_me);
+
+    // Need to decrypt the first message sent to bob (before alice left)
+    // to keep ratchet in sync
+    let bob_relay_first = relays.iter().find(|r| r.target == "bob");
+    if let Some(relay) = bob_relay_first {
+        let _ = bob_mgr.receive_message(gid, "me", &relay.encrypted_payload);
+    }
+
+    // Decrypt the second message (after alice left)
+    let (_, relays2) = me_mgr.send_message(gid, b"bob only msg").await.unwrap();
+    let received = bob_mgr
+        .receive_message(gid, "me", &relays2[0].encrypted_payload)
+        .unwrap();
+    assert_eq!(received.plaintext, b"bob only msg");
+}
+
+// ── group_members query ─────────────────────────────────────────
+
+#[test]
+fn group_members_returns_all() {
+    let mut mgr = GroupChatManager::new();
+    let gid = GroupId::new(1);
+    mgr.add_group(gid);
+    mgr.add_member(gid, "alice");
+    mgr.add_member(gid, "bob");
+
+    let mut members = mgr.group_members(gid);
+    members.sort();
+    assert_eq!(members, vec!["alice", "bob"]);
+}
+
+#[test]
+fn group_members_empty_for_unknown_group() {
+    let mgr = GroupChatManager::new();
+    assert!(mgr.group_members(GroupId::new(999)).is_empty());
+}

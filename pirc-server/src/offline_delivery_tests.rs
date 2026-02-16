@@ -8,6 +8,7 @@ use crate::config::ServerConfig;
 use crate::handler::{handle_message, PreRegistrationState};
 use crate::offline_store::OfflineMessageStore;
 use crate::prekey_store::PreKeyBundleStore;
+use crate::group_registry::GroupRegistry;
 use crate::registry::UserRegistry;
 
 fn make_config() -> ServerConfig {
@@ -52,6 +53,7 @@ fn register_user(
 ) {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut state = PreRegistrationState::new(hostname.to_owned());
+    let group_registry = Arc::new(GroupRegistry::new());
     handle_message(
         &nick_msg(nick),
         connection_id,
@@ -63,6 +65,7 @@ fn register_user(
         None,
         prekey_store,
         offline_store,
+        &group_registry,
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -75,6 +78,7 @@ fn register_user(
         None,
         prekey_store,
         offline_store,
+        &group_registry,
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -101,6 +105,7 @@ fn register_user_collect_offline(
 ) {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut state = PreRegistrationState::new(hostname.to_owned());
+    let group_registry = Arc::new(GroupRegistry::new());
     handle_message(
         &nick_msg(nick),
         connection_id,
@@ -112,6 +117,7 @@ fn register_user_collect_offline(
         None,
         prekey_store,
         offline_store,
+        &group_registry,
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -124,6 +130,7 @@ fn register_user_collect_offline(
         None,
         prekey_store,
         offline_store,
+        &group_registry,
     );
     assert!(state.registered, "registration should have completed");
 
@@ -164,6 +171,7 @@ async fn encrypted_message_queued_and_delivered_on_reconnect() {
     );
     handle_message(
         &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Alice should get a notice about Bob being offline.
@@ -204,6 +212,7 @@ async fn keyexchange_message_queued_and_delivered_on_reconnect() {
     );
     handle_message(
         &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Alice should get a notice about Bob being offline.
@@ -243,6 +252,7 @@ async fn key_exchange_delivered_before_encrypted_on_reconnect() {
     );
     handle_message(
         &enc_msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
     let _ = rx_alice.recv().await.unwrap(); // offline notice
 
@@ -255,6 +265,7 @@ async fn key_exchange_delivered_before_encrypted_on_reconnect() {
     );
     handle_message(
         &ke_msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
     let _ = rx_alice.recv().await.unwrap(); // offline notice
 
@@ -296,6 +307,7 @@ async fn sender_prefix_preserved_in_offline_messages() {
     );
     handle_message(
         &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Bob connects.
@@ -338,6 +350,7 @@ async fn multiple_senders_queued_for_same_offline_user() {
     );
     handle_message(
         &msg1, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     let msg2 = Message::new(
@@ -346,6 +359,7 @@ async fn multiple_senders_queued_for_same_offline_user() {
     );
     handle_message(
         &msg2, 3, &registry, &channels, &tx_carol, &mut state_carol, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Bob connects.
@@ -378,6 +392,7 @@ async fn offline_queue_cleared_after_delivery() {
     );
     handle_message(
         &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Bob connects first time — gets the message.
@@ -429,6 +444,7 @@ async fn keyexchange_ack_queued_for_offline_user() {
     );
     handle_message(
         &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     // Bob connects and should get the queued message.
@@ -461,6 +477,7 @@ async fn full_ordering_ke_ack_complete_then_encrypted() {
     );
     handle_message(
         &enc, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
     let _ = rx_alice.recv().await.unwrap();
 
@@ -471,6 +488,7 @@ async fn full_ordering_ke_ack_complete_then_encrypted() {
     );
     handle_message(
         &kec, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
     let _ = rx_alice.recv().await.unwrap();
 
@@ -481,6 +499,7 @@ async fn full_ordering_ke_ack_complete_then_encrypted() {
     );
     handle_message(
         &kea, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
     let _ = rx_alice.recv().await.unwrap();
 
@@ -493,6 +512,7 @@ async fn full_ordering_ke_ack_complete_then_encrypted() {
     );
     handle_message(
         &ke, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
     let _ = rx_alice.recv().await.unwrap();
 

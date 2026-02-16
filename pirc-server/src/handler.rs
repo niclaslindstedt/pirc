@@ -20,6 +20,7 @@ use crate::raft::types::NodeId;
 
 use crate::channel_registry::ChannelRegistry;
 use crate::config::ServerConfig;
+use crate::group_registry::GroupRegistry;
 use crate::handler_channel::{
     handle_ban, handle_channel_mode, handle_invite, handle_join, handle_kick, handle_list,
     handle_names, handle_notice, handle_part, handle_privmsg, handle_topic,
@@ -29,6 +30,7 @@ use crate::handler_cluster::{
     self, ClusterContext,
 };
 use crate::handler_oper::{handle_die, handle_kill, handle_oper, handle_restart, handle_wallops};
+use crate::handler_group;
 use crate::handler_p2p::handle_p2p_relay;
 use crate::handler_relay::handle_relay;
 #[allow(unused_imports)] // Re-exported for test submodules that use `super::*`
@@ -96,6 +98,7 @@ pub fn handle_message(
     cluster_ctx: Option<&ClusterContext>,
     prekey_store: &Arc<PreKeyBundleStore>,
     offline_store: &Arc<OfflineMessageStore>,
+    group_registry: &Arc<GroupRegistry>,
 ) -> HandleResult {
     if state.registered {
         // Update idle tracking for non-PING/PONG commands.
@@ -109,7 +112,7 @@ pub fn handle_message(
         // Post-registration command dispatch.
         match &msg.command {
             Command::Quit => {
-                handle_quit(msg, connection_id, registry, channels, sender, state);
+                handle_quit(msg, connection_id, registry, channels, group_registry, sender, state);
                 return HandleResult::Quit;
             }
             Command::Nick => handle_nick_change(msg, connection_id, registry, sender),
@@ -221,6 +224,41 @@ pub fn handle_message(
                 | PircSubcommand::P2pFailed),
             ) => {
                 handle_p2p_relay(sub, msg, connection_id, registry, sender);
+            }
+            Command::Pirc(PircSubcommand::GroupCreate) => {
+                handler_group::handle_group_create(
+                    msg, connection_id, registry, group_registry, sender,
+                );
+            }
+            Command::Pirc(PircSubcommand::GroupInvite) => {
+                handler_group::handle_group_invite(
+                    msg, connection_id, registry, group_registry, sender,
+                );
+            }
+            Command::Pirc(PircSubcommand::GroupJoin) => {
+                handler_group::handle_group_join(
+                    msg, connection_id, registry, group_registry, sender,
+                );
+            }
+            Command::Pirc(PircSubcommand::GroupLeave) => {
+                handler_group::handle_group_leave(
+                    msg, connection_id, registry, group_registry, sender,
+                );
+            }
+            Command::Pirc(PircSubcommand::GroupMessage) => {
+                handler_group::handle_group_message_relay(
+                    msg, connection_id, registry, group_registry, sender,
+                );
+            }
+            Command::Pirc(
+                ref sub @ (PircSubcommand::GroupKeyExchange
+                | PircSubcommand::GroupP2pOffer
+                | PircSubcommand::GroupP2pAnswer
+                | PircSubcommand::GroupP2pIce),
+            ) => {
+                handler_group::handle_group_signaling_relay(
+                    sub, msg, connection_id, registry, group_registry, sender,
+                );
             }
             // PONG and other commands are silently absorbed.
             _ => {}
@@ -849,6 +887,7 @@ fn handle_quit(
     connection_id: u64,
     registry: &Arc<UserRegistry>,
     channels: &Arc<ChannelRegistry>,
+    group_registry: &Arc<GroupRegistry>,
     sender: &mpsc::UnboundedSender<Message>,
     state: &mut PreRegistrationState,
 ) {
@@ -879,6 +918,9 @@ fn handle_quit(
 
         // Broadcast QUIT to all channel members (deduplicated) then remove from channels.
         broadcast_quit_and_remove(nick, &quit_msg, channels, registry);
+
+        // Remove user from all groups, broadcasting GROUP LEAVE to remaining members.
+        handler_group::remove_user_from_all_groups(nick, user, &hostname, registry, group_registry);
     } else if let Some(ref nick) = nickname {
         // No user info available, just remove silently.
         remove_user_from_all_channels(nick, channels);

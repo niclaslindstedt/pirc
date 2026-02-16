@@ -8,6 +8,7 @@ use crate::config::ServerConfig;
 use crate::handler::{handle_message, PreRegistrationState};
 use crate::offline_store::OfflineMessageStore;
 use crate::prekey_store::PreKeyBundleStore;
+use crate::group_registry::GroupRegistry;
 use crate::registry::UserRegistry;
 
 fn make_config() -> ServerConfig {
@@ -58,6 +59,7 @@ fn register_user(
 ) {
     let (tx, mut rx) = make_sender();
     let mut state = PreRegistrationState::new(hostname.to_owned());
+    let group_registry = Arc::new(GroupRegistry::new());
     handle_message(
         &nick_msg(nick),
         connection_id,
@@ -69,6 +71,7 @@ fn register_user(
         None,
         prekey_store,
         offline_store,
+        &group_registry,
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -81,6 +84,7 @@ fn register_user(
         None,
         prekey_store,
         offline_store,
+        &group_registry,
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -112,6 +116,7 @@ async fn encrypted_relay_to_target() {
 
     handle_message(
         &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     let relay = rx_bob.recv().await.unwrap();
@@ -142,7 +147,7 @@ async fn encrypted_relay_target_not_found() {
         vec!["Ghost".to_owned(), "payload".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Notice);
@@ -163,7 +168,7 @@ async fn encrypted_relay_no_params() {
 
     let msg = Message::new(Command::Pirc(PircSubcommand::Encrypted), vec![]);
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NEEDMOREPARAMS));
@@ -193,6 +198,7 @@ async fn keyexchange_ack_relay_to_target() {
 
     handle_message(
         &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     let relay = rx_bob.recv().await.unwrap();
@@ -223,7 +229,7 @@ async fn keyexchange_ack_relay_target_not_found() {
         vec!["Ghost".to_owned(), "data".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Notice);
@@ -254,6 +260,7 @@ async fn keyexchange_complete_relay_to_target() {
 
     handle_message(
         &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     let relay = rx_bob.recv().await.unwrap();
@@ -283,7 +290,7 @@ async fn keyexchange_complete_relay_target_not_found() {
         vec!["Ghost".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Notice);
@@ -314,6 +321,7 @@ async fn fingerprint_relay_to_target() {
 
     handle_message(
         &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     let relay = rx_bob.recv().await.unwrap();
@@ -344,7 +352,7 @@ async fn fingerprint_relay_target_not_found() {
         vec!["Ghost".to_owned(), "fingerprint-data".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Notice);
@@ -365,7 +373,7 @@ async fn fingerprint_relay_no_params() {
 
     let msg = Message::new(Command::Pirc(PircSubcommand::Fingerprint), vec![]);
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &Arc::new(GroupRegistry::new()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NEEDMOREPARAMS));
@@ -397,6 +405,7 @@ async fn encrypted_payload_forwarded_verbatim() {
 
     handle_message(
         &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
+    &Arc::new(GroupRegistry::new()),
     );
 
     let relay = rx_bob.recv().await.unwrap();

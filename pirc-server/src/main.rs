@@ -130,6 +130,7 @@ async fn main() {
     let channels = Arc::new(ChannelRegistry::new());
     let prekey_store = Arc::new(PreKeyBundleStore::new());
     let offline_store = Arc::new(OfflineMessageStore::default());
+    let group_registry = Arc::new(pirc_server::group_registry::GroupRegistry::new());
 
     // Raft cluster initialization
     let cluster_state: Option<ClusterState> = if config.cluster.enabled {
@@ -239,6 +240,7 @@ async fn main() {
                 let conn_cluster_ctx = cluster_ctx.clone();
                 let conn_prekey_store = Arc::clone(&prekey_store);
                 let conn_offline_store = Arc::clone(&offline_store);
+                let conn_group_registry = Arc::clone(&group_registry);
                 tokio::spawn(async move {
                     handle_connection(
                         connection,
@@ -251,6 +253,7 @@ async fn main() {
                         conn_cluster_ctx,
                         conn_prekey_store,
                         conn_offline_store,
+                        conn_group_registry,
                     )
                     .await;
                 });
@@ -294,6 +297,7 @@ async fn handle_connection(
     cluster_ctx: Option<Arc<ClusterContext>>,
     prekey_store: Arc<PreKeyBundleStore>,
     offline_store: Arc<OfflineMessageStore>,
+    group_registry: Arc<pirc_server::group_registry::GroupRegistry>,
 ) {
     let conn_id = connection.info().id;
     info!(conn_id, %peer_addr, "handling connection");
@@ -324,6 +328,7 @@ async fn handle_connection(
                             cluster_ctx.as_ref().map(|c| c.as_ref()),
                             &prekey_store,
                             &offline_store,
+                            &group_registry,
                         );
 
                         // Drain all queued outbound messages after handling
@@ -332,6 +337,15 @@ async fn handle_connection(
                                 warn!(conn_id, %peer_addr, "failed to send response: {e}");
                                 // Clean up on send failure
                                 if state.registered {
+                                    if let Some(session_arc) = registry.get_by_connection(conn_id) {
+                                        let (nick, username, hostname) = {
+                                            let session = session_arc.read().expect("session lock poisoned");
+                                            (session.nickname.clone(), session.username.clone(), session.hostname.clone())
+                                        };
+                                        pirc_server::handler_group::remove_user_from_all_groups(
+                                            &nick, &username, &hostname, &registry, &group_registry,
+                                        );
+                                    }
                                     registry.remove_by_connection(conn_id);
                                 }
                                 return;
@@ -387,8 +401,18 @@ async fn handle_connection(
         }
     }
 
-    // Clean up: remove user from registry on disconnect.
+    // Clean up: remove user from all groups and registry on disconnect.
     if state.registered {
+        // Retrieve session info before removal for group cleanup.
+        if let Some(session_arc) = registry.get_by_connection(conn_id) {
+            let (nick, username, hostname) = {
+                let session = session_arc.read().expect("session lock poisoned");
+                (session.nickname.clone(), session.username.clone(), session.hostname.clone())
+            };
+            pirc_server::handler_group::remove_user_from_all_groups(
+                &nick, &username, &hostname, &registry, &group_registry,
+            );
+        }
         registry.remove_by_connection(conn_id);
     }
 }
