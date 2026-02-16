@@ -4,6 +4,7 @@ pub mod command_parser;
 mod config;
 mod connection_state;
 pub mod encryption;
+pub mod group_chat;
 mod message_handler;
 pub mod p2p;
 pub mod p2p_crypto;
