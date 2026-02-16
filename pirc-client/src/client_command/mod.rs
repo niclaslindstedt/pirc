@@ -9,6 +9,7 @@
 //! client-local (like `/help`) or have no message to send (like `/query`
 //! without a message) return `None`.
 
+use pirc_common::types::GroupId;
 use pirc_protocol::{Command, Message, PircSubcommand};
 
 /// Errors returned when a parsed command cannot be converted into a
@@ -103,6 +104,10 @@ pub enum ClientCommand {
     /// `/disconnect` — disconnect without auto-reconnect.
     Disconnect,
 
+    // ── Group chat ─────────────────────────────────────────────
+    /// `/group <subcommand> [args]`
+    Group(GroupSubcommand),
+
     // ── Encryption ──────────────────────────────────────────────
     /// `/encryption <subcommand> [args]`
     Encryption(EncryptionSubcommand),
@@ -125,6 +130,25 @@ pub enum EncryptionSubcommand {
     Reset(String),
     /// `/encryption info <nick>` — show detailed session info.
     Info(String),
+}
+
+/// Subcommands for the `/group` command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupSubcommand {
+    /// `/group create <name>` — create a new group chat.
+    Create(String),
+    /// `/group invite <nick>` — invite a user to the current group.
+    Invite(String),
+    /// `/group join <group_id>` — join (accept invitation to) a group.
+    Join(GroupId),
+    /// `/group leave` — leave the current group.
+    Leave,
+    /// `/group members` — list members of the current group.
+    Members,
+    /// `/group list` — list all groups the user belongs to.
+    List,
+    /// `/group info` — show info about the current group.
+    Info,
 }
 
 impl ClientCommand {
@@ -180,6 +204,9 @@ impl ClientCommand {
             // ── Connection ──────────────────────────────────────
             "reconnect" => Ok(ClientCommand::Reconnect),
             "disconnect" => Ok(ClientCommand::Disconnect),
+
+            // ── Group chat ──────────────────────────────────────
+            "group" => parse_group(args),
 
             // ── Encryption ─────────────────────────────────────
             "encryption" => parse_encryption(args),
@@ -374,6 +401,9 @@ impl ClientCommand {
 
             // ── Connection ──────────────────────────────────────
             ClientCommand::Reconnect | ClientCommand::Disconnect => None,
+
+            // ── Group chat (client-local) ────────────────────────
+            ClientCommand::Group(_) => None,
 
             // ── Encryption (client-local) ───────────────────────
             ClientCommand::Encryption(_) | ClientCommand::Fingerprint(_) => None,
@@ -659,6 +689,60 @@ fn parse_cluster(args: &[String]) -> Result<ClientCommand, CommandError> {
     })?;
     let rest: Vec<String> = args.iter().skip(1).cloned().collect();
     Ok(ClientCommand::Cluster(sub.clone(), rest))
+}
+
+fn parse_group(args: &[String]) -> Result<ClientCommand, CommandError> {
+    let sub = args.first().ok_or_else(|| CommandError::MissingArgument {
+        command: "group".into(),
+        argument: "subcommand".into(),
+    })?;
+
+    match sub.to_ascii_lowercase().as_str() {
+        "create" => {
+            let trailing = args.get(1).ok_or_else(|| CommandError::MissingArgument {
+                command: "group create".into(),
+                argument: "name".into(),
+            })?;
+            Ok(ClientCommand::Group(GroupSubcommand::Create(
+                trailing.clone(),
+            )))
+        }
+        "invite" => {
+            let trailing = args.get(1).ok_or_else(|| CommandError::MissingArgument {
+                command: "group invite".into(),
+                argument: "nick".into(),
+            })?;
+            let (nick, _) = split_second_arg(trailing);
+            Ok(ClientCommand::Group(GroupSubcommand::Invite(
+                nick.to_owned(),
+            )))
+        }
+        "join" => {
+            let trailing = args.get(1).ok_or_else(|| CommandError::MissingArgument {
+                command: "group join".into(),
+                argument: "group_id".into(),
+            })?;
+            let (id_str, _) = split_second_arg(trailing);
+            let group_id: GroupId =
+                id_str.parse().map_err(|_| CommandError::InvalidArgument {
+                    command: "group join".into(),
+                    argument: "group_id".into(),
+                    reason: "must be a numeric group ID".into(),
+                })?;
+            Ok(ClientCommand::Group(GroupSubcommand::Join(group_id)))
+        }
+        "leave" => Ok(ClientCommand::Group(GroupSubcommand::Leave)),
+        "members" => Ok(ClientCommand::Group(GroupSubcommand::Members)),
+        "list" => Ok(ClientCommand::Group(GroupSubcommand::List)),
+        "info" => Ok(ClientCommand::Group(GroupSubcommand::Info)),
+        _ => Err(CommandError::InvalidArgument {
+            command: "group".into(),
+            argument: "subcommand".into(),
+            reason: format!(
+                "unknown subcommand '{sub}' (expected: create, invite, join, leave, members, list, info)"
+            ),
+        }),
+    }
 }
 
 #[cfg(test)]

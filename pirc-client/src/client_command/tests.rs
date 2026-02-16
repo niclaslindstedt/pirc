@@ -1613,3 +1613,167 @@ fn fingerprint_to_message_is_none() {
     let cmd = ClientCommand::Fingerprint(None);
     assert!(cmd.to_message(None).is_none());
 }
+
+// ── Group commands ────────────────────────────────────────
+
+use pirc_common::types::GroupId;
+
+#[test]
+fn group_create_parses() {
+    assert_eq!(
+        ClientCommand::from_parsed("group", &args(&["create", "my-group"])),
+        Ok(ClientCommand::Group(GroupSubcommand::Create(
+            "my-group".into()
+        )))
+    );
+}
+
+#[test]
+fn group_create_missing_name() {
+    assert_eq!(
+        ClientCommand::from_parsed("group", &args(&["create"])),
+        Err(CommandError::MissingArgument {
+            command: "group create".into(),
+            argument: "name".into(),
+        })
+    );
+}
+
+#[test]
+fn group_invite_parses() {
+    assert_eq!(
+        ClientCommand::from_parsed("group", &args(&["invite", "alice"])),
+        Ok(ClientCommand::Group(GroupSubcommand::Invite("alice".into())))
+    );
+}
+
+#[test]
+fn group_invite_missing_nick() {
+    assert_eq!(
+        ClientCommand::from_parsed("group", &args(&["invite"])),
+        Err(CommandError::MissingArgument {
+            command: "group invite".into(),
+            argument: "nick".into(),
+        })
+    );
+}
+
+#[test]
+fn group_invite_extracts_first_word() {
+    assert_eq!(
+        ClientCommand::from_parsed("group", &args(&["invite", "alice extra"])),
+        Ok(ClientCommand::Group(GroupSubcommand::Invite("alice".into())))
+    );
+}
+
+#[test]
+fn group_join_parses() {
+    assert_eq!(
+        ClientCommand::from_parsed("group", &args(&["join", "42"])),
+        Ok(ClientCommand::Group(GroupSubcommand::Join(GroupId::new(42))))
+    );
+}
+
+#[test]
+fn group_join_missing_id() {
+    assert_eq!(
+        ClientCommand::from_parsed("group", &args(&["join"])),
+        Err(CommandError::MissingArgument {
+            command: "group join".into(),
+            argument: "group_id".into(),
+        })
+    );
+}
+
+#[test]
+fn group_join_invalid_id() {
+    assert_eq!(
+        ClientCommand::from_parsed("group", &args(&["join", "not-a-number"])),
+        Err(CommandError::InvalidArgument {
+            command: "group join".into(),
+            argument: "group_id".into(),
+            reason: "must be a numeric group ID".into(),
+        })
+    );
+}
+
+#[test]
+fn group_leave_parses() {
+    assert_eq!(
+        ClientCommand::from_parsed("group", &args(&["leave"])),
+        Ok(ClientCommand::Group(GroupSubcommand::Leave))
+    );
+}
+
+#[test]
+fn group_members_parses() {
+    assert_eq!(
+        ClientCommand::from_parsed("group", &args(&["members"])),
+        Ok(ClientCommand::Group(GroupSubcommand::Members))
+    );
+}
+
+#[test]
+fn group_list_parses() {
+    assert_eq!(
+        ClientCommand::from_parsed("group", &args(&["list"])),
+        Ok(ClientCommand::Group(GroupSubcommand::List))
+    );
+}
+
+#[test]
+fn group_info_parses() {
+    assert_eq!(
+        ClientCommand::from_parsed("group", &args(&["info"])),
+        Ok(ClientCommand::Group(GroupSubcommand::Info))
+    );
+}
+
+#[test]
+fn group_missing_subcommand() {
+    assert_eq!(
+        ClientCommand::from_parsed("group", &[]),
+        Err(CommandError::MissingArgument {
+            command: "group".into(),
+            argument: "subcommand".into(),
+        })
+    );
+}
+
+#[test]
+fn group_unknown_subcommand() {
+    assert_eq!(
+        ClientCommand::from_parsed("group", &args(&["bogus"])),
+        Err(CommandError::InvalidArgument {
+            command: "group".into(),
+            argument: "subcommand".into(),
+            reason: "unknown subcommand 'bogus' (expected: create, invite, join, leave, members, list, info)".into(),
+        })
+    );
+}
+
+#[test]
+fn group_subcommand_case_insensitive() {
+    assert_eq!(
+        ClientCommand::from_parsed("group", &args(&["CREATE", "test"])),
+        Ok(ClientCommand::Group(GroupSubcommand::Create("test".into())))
+    );
+}
+
+#[test]
+fn group_to_message_is_none() {
+    let cmd = ClientCommand::Group(GroupSubcommand::Leave);
+    assert!(cmd.to_message(None).is_none());
+}
+
+#[test]
+fn group_create_to_message_is_none() {
+    let cmd = ClientCommand::Group(GroupSubcommand::Create("test".into()));
+    assert!(cmd.to_message(None).is_none());
+}
+
+#[test]
+fn group_join_to_message_is_none() {
+    let cmd = ClientCommand::Group(GroupSubcommand::Join(GroupId::new(1)));
+    assert!(cmd.to_message(None).is_none());
+}

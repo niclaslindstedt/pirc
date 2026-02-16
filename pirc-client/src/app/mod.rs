@@ -11,6 +11,7 @@ use tokio::time::Instant;
 use tracing::{info, warn};
 
 use crate::encryption::EncryptionManager;
+use crate::group_chat::GroupChatManager;
 use crate::p2p::P2pManager;
 
 use crate::client_command::ClientCommand;
@@ -76,6 +77,8 @@ pub struct App {
     encryption: EncryptionManager,
     /// P2P connection manager for direct peer connections.
     p2p: P2pManager,
+    /// Encrypted group chat manager.
+    group_chat: GroupChatManager,
 }
 
 impl App {
@@ -123,6 +126,7 @@ impl App {
             channels_to_rejoin: Vec::new(),
             encryption,
             p2p,
+            group_chat: GroupChatManager::new(),
         }
     }
 
@@ -433,6 +437,13 @@ impl App {
             return;
         }
 
+        // Handle /group subcommands
+        if let ClientCommand::Group(ref sub) = cmd {
+            let sub = sub.clone();
+            self.handle_group_command(&sub).await;
+            return;
+        }
+
         // Handle /msg with E2E encryption
         if let ClientCommand::Msg(ref target, ref message) = cmd {
             if !target.starts_with('#') && !target.starts_with('&') {
@@ -552,6 +563,12 @@ impl App {
             BufferId::Channel(name) => name.clone(),
             _ => return,
         };
+
+        // Group buffers route through encrypted fan-out, not raw PRIVMSG.
+        if let Some(group_id) = group::group_id_from_buffer(target) {
+            self.handle_group_chat_message(group_id, text, target).await;
+            return;
+        }
 
         let msg = Message::new(
             pirc_protocol::Command::Privmsg,
@@ -682,6 +699,11 @@ impl App {
 
         // Handle PIRC P2P signaling messages.
         if self.handle_p2p_message(msg).await {
+            return;
+        }
+
+        // Handle PIRC GROUP messages.
+        if self.handle_group_message(msg) {
             return;
         }
 
@@ -1054,6 +1076,7 @@ fn derive_machine_passphrase(nick: &str) -> Vec<u8> {
 }
 
 mod encryption;
+mod group;
 mod p2p;
 
 #[cfg(test)]
