@@ -11,3 +11,4 @@ workspace = true
 
 [dependencies]
 pirc-common = { path = "../pirc-common" }
+thiserror = "2"

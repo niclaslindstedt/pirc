@@ -16,4 +16,7 @@
 //! See the [`grammar`] module for the complete EBNF grammar specification
 //! and example scripts.
 
+pub mod ast;
+pub mod error;
 pub mod grammar;
+pub mod token;
