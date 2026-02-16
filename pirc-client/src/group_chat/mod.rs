@@ -160,6 +160,70 @@ impl GroupChatManager {
         }
     }
 
+    /// Reconnects a degraded member with a new P2P transport.
+    ///
+    /// This switches the member back from server relay to direct P2P
+    /// delivery. Typically called when a periodic reconnection attempt
+    /// succeeds for a previously degraded member.
+    ///
+    /// Returns `true` if the member was successfully reconnected (was in
+    /// a degraded or disconnected state), `false` if the group or member
+    /// doesn't exist or the member was already connected.
+    pub fn reconnect_member(
+        &mut self,
+        group_id: GroupId,
+        nickname: &str,
+        transport: EncryptedP2pTransport,
+    ) -> bool {
+        let Some(state) = self.groups.get_mut(&group_id) else {
+            return false;
+        };
+        let current = state.mesh.member_state(nickname);
+        match current {
+            Some(PeerConnectionState::RelayFallback | PeerConnectionState::Disconnected | PeerConnectionState::Connecting) => {
+                info!(
+                    group_id = group_id.as_u64(),
+                    nickname,
+                    prev_state = ?current,
+                    "reconnecting degraded member via P2P"
+                );
+                state.mesh.member_connected(nickname.to_owned(), transport);
+                true
+            }
+            Some(PeerConnectionState::Connected) => {
+                debug!(
+                    group_id = group_id.as_u64(),
+                    nickname,
+                    "member already connected, ignoring reconnect"
+                );
+                false
+            }
+            None => false,
+        }
+    }
+
+    /// Returns the nicknames of members that need P2P reconnection.
+    ///
+    /// These are members in `RelayFallback` or `Disconnected` state that
+    /// have a ready encryption session and could benefit from a P2P
+    /// reconnection attempt.
+    #[must_use]
+    pub fn members_needing_reconnect(&self, group_id: GroupId) -> Vec<String> {
+        let Some(state) = self.groups.get(&group_id) else {
+            return Vec::new();
+        };
+        let mut result = Vec::new();
+        for nick in state.mesh.members_needing_reconnect() {
+            if matches!(
+                state.key_manager.member_state(&nick),
+                Some(GroupEncryptionState::Ready)
+            ) {
+                result.push(nick);
+            }
+        }
+        result
+    }
+
     // ── Join / Leave handling ────────────────────────────────────────
 
     /// Handles a new member joining a group.

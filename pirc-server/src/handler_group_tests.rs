@@ -590,3 +590,200 @@ async fn group_message_non_member_fails() {
     assert_eq!(reply.command, Command::Notice);
     assert!(reply.trailing().unwrap().contains("not a member"));
 }
+
+// ── GROUP MSG offline queueing ──────────────────────────────
+
+#[tokio::test]
+async fn group_message_queued_for_offline_target() {
+    let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
+    let config = make_config();
+    let group_registry = Arc::new(GroupRegistry::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
+
+    let (tx_alice, mut rx_alice, mut state_alice) = register_user(
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &group_registry,
+    );
+
+    // Alice creates group
+    handle_message(
+        &group_create_msg("offline-grp"),
+        1, &registry, &channels, &tx_alice, &mut state_alice, &config, None,
+        &Arc::new(PreKeyBundleStore::new()),
+        &offline_store,
+        &group_registry,
+    );
+    let create_reply = rx_alice.recv().await.unwrap();
+    let gid: u64 = create_reply.params[0].parse().unwrap();
+
+    // Add Bob as a member via the registry directly (simulating he joined then disconnected)
+    group_registry.add_member(
+        pirc_common::types::GroupId::new(gid),
+        "Bob".to_owned(),
+        1234,
+    );
+
+    // Alice sends a message to Bob (who is offline — not registered in user registry)
+    handle_message(
+        &group_message_msg(gid, "Bob", "offline_payload"),
+        1, &registry, &channels, &tx_alice, &mut state_alice, &config, None,
+        &Arc::new(PreKeyBundleStore::new()),
+        &offline_store,
+        &group_registry,
+    );
+
+    // Alice should receive a notice about offline delivery
+    let notice = rx_alice.recv().await.unwrap();
+    assert_eq!(notice.command, Command::Notice);
+    assert!(notice.trailing().unwrap().contains("offline"));
+    assert!(notice.trailing().unwrap().contains("Bob"));
+
+    // The offline store should have the queued message
+    let bob_nick = pirc_common::Nickname::new("Bob").unwrap();
+    let queued = offline_store.take_messages(&bob_nick);
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].command, Command::Pirc(PircSubcommand::GroupMessage));
+    assert_eq!(queued[0].params[2], "offline_payload");
+}
+
+#[tokio::test]
+async fn group_message_delivered_on_reconnect() {
+    let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
+    let config = make_config();
+    let group_registry = Arc::new(GroupRegistry::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
+
+    let (tx_alice, mut rx_alice, mut state_alice) = register_user(
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &group_registry,
+    );
+
+    // Alice creates group
+    handle_message(
+        &group_create_msg("reconnect-grp"),
+        1, &registry, &channels, &tx_alice, &mut state_alice, &config, None,
+        &Arc::new(PreKeyBundleStore::new()),
+        &offline_store,
+        &group_registry,
+    );
+    let create_reply = rx_alice.recv().await.unwrap();
+    let gid: u64 = create_reply.params[0].parse().unwrap();
+
+    // Add Bob to group registry (he was a member)
+    group_registry.add_member(
+        pirc_common::types::GroupId::new(gid),
+        "Bob".to_owned(),
+        1234,
+    );
+
+    // Alice sends messages to offline Bob
+    handle_message(
+        &group_message_msg(gid, "Bob", "payload1"),
+        1, &registry, &channels, &tx_alice, &mut state_alice, &config, None,
+        &Arc::new(PreKeyBundleStore::new()),
+        &offline_store,
+        &group_registry,
+    );
+    handle_message(
+        &group_message_msg(gid, "Bob", "payload2"),
+        1, &registry, &channels, &tx_alice, &mut state_alice, &config, None,
+        &Arc::new(PreKeyBundleStore::new()),
+        &offline_store,
+        &group_registry,
+    );
+    // Drain Alice's notices
+    while rx_alice.try_recv().is_ok() {}
+
+    // Now Bob reconnects — register him
+    let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let (tx_bob, mut rx_bob) = make_sender();
+    let mut state_bob = crate::handler::PreRegistrationState::new("127.0.0.2".to_owned());
+    handle_message(
+        &nick_msg("Bob"),
+        3, &registry, &channels, &tx_bob, &mut state_bob, &config, None,
+        &prekey_store,
+        &offline_store,
+        &group_registry,
+    );
+    handle_message(
+        &user_msg("bob", "Bob Test"),
+        3, &registry, &channels, &tx_bob, &mut state_bob, &config, None,
+        &prekey_store,
+        &offline_store,
+        &group_registry,
+    );
+
+    // Collect all messages Bob receives (welcome burst + offline messages)
+    let mut bob_messages = Vec::new();
+    while let Ok(msg) = rx_bob.try_recv() {
+        bob_messages.push(msg);
+    }
+
+    // Bob should have received the queued group messages among the welcome burst
+    let group_msgs: Vec<_> = bob_messages
+        .iter()
+        .filter(|m| m.command == Command::Pirc(PircSubcommand::GroupMessage))
+        .collect();
+    assert_eq!(group_msgs.len(), 2);
+    assert_eq!(group_msgs[0].params[2], "payload1");
+    assert_eq!(group_msgs[1].params[2], "payload2");
+
+    // Offline store should be empty now
+    let bob_nick = pirc_common::Nickname::new("Bob").unwrap();
+    assert!(offline_store.take_messages(&bob_nick).is_empty());
+}
+
+#[tokio::test]
+async fn group_message_preserves_sender_prefix_in_offline() {
+    let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
+    let config = make_config();
+    let group_registry = Arc::new(GroupRegistry::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
+
+    let (tx_alice, mut rx_alice, mut state_alice) = register_user(
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &group_registry,
+    );
+
+    // Alice creates group
+    handle_message(
+        &group_create_msg("prefix-grp"),
+        1, &registry, &channels, &tx_alice, &mut state_alice, &config, None,
+        &Arc::new(PreKeyBundleStore::new()),
+        &offline_store,
+        &group_registry,
+    );
+    let create_reply = rx_alice.recv().await.unwrap();
+    let gid: u64 = create_reply.params[0].parse().unwrap();
+
+    // Add Bob to group
+    group_registry.add_member(
+        pirc_common::types::GroupId::new(gid),
+        "Bob".to_owned(),
+        1234,
+    );
+
+    // Alice sends to offline Bob
+    handle_message(
+        &group_message_msg(gid, "Bob", "enc_data"),
+        1, &registry, &channels, &tx_alice, &mut state_alice, &config, None,
+        &Arc::new(PreKeyBundleStore::new()),
+        &offline_store,
+        &group_registry,
+    );
+    while rx_alice.try_recv().is_ok() {}
+
+    // Check queued message has Alice's prefix
+    let bob_nick = pirc_common::Nickname::new("Bob").unwrap();
+    let queued = offline_store.take_messages(&bob_nick);
+    assert_eq!(queued.len(), 1);
+
+    // Verify the prefix contains Alice's nick
+    let prefix = queued[0].prefix.as_ref().expect("message should have prefix");
+    match prefix {
+        pirc_protocol::Prefix::User { nick, .. } => {
+            assert_eq!(nick.as_ref(), "Alice");
+        }
+        _ => panic!("expected user prefix"),
+    }
+}

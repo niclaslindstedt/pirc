@@ -256,6 +256,22 @@ impl GroupMesh {
             .collect()
     }
 
+    /// Returns the nicknames of members in `RelayFallback` or `Disconnected`
+    /// state that could benefit from a P2P reconnection attempt.
+    #[must_use]
+    pub fn members_needing_reconnect(&self) -> Vec<String> {
+        self.tracked_members
+            .iter()
+            .filter(|(_, state)| {
+                matches!(
+                    state,
+                    PeerConnectionState::RelayFallback | PeerConnectionState::Disconnected
+                )
+            })
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
     /// Returns the total number of tracked members (all states).
     #[must_use]
     pub fn member_count(&self) -> usize {
@@ -646,6 +662,35 @@ mod tests {
 
         assert!(!mesh.is_fully_connected());
         assert!(mesh.is_degraded());
+    }
+
+    #[tokio::test]
+    async fn members_needing_reconnect_includes_both_states() {
+        let mut mesh = GroupMesh::new("g1".into());
+        mesh.add_member("alice".into());
+        mesh.add_member("bob".into());
+        mesh.add_member("charlie".into());
+        mesh.add_member("dave".into());
+
+        // alice: connected (should NOT appear)
+        mesh.member_connected("alice".into(), mock_transport().await);
+        // bob: degraded to relay (should appear)
+        mesh.member_degraded("bob", "NAT failed".into());
+        // charlie: disconnected (should appear)
+        mesh.member_connected("charlie".into(), mock_transport().await);
+        mesh.member_disconnected("charlie");
+        // dave: still connecting (should NOT appear)
+
+        let needing = mesh.members_needing_reconnect();
+        assert_eq!(needing.len(), 2);
+        assert!(needing.contains(&"bob".to_owned()));
+        assert!(needing.contains(&"charlie".to_owned()));
+    }
+
+    #[test]
+    fn members_needing_reconnect_empty_mesh() {
+        let mesh = GroupMesh::new("g1".into());
+        assert!(mesh.members_needing_reconnect().is_empty());
     }
 
     #[tokio::test]

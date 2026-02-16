@@ -16,6 +16,7 @@ use tracing::{debug, info};
 
 use crate::group_registry::GroupRegistry;
 use crate::handler::{send_numeric, SERVER_NAME};
+use crate::offline_store::OfflineMessageStore;
 use crate::registry::UserRegistry;
 
 /// Returns the current Unix timestamp in seconds.
@@ -353,13 +354,15 @@ pub fn handle_member_leave(
 /// Handle `PIRC GROUP MSG <group_id> <target> <encrypted_payload>`.
 ///
 /// Relays an encrypted group message from sender to a specific target
-/// member via the server.
+/// member via the server. If the target is offline, the message is
+/// queued for delivery on reconnect.
 pub fn handle_group_message_relay(
     msg: &Message,
     connection_id: u64,
     user_registry: &Arc<UserRegistry>,
     group_registry: &Arc<GroupRegistry>,
     sender: &mpsc::UnboundedSender<Message>,
+    offline_store: &Arc<OfflineMessageStore>,
 ) {
     let Some(session_arc) = user_registry.get_by_connection(connection_id) else {
         return;
@@ -422,11 +425,21 @@ pub fn handle_group_message_relay(
         let session = target_session.read().expect("session lock poisoned");
         let _ = session.sender.send(relay_msg);
     } else {
-        send_numeric(
-            sender,
-            ERR_NOSUCHNICK,
-            &[sender_nick.as_ref(), target_nick.as_ref()],
-            "No such nick/channel",
+        // Target is offline — queue for delivery on reconnect.
+        offline_store.queue_message(&target_nick, relay_msg);
+        let notice = Message::builder(Command::Notice)
+            .prefix(Prefix::server(SERVER_NAME))
+            .param(sender_nick.as_ref())
+            .trailing(&format!(
+                "{target_nick} is offline. Group message will be delivered when they reconnect."
+            ))
+            .build();
+        let _ = sender.send(notice);
+        debug!(
+            group_id = group_id.as_u64(),
+            sender = %sender_nick,
+            target = %target_nick,
+            "queued group message for offline user"
         );
     }
 }

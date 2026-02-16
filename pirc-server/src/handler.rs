@@ -247,7 +247,7 @@ pub fn handle_message(
             }
             Command::Pirc(PircSubcommand::GroupMessage) => {
                 handler_group::handle_group_message_relay(
-                    msg, connection_id, registry, group_registry, sender,
+                    msg, connection_id, registry, group_registry, sender, offline_store,
                 );
             }
             Command::Pirc(
