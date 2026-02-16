@@ -23,5 +23,10 @@ thiserror = "2"
 # Randomness for transaction IDs
 rand = "0.8"
 
+# Cryptographic primitives for TURN long-term credential auth (MESSAGE-INTEGRITY)
+hmac = "0.12"
+sha1 = "0.10"
+md5 = "0.7"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["net", "time", "rt", "macros", "test-util"] }

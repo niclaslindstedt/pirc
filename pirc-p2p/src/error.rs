@@ -13,6 +13,14 @@ pub enum P2pError {
     #[error("STUN request to {0} timed out")]
     StunTimeout(SocketAddr),
 
+    /// TURN protocol error.
+    #[error("TURN error: {0}")]
+    Turn(String),
+
+    /// TURN request timed out waiting for a response.
+    #[error("TURN request to {0} timed out")]
+    TurnTimeout(SocketAddr),
+
     /// Network I/O error.
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
