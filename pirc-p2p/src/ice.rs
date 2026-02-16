@@ -195,6 +195,7 @@ pub fn compute_priority(candidate_type: CandidateType, local_preference: u16, co
 }
 
 /// Configuration for the [`CandidateGatherer`].
+#[derive(Clone)]
 pub struct GathererConfig {
     /// STUN server address for server-reflexive candidate discovery.
     pub stun_server: Option<SocketAddr>,

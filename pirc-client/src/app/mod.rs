@@ -11,6 +11,7 @@ use tokio::time::Instant;
 use tracing::{info, warn};
 
 use crate::encryption::EncryptionManager;
+use crate::p2p::P2pManager;
 
 use crate::client_command::ClientCommand;
 use crate::config::ClientConfig;
@@ -73,6 +74,8 @@ pub struct App {
     channels_to_rejoin: Vec<String>,
     /// E2E encryption manager for private messages.
     encryption: EncryptionManager,
+    /// P2P connection manager for direct peer connections.
+    p2p: P2pManager,
 }
 
 impl App {
@@ -101,6 +104,8 @@ impl App {
             }
         };
 
+        let p2p = P2pManager::new(&config.p2p);
+
         Self {
             config,
             connection_mgr,
@@ -117,6 +122,7 @@ impl App {
             reconnect_attempt: 0,
             channels_to_rejoin: Vec::new(),
             encryption,
+            p2p,
         }
     }
 
@@ -674,6 +680,11 @@ impl App {
             return;
         }
 
+        // Handle PIRC P2P signaling messages.
+        if self.handle_p2p_message(msg).await {
+            return;
+        }
+
         // Route the message to the appropriate buffer(s).
         let ts = current_timestamp(&self.config.ui.timestamp_format);
         let our_nick = self.connection_mgr.nick().to_string();
@@ -777,6 +788,7 @@ impl App {
         self.ping_sent_at = None;
         self.lag_ms = None;
         self.view.set_lag(None);
+        self.p2p.clear();
         let _ = self
             .connection_mgr
             .transition(ConnectionState::Disconnected);
@@ -1042,6 +1054,7 @@ fn derive_machine_passphrase(nick: &str) -> Vec<u8> {
 }
 
 mod encryption;
+mod p2p;
 
 #[cfg(test)]
 mod tests;

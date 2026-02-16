@@ -20,6 +20,7 @@ pirc-network = { path = "../pirc-network" }
 pirc-crypto = { path = "../pirc-crypto" }
 pirc-scripting = { path = "../pirc-scripting" }
 pirc-plugin = { path = "../pirc-plugin" }
+pirc-p2p = { path = "../pirc-p2p" }
 hostname = "0.4"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"

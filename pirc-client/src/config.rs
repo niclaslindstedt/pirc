@@ -23,6 +23,7 @@ pub struct ClientConfig {
     pub ui: UiConfig,
     pub scripting: ScriptingConfig,
     pub plugins: PluginsConfig,
+    pub p2p: P2pConfig,
 }
 
 impl ClientConfig {
@@ -184,6 +185,16 @@ impl Default for PluginsConfig {
             plugins_dir: None,
         }
     }
+}
+
+/// P2P connection settings.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct P2pConfig {
+    pub stun_server: Option<String>,
+    pub turn_server: Option<String>,
+    pub turn_username: Option<String>,
+    pub turn_password: Option<String>,
 }
 
 #[cfg(test)]
@@ -428,6 +439,7 @@ alt_nicks = ["rustacean_", "rustacean__"]
                 enabled: false,
                 plugins_dir: Some(String::from("/home/user/.pirc/plugins")),
             },
+            p2p: P2pConfig::default(),
         };
 
         let toml_str = toml::to_string(&config).expect("serialize to TOML");

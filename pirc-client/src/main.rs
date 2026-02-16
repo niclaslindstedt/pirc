@@ -5,6 +5,7 @@ mod config;
 mod connection_state;
 pub mod encryption;
 mod message_handler;
+pub mod p2p;
 mod registration;
 mod tui;
 

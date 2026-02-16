@@ -646,6 +646,7 @@ dependencies = [
  "pirc-common",
  "pirc-crypto",
  "pirc-network",
+ "pirc-p2p",
  "pirc-plugin",
  "pirc-protocol",
  "pirc-scripting",
