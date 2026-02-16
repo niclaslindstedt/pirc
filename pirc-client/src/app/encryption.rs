@@ -198,6 +198,7 @@ impl App {
                     peer,
                     &format!("Encrypted session established with {peer}"),
                 );
+                self.encryption.persist();
             }
             Ok(_) => {
                 warn!("Unexpected key exchange response from handle_init_message for {peer}");
@@ -216,6 +217,7 @@ impl App {
         self.encryption.handle_complete(peer);
         self.push_status(&format!("Encrypted session established with {peer}"));
         self.push_encryption_event(peer, &format!("Encrypted session established with {peer}"));
+        self.encryption.persist();
     }
 
     /// Initiate a key exchange with a peer and optionally queue a message.

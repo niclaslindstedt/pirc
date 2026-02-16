@@ -378,6 +378,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hostname"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "617aaa3557aef3810a6369d0a99fac8a080891b68bd9f9812a1eeda0c0730cbd"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "windows-link",
+]
+
+[[package]]
 name = "hybrid-array"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -624,6 +635,7 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 name = "pirc-client"
 version = "0.1.0"
 dependencies = [
+ "hostname",
  "libc",
  "pirc-common",
  "pirc-crypto",
@@ -632,6 +644,7 @@ dependencies = [
  "pirc-protocol",
  "pirc-scripting",
  "serde",
+ "sha2",
  "tempfile",
  "thiserror",
  "tokio",

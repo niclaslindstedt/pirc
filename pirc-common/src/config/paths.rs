@@ -58,6 +58,13 @@ pub fn plugins_dir() -> Option<PathBuf> {
     config_dir().map(|d| d.join("plugins"))
 }
 
+/// Returns the keys directory path for encrypted key storage.
+///
+/// Returns `config_dir()/keys/`.
+pub fn keys_dir() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("keys"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +176,21 @@ mod tests {
         std::env::set_var("XDG_CONFIG_HOME", "/tmp/xdg_test");
         let path = plugins_dir().unwrap();
         assert_eq!(path, PathBuf::from("/tmp/xdg_test/pirc/plugins"));
+
+        match original {
+            Some(val) => std::env::set_var("XDG_CONFIG_HOME", val),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+    }
+
+    #[test]
+    fn keys_dir_under_config_dir() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let original = std::env::var("XDG_CONFIG_HOME").ok();
+
+        std::env::set_var("XDG_CONFIG_HOME", "/tmp/xdg_test");
+        let path = keys_dir().unwrap();
+        assert_eq!(path, PathBuf::from("/tmp/xdg_test/pirc/keys"));
 
         match original {
             Some(val) => std::env::set_var("XDG_CONFIG_HOME", val),

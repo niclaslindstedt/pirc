@@ -6,5 +6,6 @@
 pub mod paths;
 
 pub use paths::{
-    config_dir, default_client_config_path, default_server_config_path, plugins_dir, scripts_dir,
+    config_dir, default_client_config_path, default_server_config_path, keys_dir, plugins_dir,
+    scripts_dir,
 };

@@ -500,6 +500,87 @@ impl KeyStore {
     pub fn one_time_pre_key_count(&self) -> usize {
         self.bundle.one_time_pre_keys.len()
     }
+
+    /// Build a [`KeyStore`] from individual key components.
+    ///
+    /// Used by the client to construct a `KeyStore` from an
+    /// [`EncryptionManager`](pirc_client) that manages keys in memory.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CryptoError`] if the identity key cannot be re-serialized.
+    pub fn from_parts(
+        identity: &IdentityKeyPair,
+        signed_pre_key: &SignedPreKey,
+        kem_pre_key: &KemPreKey,
+        one_time_pre_keys: &[OneTimePreKey],
+    ) -> Result<Self> {
+        // Round-trip the identity key through bytes to get an owned copy
+        let identity_bytes = identity.to_bytes();
+        let identity = IdentityKeyPair::from_bytes(&identity_bytes)?;
+
+        // Clone signed pre-key via serialization roundtrip
+        let spk = SignedPreKey::from_bytes(&signed_pre_key.to_bytes())?;
+
+        // Clone KEM pre-key via serialization roundtrip
+        let kpk = KemPreKey::from_bytes(&kem_pre_key.to_bytes())?;
+
+        // Clone one-time pre-keys via serialization roundtrip
+        let mut otpks = Vec::with_capacity(one_time_pre_keys.len());
+        for otpk in one_time_pre_keys {
+            otpks.push(OneTimePreKey::from_bytes(&otpk.to_bytes())?);
+        }
+
+        // Determine the next pre-key ID from existing keys
+        let max_id = [signed_pre_key.id(), kem_pre_key.id()]
+            .into_iter()
+            .chain(one_time_pre_keys.iter().map(OneTimePreKey::id))
+            .max()
+            .unwrap_or(0);
+
+        Ok(Self {
+            bundle: KeyBundle {
+                identity,
+                signed_pre_keys: vec![spk],
+                one_time_pre_keys: otpks,
+                kem_pre_keys: vec![kpk],
+                next_pre_key_id: max_id + 1,
+                kem_pre_key_timestamps: vec![0],
+            },
+        })
+    }
+
+    /// Consume the [`KeyStore`] and return the individual key components.
+    ///
+    /// Returns `(identity, signed_pre_key, kem_pre_key, one_time_pre_keys)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key store has no signed or KEM pre-keys.
+    pub fn into_parts(
+        self,
+    ) -> Result<(IdentityKeyPair, SignedPreKey, KemPreKey, Vec<OneTimePreKey>)> {
+        let signed_pre_key = self
+            .bundle
+            .signed_pre_keys
+            .into_iter()
+            .next()
+            .ok_or_else(|| CryptoError::InvalidKey("no signed pre-keys in store".into()))?;
+
+        let kem_pre_key = self
+            .bundle
+            .kem_pre_keys
+            .into_iter()
+            .next()
+            .ok_or_else(|| CryptoError::InvalidKey("no KEM pre-keys in store".into()))?;
+
+        Ok((
+            self.bundle.identity,
+            signed_pre_key,
+            kem_pre_key,
+            self.bundle.one_time_pre_keys,
+        ))
+    }
 }
 
 impl std::fmt::Debug for KeyStore {
@@ -763,6 +844,58 @@ mod tests {
         assert_eq!(
             bundle_before.signed_pre_key().public_key().as_bytes(),
             bundle_after.signed_pre_key().public_key().as_bytes()
+        );
+    }
+
+    // ── from_parts / into_parts ──────────────────────────────────────
+
+    #[test]
+    fn from_parts_into_parts_roundtrip() {
+        let store = KeyStore::create().expect("create failed");
+        let mut store_with_otpks = KeyStore::create().expect("create failed");
+        store_with_otpks.generate_one_time_pre_keys(5);
+
+        let (identity, spk, kpk, otpks) = store_with_otpks
+            .into_parts()
+            .expect("into_parts failed");
+
+        let rebuilt = KeyStore::from_parts(&identity, &spk, &kpk, &otpks)
+            .expect("from_parts failed");
+
+        // Identity should match
+        assert_eq!(
+            identity.public_identity(),
+            rebuilt.identity().public_identity()
+        );
+
+        // Pre-key counts should match
+        assert_eq!(rebuilt.one_time_pre_key_count(), 5);
+
+        // Bundle should validate
+        rebuilt.public_bundle().expect("bundle").validate().expect("validate");
+    }
+
+    #[test]
+    fn from_parts_save_open_roundtrip() {
+        let original = KeyStore::create().expect("create failed");
+        let original_pub = original.identity().public_identity();
+        let original_bundle = original.public_bundle().expect("bundle");
+
+        let (identity, spk, kpk, otpks) = original.into_parts().expect("into_parts");
+        let rebuilt = KeyStore::from_parts(&identity, &spk, &kpk, &otpks)
+            .expect("from_parts failed");
+
+        // Save and reopen
+        let encrypted = rebuilt.save(b"pass").expect("save failed");
+        let restored = KeyStore::open(&encrypted, b"pass").expect("open failed");
+
+        assert_eq!(
+            original_pub,
+            restored.identity().public_identity()
+        );
+        assert_eq!(
+            original_bundle.signed_pre_key().id(),
+            restored.public_bundle().expect("bundle").signed_pre_key().id()
         );
     }
 }

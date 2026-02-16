@@ -2,6 +2,7 @@ use std::io::{self, Write};
 use std::net::ToSocketAddrs;
 use std::time::Duration;
 
+use pirc_common::config::keys_dir;
 use pirc_network::connection::AsyncTransport;
 use pirc_network::{Connection, Connector, ShutdownController, ShutdownSignal};
 use pirc_protocol::{Command, Message};
@@ -87,6 +88,19 @@ impl App {
 
         let (shutdown_controller, shutdown_signal) = ShutdownSignal::new();
 
+        // Load or create encrypted identity keys from disk.
+        // Uses a machine-specific passphrase derived from the nick and hostname.
+        let encryption = match keys_dir() {
+            Some(dir) => {
+                let passphrase = derive_machine_passphrase(connection_mgr.nick());
+                EncryptionManager::load_or_create(&dir, &passphrase)
+            }
+            None => {
+                warn!("Could not determine keys directory; using ephemeral keys");
+                EncryptionManager::new()
+            }
+        };
+
         Self {
             config,
             connection_mgr,
@@ -102,7 +116,7 @@ impl App {
             reconnect_at: None,
             reconnect_attempt: 0,
             channels_to_rejoin: Vec::new(),
-            encryption: EncryptionManager::new(),
+            encryption,
         }
     }
 
@@ -1004,6 +1018,27 @@ fn current_timestamp(format: &str) -> String {
 
     // Fallback: just use epoch seconds
     secs.to_string()
+}
+
+/// Derive a machine-specific passphrase from the user's nick and hostname.
+///
+/// Uses SHA-256 to combine the nick with the machine hostname, producing
+/// a deterministic 32-byte passphrase. This avoids prompting the user for
+/// a password while still providing encrypted-at-rest key storage tied to
+/// this machine and user identity.
+fn derive_machine_passphrase(nick: &str) -> Vec<u8> {
+    use sha2::{Digest, Sha256};
+
+    let hostname = hostname::get()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "pirc-default-host".to_string());
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"pirc-key-storage-v1:");
+    hasher.update(nick.as_bytes());
+    hasher.update(b"@");
+    hasher.update(hostname.as_bytes());
+    hasher.finalize().to_vec()
 }
 
 mod encryption;

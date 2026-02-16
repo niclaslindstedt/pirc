@@ -5,10 +5,12 @@
 //! pre-key bundle generation for server upload.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pirc_crypto::identity::{IdentityKeyPair, IdentityPublicKey};
 use pirc_crypto::kem::KemKeyPair;
+use pirc_crypto::key_storage::{EncryptedKeyStore, KeyStore};
 use pirc_crypto::message::EncryptedMessage;
 use pirc_crypto::prekey::{KemPreKey, OneTimePreKey, PreKeyBundle, SignedPreKey};
 use pirc_crypto::protocol::KeyExchangeMessage;
@@ -16,6 +18,7 @@ use pirc_crypto::triple_ratchet::TripleRatchetSession;
 use pirc_crypto::x25519;
 use pirc_crypto::x3dh::{self, X3DHInitMessage};
 use pirc_crypto::CryptoError;
+use tracing::{info, warn};
 
 /// Number of one-time pre-keys to generate in a batch.
 const ONE_TIME_PRE_KEY_BATCH_SIZE: u32 = 10;
@@ -36,6 +39,9 @@ pub enum EncryptionStatus {
 /// Holds long-term identity keys, manages per-peer triple ratchet sessions,
 /// and drives the X3DH key exchange state machine. All private messages are
 /// encrypted and decrypted through this manager.
+/// File name for the encrypted identity key store on disk.
+const IDENTITY_FILE: &str = "identity.enc";
+
 pub struct EncryptionManager {
     /// Our long-term identity key pair.
     identity: IdentityKeyPair,
@@ -51,6 +57,10 @@ pub struct EncryptionManager {
     one_time_pre_keys: Vec<OneTimePreKey>,
     /// Peer identity public keys, for fingerprint lookups.
     peer_identities: HashMap<String, IdentityPublicKey>,
+    /// Directory for encrypted key storage on disk.
+    keys_dir: Option<std::path::PathBuf>,
+    /// Passphrase for encrypting/decrypting key material at rest.
+    passphrase: Option<Vec<u8>>,
 }
 
 /// State machine for a pending key exchange with a peer.
@@ -103,7 +113,127 @@ impl EncryptionManager {
             kem_pre_key,
             one_time_pre_keys,
             peer_identities: HashMap::new(),
+            keys_dir: None,
+            passphrase: None,
         }
+    }
+
+    /// Load an existing identity from disk, or generate a new one and save it.
+    ///
+    /// Attempts to read `identity.enc` from the given `keys_dir`. If the file
+    /// exists, decrypts it with the passphrase to recover the identity. If it
+    /// does not exist, generates a fresh identity and persists it.
+    ///
+    /// Falls back to an ephemeral in-memory identity if disk I/O fails.
+    #[must_use]
+    pub fn load_or_create(keys_dir: &Path, passphrase: &[u8]) -> Self {
+        let identity_path = keys_dir.join(IDENTITY_FILE);
+
+        if identity_path.exists() {
+            match Self::load_from_disk(&identity_path, passphrase) {
+                Ok(mut mgr) => {
+                    mgr.keys_dir = Some(keys_dir.to_path_buf());
+                    mgr.passphrase = Some(passphrase.to_vec());
+                    info!("Loaded identity keys from disk");
+                    return mgr;
+                }
+                Err(e) => {
+                    warn!("Failed to load keys from disk, generating new identity: {e}");
+                }
+            }
+        }
+
+        let mut mgr = Self::new();
+        mgr.keys_dir = Some(keys_dir.to_path_buf());
+        mgr.passphrase = Some(passphrase.to_vec());
+
+        if let Err(e) = mgr.save_identity_to_disk() {
+            warn!("Failed to save new identity to disk: {e}");
+        } else {
+            info!("Generated and saved new identity keys to disk");
+        }
+
+        mgr
+    }
+
+    /// Save identity keys and pre-keys to disk as an encrypted file.
+    ///
+    /// Creates the keys directory if it does not exist, then writes
+    /// `identity.enc` containing AES-256-GCM encrypted key material.
+    fn save_identity_to_disk(&self) -> Result<(), String> {
+        let keys_dir = self
+            .keys_dir
+            .as_ref()
+            .ok_or("no keys directory configured")?;
+        let passphrase = self
+            .passphrase
+            .as_ref()
+            .ok_or("no passphrase configured")?;
+
+        // Ensure the keys directory exists
+        std::fs::create_dir_all(keys_dir)
+            .map_err(|e| format!("failed to create keys directory: {e}"))?;
+
+        // Build a KeyStore from our current state
+        let key_store = self.to_key_store().map_err(|e| e.to_string())?;
+        let encrypted = key_store.save(passphrase).map_err(|e| e.to_string())?;
+
+        let identity_path = keys_dir.join(IDENTITY_FILE);
+        std::fs::write(&identity_path, encrypted.to_bytes())
+            .map_err(|e| format!("failed to write {}: {e}", identity_path.display()))?;
+
+        Ok(())
+    }
+
+    /// Save the current key state to disk (if persistence is configured).
+    ///
+    /// Called after key state changes (session establishment, etc.) to
+    /// ensure keys survive restarts.
+    pub fn persist(&self) {
+        if self.keys_dir.is_some() && self.passphrase.is_some() {
+            if let Err(e) = self.save_identity_to_disk() {
+                warn!("Failed to persist keys to disk: {e}");
+            }
+        }
+    }
+
+    /// Load an [`EncryptionManager`] from an encrypted identity file.
+    fn load_from_disk(path: &Path, passphrase: &[u8]) -> Result<Self, String> {
+        let data = std::fs::read(path)
+            .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+        let encrypted =
+            EncryptedKeyStore::from_bytes(&data).map_err(|e| e.to_string())?;
+        let key_store = KeyStore::open(&encrypted, passphrase).map_err(|e| e.to_string())?;
+
+        Self::from_key_store(key_store)
+    }
+
+    /// Build a [`KeyStore`] from the current encryption manager state.
+    fn to_key_store(&self) -> Result<KeyStore, CryptoError> {
+        KeyStore::from_parts(
+            &self.identity,
+            &self.signed_pre_key,
+            &self.kem_pre_key,
+            &self.one_time_pre_keys,
+        )
+    }
+
+    /// Reconstruct an [`EncryptionManager`] from a loaded [`KeyStore`].
+    fn from_key_store(store: KeyStore) -> Result<Self, String> {
+        let (identity, signed_pre_key, kem_pre_key, one_time_pre_keys) =
+            store.into_parts().map_err(|e| e.to_string())?;
+
+        Ok(Self {
+            identity,
+            sessions: HashMap::new(),
+            pending_exchanges: HashMap::new(),
+            signed_pre_key,
+            kem_pre_key,
+            one_time_pre_keys,
+            peer_identities: HashMap::new(),
+            keys_dir: None,
+            passphrase: None,
+        })
     }
 
     /// Check whether an active session exists with a peer.
@@ -739,6 +869,91 @@ mod tests {
             .join();
 
         result.expect("list_peers_shows_active panicked");
+    }
+
+    // ── Persistence ──────────────────────────────────────────────────
+
+    #[test]
+    fn save_and_load_preserves_identity() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let passphrase = b"test-passphrase";
+
+        let mgr = EncryptionManager::load_or_create(dir.path(), passphrase);
+        let original_fp = mgr.get_identity_fingerprint();
+
+        // Load from disk — should recover the same identity
+        let mgr2 = EncryptionManager::load_or_create(dir.path(), passphrase);
+        assert_eq!(mgr2.get_identity_fingerprint(), original_fp);
+    }
+
+    #[test]
+    fn save_and_load_preserves_pre_key_bundle() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let passphrase = b"test-passphrase";
+
+        let mgr = EncryptionManager::load_or_create(dir.path(), passphrase);
+        let bundle1 = mgr.create_pre_key_bundle();
+
+        let mgr2 = EncryptionManager::load_or_create(dir.path(), passphrase);
+        let bundle2 = mgr2.create_pre_key_bundle();
+
+        // Signed pre-key should have the same ID after reload
+        assert_eq!(
+            bundle1.signed_pre_key().id(),
+            bundle2.signed_pre_key().id()
+        );
+
+        // Identity should match
+        assert_eq!(bundle1.identity_public(), bundle2.identity_public());
+    }
+
+    #[test]
+    fn wrong_passphrase_generates_new_identity() {
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        let mgr = EncryptionManager::load_or_create(dir.path(), b"correct");
+        let original_fp = mgr.get_identity_fingerprint();
+
+        // Wrong passphrase should generate a new identity (fallback)
+        let mgr2 = EncryptionManager::load_or_create(dir.path(), b"wrong");
+        assert_ne!(mgr2.get_identity_fingerprint(), original_fp);
+    }
+
+    #[test]
+    fn load_or_create_creates_keys_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let keys_path = dir.path().join("subdir").join("keys");
+
+        assert!(!keys_path.exists());
+        let _mgr = EncryptionManager::load_or_create(&keys_path, b"pass");
+        assert!(keys_path.exists());
+        assert!(keys_path.join("identity.enc").exists());
+    }
+
+    #[test]
+    fn persist_updates_disk_state() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let passphrase = b"test-passphrase";
+
+        let mgr = EncryptionManager::load_or_create(dir.path(), passphrase);
+        let fp = mgr.get_identity_fingerprint();
+
+        // Get the file size after initial save
+        let path = dir.path().join("identity.enc");
+        let size1 = std::fs::metadata(&path).expect("metadata").len();
+
+        // Persist again (should overwrite with new nonce/salt)
+        mgr.persist();
+        let size2 = std::fs::metadata(&path).expect("metadata").len();
+
+        // Sizes should be similar (same data, new salt/nonce)
+        // but importantly the file is still valid
+        assert!(size1 > 0);
+        assert!(size2 > 0);
+
+        // Reload and verify identity is preserved
+        let mgr2 = EncryptionManager::load_or_create(dir.path(), passphrase);
+        assert_eq!(mgr2.get_identity_fingerprint(), fp);
     }
 
     // ── Test helper ──────────────────────────────────────────────────
