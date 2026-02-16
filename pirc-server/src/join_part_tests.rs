@@ -81,6 +81,7 @@ fn register_user(
         config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -92,6 +93,7 @@ fn register_user(
         config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst (RPL_WELCOME, RPL_YOURHOST, RPL_CREATED, ERR_NOMOTD)
@@ -126,6 +128,7 @@ async fn join_creates_channel_and_grants_operator() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // Should receive JOIN echo.
@@ -190,6 +193,7 @@ async fn join_second_user_gets_normal_status() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx1.try_recv().is_ok() {} // drain Alice's JOIN replies
 
@@ -204,6 +208,7 @@ async fn join_second_user_gets_normal_status() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // Alice should receive Bob's JOIN broadcast.
@@ -284,6 +289,7 @@ async fn join_sends_topic_when_set() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // JOIN echo
@@ -318,7 +324,7 @@ async fn join_no_params_returns_err() {
     );
 
     let msg = Message::new(Command::Join, vec![]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -350,6 +356,7 @@ async fn join_invalid_channel_name_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -381,6 +388,7 @@ async fn join_duplicate_is_silently_ignored() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx.try_recv().is_ok() {} // drain first JOIN replies
 
@@ -395,6 +403,7 @@ async fn join_duplicate_is_silently_ignored() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // No messages should be sent for duplicate join.
@@ -432,6 +441,7 @@ async fn join_multiple_channels() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // First channel: JOIN + NOTOPIC + NAMREPLY + ENDOFNAMES
@@ -495,6 +505,7 @@ async fn join_invite_only_without_invite_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -539,6 +550,7 @@ async fn join_invite_only_with_invite_succeeds() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -587,6 +599,7 @@ async fn join_key_required_wrong_key_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -629,6 +642,7 @@ async fn join_key_required_correct_key_succeeds() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -672,6 +686,7 @@ async fn join_key_required_no_key_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -714,6 +729,7 @@ async fn join_user_limit_reached_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -760,6 +776,7 @@ async fn join_banned_user_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -800,6 +817,7 @@ async fn join_ban_with_wildcard_nick_matches() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -836,6 +854,7 @@ async fn part_removes_user_and_broadcasts() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &join_msg("#general"),
@@ -847,6 +866,7 @@ async fn part_removes_user_and_broadcasts() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -862,6 +882,7 @@ async fn part_removes_user_and_broadcasts() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // Alice receives PART message.
@@ -912,6 +933,7 @@ async fn part_with_reason() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -925,6 +947,7 @@ async fn part_with_reason() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -958,6 +981,7 @@ async fn part_last_user_removes_channel() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx.try_recv().is_ok() {}
     assert_eq!(channels.channel_count(), 1);
@@ -972,6 +996,7 @@ async fn part_last_user_removes_channel() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -1017,6 +1042,7 @@ async fn part_not_on_channel_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1048,6 +1074,7 @@ async fn part_nonexistent_channel_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1079,6 +1106,7 @@ async fn part_invalid_channel_name_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1101,7 +1129,7 @@ async fn part_no_params_returns_err() {
     );
 
     let msg = Message::new(Command::Part, vec![]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -1133,6 +1161,7 @@ async fn part_multiple_channels() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx.try_recv().is_ok() {}
     assert_eq!(channels.channel_count(), 2);
@@ -1148,6 +1177,7 @@ async fn part_multiple_channels() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // PART #chan1
@@ -1192,13 +1222,14 @@ async fn quit_removes_user_from_channels() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx.try_recv().is_ok() {}
     assert_eq!(channels.channel_count(), 2);
 
     // Quit.
     let quit = Message::new(Command::Quit, vec!["Bye".to_owned()]);
-    handle_message(&quit, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&quit, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     // Both channels should be cleaned up (Alice was the only member).
     assert_eq!(channels.channel_count(), 0);

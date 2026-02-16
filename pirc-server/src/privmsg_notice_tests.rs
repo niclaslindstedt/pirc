@@ -77,6 +77,7 @@ fn register_user(
         config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -88,6 +89,7 @@ fn register_user(
         config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -134,6 +136,7 @@ async fn privmsg_channel_delivered_to_members_except_sender() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &join_msg("#general"),
@@ -145,6 +148,7 @@ async fn privmsg_channel_delivered_to_members_except_sender() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &join_msg("#general"),
@@ -156,6 +160,7 @@ async fn privmsg_channel_delivered_to_members_except_sender() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -172,6 +177,7 @@ async fn privmsg_channel_delivered_to_members_except_sender() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // Alice should NOT receive her own message.
@@ -223,6 +229,7 @@ async fn notice_channel_delivered_to_members_except_sender() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &join_msg("#general"),
@@ -234,6 +241,7 @@ async fn notice_channel_delivered_to_members_except_sender() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -249,6 +257,7 @@ async fn notice_channel_delivered_to_members_except_sender() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // Alice should NOT receive her own notice.
@@ -290,6 +299,7 @@ async fn privmsg_moderated_channel_normal_user_blocked() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &join_msg("#moderated"),
@@ -301,6 +311,7 @@ async fn privmsg_moderated_channel_normal_user_blocked() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -324,6 +335,7 @@ async fn privmsg_moderated_channel_normal_user_blocked() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -360,6 +372,7 @@ async fn privmsg_moderated_channel_voiced_user_allowed() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &join_msg("#moderated"),
@@ -371,6 +384,7 @@ async fn privmsg_moderated_channel_voiced_user_allowed() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -397,6 +411,7 @@ async fn privmsg_moderated_channel_voiced_user_allowed() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // Alice should receive Bob's message.
@@ -432,6 +447,7 @@ async fn privmsg_moderated_channel_operator_allowed() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &join_msg("#moderated"),
@@ -443,6 +459,7 @@ async fn privmsg_moderated_channel_operator_allowed() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -466,6 +483,7 @@ async fn privmsg_moderated_channel_operator_allowed() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // Bob should receive Alice's message.
@@ -504,6 +522,7 @@ async fn privmsg_no_external_messages_blocks_non_member() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx1.try_recv().is_ok() {}
 
@@ -526,6 +545,7 @@ async fn privmsg_no_external_messages_blocks_non_member() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -562,6 +582,7 @@ async fn privmsg_no_external_messages_allows_member() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &join_msg("#private"),
@@ -573,6 +594,7 @@ async fn privmsg_no_external_messages_allows_member() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -596,6 +618,7 @@ async fn privmsg_no_external_messages_allows_member() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // Alice should receive the message.
@@ -632,6 +655,7 @@ async fn privmsg_without_no_external_allows_non_member() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx1.try_recv().is_ok() {}
 
@@ -646,6 +670,7 @@ async fn privmsg_without_no_external_allows_non_member() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // Alice should receive the message.
@@ -684,6 +709,7 @@ async fn privmsg_user_to_user_delivered() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // Bob should receive the message.
@@ -728,6 +754,7 @@ async fn notice_user_to_user_delivered() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // Bob should receive the notice.
@@ -767,6 +794,7 @@ async fn privmsg_nonexistent_user_returns_err_nosuchnick() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx1.recv().await.unwrap();
@@ -798,6 +826,7 @@ async fn notice_nonexistent_user_returns_err_nosuchnick() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx1.recv().await.unwrap();
@@ -831,6 +860,7 @@ async fn privmsg_nonexistent_channel_returns_err_cannotsendtochan() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx1.recv().await.unwrap();
@@ -855,7 +885,7 @@ async fn privmsg_no_params_returns_err_needmoreparams() {
     );
 
     let msg = Message::new(Command::Privmsg, vec![]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -877,7 +907,7 @@ async fn privmsg_one_param_returns_err_needmoreparams() {
     );
 
     let msg = Message::new(Command::Privmsg, vec!["Bob".to_owned()]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -913,6 +943,7 @@ async fn privmsg_to_away_user_sends_rpl_away() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx2.try_recv().is_ok() {}
 
@@ -927,6 +958,7 @@ async fn privmsg_to_away_user_sends_rpl_away() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // Alice should receive RPL_AWAY.
@@ -970,6 +1002,7 @@ async fn notice_to_away_user_does_not_send_rpl_away() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx2.try_recv().is_ok() {}
 
@@ -984,6 +1017,7 @@ async fn notice_to_away_user_does_not_send_rpl_away() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // Alice should NOT receive RPL_AWAY for NOTICE.
@@ -1034,6 +1068,7 @@ async fn privmsg_moderated_and_no_external_both_enforced() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &join_msg("#strict"),
@@ -1045,6 +1080,7 @@ async fn privmsg_moderated_and_no_external_both_enforced() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -1069,6 +1105,7 @@ async fn privmsg_moderated_and_no_external_both_enforced() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     let reply = rx3.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_CANNOTSENDTOCHAN));
@@ -1084,6 +1121,7 @@ async fn privmsg_moderated_and_no_external_both_enforced() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     let reply = rx2.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_CANNOTSENDTOCHAN));
@@ -1099,6 +1137,7 @@ async fn privmsg_moderated_and_no_external_both_enforced() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     let reply = rx2.recv().await.unwrap();
     assert_eq!(reply.command, Command::Privmsg);

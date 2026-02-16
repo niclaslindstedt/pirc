@@ -10,6 +10,7 @@ use pirc_protocol::{Command, Message};
 use pirc_server::channel_registry::ChannelRegistry;
 use pirc_server::config::ServerConfig;
 use pirc_server::handler::{self, HandleResult, PreRegistrationState};
+use pirc_server::offline_store::OfflineMessageStore;
 use pirc_server::prekey_store::PreKeyBundleStore;
 use pirc_server::registry::UserRegistry;
 use tokio::net::TcpStream;
@@ -77,9 +78,11 @@ async fn handle_connection(
         match connection.recv_with_shutdown(&mut shutdown).await {
             Ok(Some(msg)) => {
                 let prekey_store = Arc::new(PreKeyBundleStore::new());
+                let offline_store = Arc::new(OfflineMessageStore::default());
                 let result = handler::handle_message(
                     &msg, conn_id, &registry, &channels, &tx, &mut state, &config, None,
                     &prekey_store,
+                    &offline_store,
                 );
                 while let Ok(out_msg) = rx.try_recv() {
                     if connection.send(out_msg).await.is_err() {

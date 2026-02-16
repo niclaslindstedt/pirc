@@ -49,6 +49,7 @@ async fn nick_then_user_completes_registration() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     assert!(state.nick.is_some());
     assert!(!state.registered);
@@ -63,6 +64,7 @@ async fn nick_then_user_completes_registration() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     assert!(state.registered);
     assert_eq!(registry.connection_count(), 1);
@@ -103,6 +105,7 @@ async fn user_then_nick_completes_registration() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     assert!(!state.registered);
 
@@ -116,6 +119,7 @@ async fn user_then_nick_completes_registration() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     assert!(state.registered);
     assert_eq!(registry.connection_count(), 1);
@@ -133,7 +137,7 @@ async fn nick_no_param_returns_err() {
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
     let msg = Message::new(Command::Nick, vec![]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NONICKNAMEGIVEN));
@@ -157,6 +161,7 @@ async fn nick_invalid_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -201,6 +206,7 @@ async fn nick_in_use_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -217,7 +223,7 @@ async fn user_missing_params_returns_err() {
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
     let msg = Message::new(Command::User, vec!["alice".to_owned()]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -242,6 +248,7 @@ async fn user_after_registration_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &user_msg("alice", "Alice"),
@@ -253,6 +260,7 @@ async fn user_after_registration_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     assert!(state.registered);
 
@@ -270,6 +278,7 @@ async fn user_after_registration_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -285,7 +294,7 @@ async fn ping_gets_pong_response() {
     let mut state = PreRegistrationState::new("127.0.0.1".to_owned());
 
     let msg = Message::new(Command::Ping, vec!["token123".to_owned()]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Pong);
@@ -310,6 +319,7 @@ async fn welcome_message_contains_nick_and_host() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &user_msg("testuser", "Test User"),
@@ -321,6 +331,7 @@ async fn welcome_message_contains_nick_and_host() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let welcome = rx.recv().await.unwrap();
@@ -350,6 +361,7 @@ async fn registration_race_condition_handled() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &user_msg("user1", "User One"),
@@ -361,6 +373,7 @@ async fn registration_race_condition_handled() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     assert!(state1.registered);
 
@@ -376,6 +389,7 @@ async fn registration_race_condition_handled() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // Second connection should get ERR_NICKNAMEINUSE when trying nick
@@ -414,6 +428,7 @@ fn register_user(
         config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -425,6 +440,7 @@ fn register_user(
         config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst (RPL_WELCOME, RPL_YOURHOST, RPL_CREATED, ERR_NOMOTD)
@@ -457,6 +473,7 @@ async fn nick_change_after_registration_succeeds() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -502,6 +519,7 @@ async fn nick_change_collision_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -537,6 +555,7 @@ async fn nick_change_invalid_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -572,6 +591,7 @@ async fn nick_change_case_only_succeeds() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -605,7 +625,7 @@ async fn nick_change_no_param_returns_err() {
     );
 
     let msg = Message::new(Command::Nick, vec![]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NONICKNAMEGIVEN));
@@ -630,6 +650,7 @@ async fn nick_change_prefix_has_correct_old_nick() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -660,6 +681,7 @@ async fn motd_text_is_sent_when_configured() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &user_msg("motduser", "Motd User"),
@@ -671,6 +693,7 @@ async fn motd_text_is_sent_when_configured() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // Skip RPL_WELCOME, RPL_YOURHOST, RPL_CREATED
@@ -743,6 +766,7 @@ async fn away_set_returns_rpl_nowaway() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -785,6 +809,7 @@ async fn away_clear_returns_rpl_unaway() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     let _ = rx.recv().await.unwrap(); // drain RPL_NOWAWAY
 
@@ -799,6 +824,7 @@ async fn away_clear_returns_rpl_unaway() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -843,6 +869,7 @@ async fn away_set_then_update_message() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     let _ = rx.recv().await.unwrap();
 
@@ -856,6 +883,7 @@ async fn away_set_then_update_message() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     let reply = rx.recv().await.unwrap();
     assert_eq!(
@@ -908,6 +936,7 @@ async fn mode_query_own_returns_rpl_umodeis() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -945,6 +974,7 @@ async fn mode_query_other_returns_err_usersdontmatch() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -979,6 +1009,7 @@ async fn mode_no_params_returns_err_needmoreparams() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1013,6 +1044,7 @@ async fn mode_set_voiced_on_self() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1055,6 +1087,7 @@ async fn mode_set_operator_self_ignored() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1103,6 +1136,7 @@ async fn mode_remove_operator() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1143,6 +1177,7 @@ async fn mode_unknown_flag_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1186,6 +1221,7 @@ async fn mode_set_other_returns_err_usersdontmatch() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1221,6 +1257,7 @@ async fn mode_query_case_insensitive() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -1256,6 +1293,7 @@ async fn mode_combined_modestring() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();

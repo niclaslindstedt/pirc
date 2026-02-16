@@ -11,6 +11,7 @@ use crate::cluster::InviteKeyStore;
 use crate::config::ServerConfig;
 use crate::degraded_mode::DegradedModeState;
 use crate::handler::{handle_message, PreRegistrationState};
+use crate::offline_store::OfflineMessageStore;
 use crate::prekey_store::PreKeyBundleStore;
 use crate::handler_cluster::ClusterContext;
 use crate::raft::test_utils::MemStorage;
@@ -69,6 +70,7 @@ fn register_user(
         config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -80,6 +82,7 @@ fn register_user(
         config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     assert!(state.registered);
     while rx.try_recv().is_ok() {}
@@ -164,6 +167,7 @@ async fn invite_key_generate_requires_oper() {
         &msg, 1, &registry, &channels, &tx, &mut state, &config,
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -185,6 +189,7 @@ async fn invite_key_generate_success() {
         &msg, 1, &registry, &channels, &tx, &mut state, &config,
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -211,6 +216,7 @@ async fn invite_key_generate_with_custom_ttl() {
         &msg, 1, &registry, &channels, &tx, &mut state, &config,
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -235,6 +241,7 @@ async fn invite_key_list_requires_oper() {
         &msg, 1, &registry, &channels, &tx, &mut state, &config,
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -256,6 +263,7 @@ async fn invite_key_list_empty() {
         &msg, 1, &registry, &channels, &tx, &mut state, &config,
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -284,6 +292,7 @@ async fn invite_key_list_shows_keys() {
         &msg, 1, &registry, &channels, &tx, &mut state, &config,
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -311,6 +320,7 @@ async fn invite_key_revoke_requires_oper() {
         &msg, 1, &registry, &channels, &tx, &mut state, &config,
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -341,6 +351,7 @@ async fn invite_key_revoke_success() {
         &msg, 1, &registry, &channels, &tx, &mut state, &config,
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -366,6 +377,7 @@ async fn invite_key_revoke_not_found() {
         &msg, 1, &registry, &channels, &tx, &mut state, &config,
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -388,6 +400,7 @@ async fn invite_key_revoke_missing_param() {
         &msg, 1, &registry, &channels, &tx, &mut state, &config,
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -411,6 +424,7 @@ async fn cluster_status_shows_info() {
         &msg, 1, &registry, &channels, &tx, &mut state, &config,
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -437,6 +451,7 @@ async fn cluster_members_shows_peers() {
         &msg, 1, &registry, &channels, &tx, &mut state, &config,
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -465,6 +480,7 @@ async fn network_info_shows_servers_and_users() {
         &msg, 1, &registry, &channels, &tx, &mut state, &config,
         Some(ctx.as_ref()),
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let notices = collect_notices(&mut rx);
@@ -549,6 +565,7 @@ async fn commands_without_cluster_ctx_are_noop() {
         handle_message(
             &msg, 1, &registry, &channels, &tx, &mut state, &config, None,
             &Arc::new(PreKeyBundleStore::new()),
+            &Arc::new(OfflineMessageStore::default()),
         );
     }
 

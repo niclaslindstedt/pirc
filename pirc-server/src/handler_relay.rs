@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
 use pirc_common::Nickname;
-use pirc_protocol::numeric::{ERR_NEEDMOREPARAMS, ERR_NOSUCHNICK};
+use pirc_protocol::numeric::ERR_NEEDMOREPARAMS;
 use pirc_protocol::{Command, Message, PircSubcommand, Prefix};
 use tokio::sync::mpsc;
 
-use crate::handler::send_numeric;
+use crate::handler::{send_numeric, SERVER_NAME};
+use crate::offline_store::OfflineMessageStore;
 use crate::registry::UserRegistry;
 
 /// Relay a PIRC subcommand message from sender to target user.
@@ -18,13 +19,15 @@ use crate::registry::UserRegistry;
 ///
 /// The server rewrites the prefix to the sender's `nick!user@host` and
 /// forwards the message (including all params after the target) to the
-/// target user. If the target is not found, sends `ERR_NOSUCHNICK`.
+/// target user. If the target is offline, the message is queued for
+/// delivery on reconnect and the sender is notified.
 pub fn handle_relay(
     subcommand: &PircSubcommand,
     msg: &Message,
     connection_id: u64,
     registry: &Arc<UserRegistry>,
     sender: &mpsc::UnboundedSender<Message>,
+    offline_store: &Arc<OfflineMessageStore>,
 ) {
     let Some(session_arc) = registry.get_by_connection(connection_id) else {
         return;
@@ -56,17 +59,7 @@ pub fn handle_relay(
     let Ok(target_nick) = Nickname::new(target_str) else {
         send_numeric(
             sender,
-            ERR_NOSUCHNICK,
-            &[sender_nick.as_ref(), target_str],
-            "No such nick/channel",
-        );
-        return;
-    };
-
-    let Some(target_session_arc) = registry.get_by_nick(&target_nick) else {
-        send_numeric(
-            sender,
-            ERR_NOSUCHNICK,
+            pirc_protocol::numeric::ERR_NOSUCHNICK,
             &[sender_nick.as_ref(), target_str],
             "No such nick/channel",
         );
@@ -76,7 +69,7 @@ pub fn handle_relay(
     // Build the relayed message with the sender's prefix and all original params.
     let mut builder = Message::builder(Command::Pirc(subcommand.clone()))
         .prefix(Prefix::User {
-            nick: sender_nick,
+            nick: sender_nick.clone(),
             user: username,
             host: hostname,
         });
@@ -85,6 +78,19 @@ pub fn handle_relay(
     }
     let relay_msg = builder.build();
 
-    let target_session = target_session_arc.read().expect("session lock poisoned");
-    let _ = target_session.sender.send(relay_msg);
+    if let Some(target_session_arc) = registry.get_by_nick(&target_nick) {
+        let target_session = target_session_arc.read().expect("session lock poisoned");
+        let _ = target_session.sender.send(relay_msg);
+    } else {
+        // Target is offline — queue for delivery on reconnect.
+        offline_store.queue_message(&target_nick, relay_msg);
+        let notice = Message::builder(Command::Notice)
+            .prefix(Prefix::server(SERVER_NAME))
+            .param(sender_nick.as_ref())
+            .trailing(&format!(
+                "{target_nick} is offline. Message will be delivered when they reconnect."
+            ))
+            .build();
+        let _ = sender.send(notice);
+    }
 }

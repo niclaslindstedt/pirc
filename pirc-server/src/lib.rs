@@ -12,6 +12,7 @@ pub mod handler_cluster;
 pub mod handler_oper;
 pub mod handler_relay;
 pub mod migration;
+pub mod offline_store;
 pub mod prekey_store;
 pub mod raft;
 pub mod registry;

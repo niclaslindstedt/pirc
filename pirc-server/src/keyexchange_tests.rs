@@ -7,6 +7,7 @@ use tokio::sync::mpsc;
 use crate::channel_registry::ChannelRegistry;
 use crate::config::ServerConfig;
 use crate::handler::{handle_message, PreRegistrationState};
+use crate::offline_store::OfflineMessageStore;
 use crate::prekey_store::PreKeyBundleStore;
 use crate::registry::UserRegistry;
 
@@ -50,6 +51,7 @@ fn register_user(
     channels: &Arc<ChannelRegistry>,
     config: &ServerConfig,
     prekey_store: &Arc<PreKeyBundleStore>,
+    offline_store: &Arc<OfflineMessageStore>,
 ) -> (
     mpsc::UnboundedSender<Message>,
     mpsc::UnboundedReceiver<Message>,
@@ -67,6 +69,7 @@ fn register_user(
         config,
         None,
         prekey_store,
+        offline_store,
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -78,6 +81,7 @@ fn register_user(
         config,
         None,
         prekey_store,
+        offline_store,
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -93,9 +97,10 @@ async fn store_bundle_via_keyexchange_self() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx, mut rx, mut state) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     // Build a bundle message: tag byte 1 (Bundle) followed by some data.
@@ -107,7 +112,7 @@ async fn store_bundle_via_keyexchange_self() {
         vec!["*".to_owned(), encoded],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
 
     // Should receive acknowledgment notice.
     let reply = rx.recv().await.unwrap();
@@ -126,9 +131,10 @@ async fn store_bundle_invalid_encoding_sends_error() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx, mut rx, mut state) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     let msg = Message::new(
@@ -136,7 +142,7 @@ async fn store_bundle_invalid_encoding_sends_error() {
         vec!["*".to_owned(), "not-valid-base64!!!".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Notice);
@@ -149,9 +155,10 @@ async fn store_bundle_wrong_tag_sends_error() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx, mut rx, mut state) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     // Tag byte 0 = RequestBundle, not a Bundle message.
@@ -163,7 +170,7 @@ async fn store_bundle_wrong_tag_sends_error() {
         vec!["*".to_owned(), encoded],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Notice);
@@ -178,9 +185,10 @@ async fn request_bundle_returns_stored_bundle() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx, mut rx, mut state) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     // Pre-store Bob's bundle.
@@ -190,7 +198,7 @@ async fn request_bundle_returns_stored_bundle() {
 
     // Also register Bob so we can verify the target nick resolution works.
     let (_tx2, _rx2, _state2) = register_user(
-        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     // Alice requests Bob's bundle (no data param = RequestBundle).
@@ -199,7 +207,7 @@ async fn request_bundle_returns_stored_bundle() {
         vec!["Bob".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
 
     // Alice should receive Bob's bundle back.
     let reply = rx.recv().await.unwrap();
@@ -216,9 +224,10 @@ async fn request_bundle_with_explicit_request_tag() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx, mut rx, mut state) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     let bob_nick = Nickname::new("Bob").unwrap();
@@ -226,7 +235,7 @@ async fn request_bundle_with_explicit_request_tag() {
     prekey_store.store_bundle(&bob_nick, bundle_data.clone());
 
     let (_tx2, _rx2, _state2) = register_user(
-        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     // RequestBundle with explicit tag byte 0.
@@ -238,7 +247,7 @@ async fn request_bundle_with_explicit_request_tag() {
         vec!["Bob".to_owned(), encoded],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
 
     let reply = rx.recv().await.unwrap();
     assert!(matches!(reply.command, Command::Pirc(PircSubcommand::KeyExchange)));
@@ -252,9 +261,10 @@ async fn request_bundle_missing_sends_notice() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx, mut rx, mut state) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     // Request bundle for Bob who has no bundle stored.
@@ -263,7 +273,7 @@ async fn request_bundle_missing_sends_notice() {
         vec!["Bob".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.command, Command::Notice);
@@ -278,13 +288,14 @@ async fn relay_init_message_to_target() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx_alice, _rx_alice, mut state_alice) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     let (_tx_bob, mut rx_bob, _state_bob) = register_user(
-        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     // Alice sends an InitMessage (tag byte 2) to Bob.
@@ -296,7 +307,7 @@ async fn relay_init_message_to_target() {
         vec!["Bob".to_owned(), encoded.clone()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store);
 
     // Bob should receive the relayed message.
     let relay = rx_bob.recv().await.unwrap();
@@ -317,13 +328,14 @@ async fn relay_complete_message_to_target() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx_alice, _rx_alice, mut state_alice) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     let (_tx_bob, mut rx_bob, _state_bob) = register_user(
-        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     // Alice sends a Complete message (tag byte 3) to Bob.
@@ -335,7 +347,7 @@ async fn relay_complete_message_to_target() {
         vec!["Bob".to_owned(), encoded.clone()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store);
 
     let relay = rx_bob.recv().await.unwrap();
     assert!(matches!(relay.command, Command::Pirc(PircSubcommand::KeyExchange)));
@@ -348,13 +360,14 @@ async fn relay_bundle_message_to_target() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx_alice, _rx_alice, mut state_alice) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     let (_tx_bob, mut rx_bob, _state_bob) = register_user(
-        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     // Alice sends a Bundle message (tag byte 1) to Bob (e.g. direct bundle delivery).
@@ -366,7 +379,7 @@ async fn relay_bundle_message_to_target() {
         vec!["Bob".to_owned(), encoded.clone()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store);
 
     let relay = rx_bob.recv().await.unwrap();
     assert!(matches!(relay.command, Command::Pirc(PircSubcommand::KeyExchange)));
@@ -381,9 +394,10 @@ async fn relay_to_nonexistent_target_sends_nosuchnick() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx, mut rx, mut state) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     // Alice sends a Complete message to a nonexistent user.
@@ -395,10 +409,11 @@ async fn relay_to_nonexistent_target_sends_nosuchnick() {
         vec!["Ghost".to_owned(), encoded],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NOSUCHNICK));
+    assert_eq!(reply.command, Command::Notice);
+    assert!(reply.trailing().unwrap().contains("offline"));
 }
 
 #[tokio::test]
@@ -407,9 +422,10 @@ async fn keyexchange_no_params_sends_need_more_params() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx, mut rx, mut state) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     let msg = Message::new(
@@ -417,7 +433,7 @@ async fn keyexchange_no_params_sends_need_more_params() {
         vec![],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NEEDMOREPARAMS));

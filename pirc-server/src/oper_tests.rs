@@ -58,6 +58,7 @@ fn register_user(
         config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -69,6 +70,7 @@ fn register_user(
         config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     assert!(state.registered, "registration should have completed");
     while rx.try_recv().is_ok() {}
@@ -116,6 +118,7 @@ async fn oper_success_grants_operator_mode() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // RPL_YOUREOPER (381)
@@ -155,7 +158,7 @@ async fn oper_missing_params_returns_err() {
 
     // No params
     let msg = Message::new(Command::Oper, vec![]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -178,7 +181,7 @@ async fn oper_one_param_returns_err() {
 
     // Only one param (name but no password)
     let msg = Message::new(Command::Oper, vec!["admin".to_owned()]);
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -211,6 +214,7 @@ async fn oper_wrong_password_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -250,6 +254,7 @@ async fn oper_unknown_name_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -283,6 +288,7 @@ async fn oper_host_mask_matches() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -314,6 +320,7 @@ async fn oper_host_mask_mismatch_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -351,6 +358,7 @@ async fn oper_host_mask_exact_match() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -384,6 +392,7 @@ async fn oper_no_operators_configured_returns_err() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -535,7 +544,7 @@ async fn kill_success_removes_target() {
         Command::Kill,
         vec!["Victim".to_owned(), "Bad behavior".to_owned()],
     );
-    handle_message(&kill, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&kill, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     // Admin should not get any error.
     assert!(rx.try_recv().is_err());
@@ -573,7 +582,7 @@ async fn kill_non_oper_returns_err() {
         register_user("Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config);
 
     let kill = Message::new(Command::Kill, vec!["Bob".to_owned(), "reason".to_owned()]);
-    handle_message(&kill, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&kill, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NOPRIVILEGES));
@@ -601,7 +610,7 @@ async fn kill_missing_params_returns_err() {
     make_user_oper(&registry, "Admin");
 
     let kill = Message::new(Command::Kill, vec![]);
-    handle_message(&kill, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&kill, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -625,7 +634,7 @@ async fn kill_unknown_target_returns_err() {
     make_user_oper(&registry, "Admin");
 
     let kill = Message::new(Command::Kill, vec!["Ghost".to_owned(), "reason".to_owned()]);
-    handle_message(&kill, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&kill, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NOSUCHNICK));
@@ -655,7 +664,7 @@ async fn die_success_returns_shutdown() {
         register_user("Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config);
 
     let die = Message::new(Command::Die, vec![]);
-    let result = handle_message(&die, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    let result = handle_message(&die, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     assert!(matches!(result, HandleResult::Shutdown));
 
@@ -688,7 +697,7 @@ async fn die_non_oper_returns_err() {
     );
 
     let die = Message::new(Command::Die, vec![]);
-    let result = handle_message(&die, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    let result = handle_message(&die, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     assert!(matches!(result, HandleResult::Continue));
 
@@ -719,7 +728,7 @@ async fn restart_success_returns_shutdown() {
         register_user("Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config);
 
     let restart = Message::new(Command::Restart, vec![]);
-    let result = handle_message(&restart, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    let result = handle_message(&restart, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     assert!(matches!(result, HandleResult::Shutdown));
 
@@ -752,7 +761,7 @@ async fn restart_non_oper_returns_err() {
     );
 
     let restart = Message::new(Command::Restart, vec![]);
-    let result = handle_message(&restart, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    let result = handle_message(&restart, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     assert!(matches!(result, HandleResult::Continue));
 
@@ -804,7 +813,7 @@ async fn wallops_success_sends_to_opers() {
     );
 
     let wallops = Message::new(Command::Wallops, vec!["Server maintenance soon".to_owned()]);
-    handle_message(&wallops, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&wallops, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     // Admin (oper) should receive WALLOPS.
     let msg = rx.recv().await.unwrap();
@@ -839,7 +848,7 @@ async fn wallops_non_oper_returns_err() {
     );
 
     let wallops = Message::new(Command::Wallops, vec!["Hello".to_owned()]);
-    handle_message(&wallops, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&wallops, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NOPRIVILEGES));
@@ -863,7 +872,7 @@ async fn wallops_missing_params_returns_err() {
     make_user_oper(&registry, "Admin");
 
     let wallops = Message::new(Command::Wallops, vec![]);
-    handle_message(&wallops, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&wallops, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NEEDMOREPARAMS));
@@ -889,7 +898,7 @@ async fn motd_command_returns_motd() {
     );
 
     let motd = Message::new(Command::Motd, vec![]);
-    handle_message(&motd, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&motd, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     // RPL_MOTDSTART
     let reply = rx.recv().await.unwrap();
@@ -928,7 +937,7 @@ async fn motd_command_no_motd_returns_err() {
     );
 
     let motd = Message::new(Command::Motd, vec![]);
-    handle_message(&motd, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()));
+    handle_message(&motd, 1, &registry, &channels, &tx, &mut state, &config, None, &Arc::new(PreKeyBundleStore::new()), &Arc::new(OfflineMessageStore::default()));
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(ERR_NOMOTD));

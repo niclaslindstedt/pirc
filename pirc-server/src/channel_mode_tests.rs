@@ -75,6 +75,7 @@ fn register_user(
         config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -86,6 +87,7 @@ fn register_user(
         config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -120,6 +122,7 @@ async fn mode_nonexistent_channel() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -163,6 +166,7 @@ async fn mode_not_on_channel() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -196,6 +200,7 @@ async fn mode_non_operator_cannot_set() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &join_msg("#test"),
@@ -207,6 +212,7 @@ async fn mode_non_operator_cannot_set() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -222,6 +228,7 @@ async fn mode_non_operator_cannot_set() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx2.recv().await.unwrap();
@@ -259,6 +266,7 @@ async fn mode_unknown_mode_char() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -272,6 +280,7 @@ async fn mode_unknown_mode_char() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -303,6 +312,7 @@ async fn mode_user_not_in_channel_for_op() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -317,6 +327,7 @@ async fn mode_user_not_in_channel_for_op() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let reply = rx.recv().await.unwrap();
@@ -361,6 +372,7 @@ async fn mode_change_broadcasts_to_all_members() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &join_msg("#test"),
@@ -372,6 +384,7 @@ async fn mode_change_broadcasts_to_all_members() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     handle_message(
         &join_msg("#test"),
@@ -383,6 +396,7 @@ async fn mode_change_broadcasts_to_all_members() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx1.try_recv().is_ok() {}
     while rx2.try_recv().is_ok() {}
@@ -399,6 +413,7 @@ async fn mode_change_broadcasts_to_all_members() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     // All three should receive the MODE broadcast.
@@ -446,6 +461,7 @@ async fn mode_set_all_flag_modes() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -460,6 +476,7 @@ async fn mode_set_all_flag_modes() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -499,6 +516,7 @@ async fn mode_unset_all_flag_modes() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -525,6 +543,7 @@ async fn mode_unset_all_flag_modes() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();
@@ -562,6 +581,7 @@ async fn mode_mixed_add_remove() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
     while rx.try_recv().is_ok() {}
 
@@ -584,6 +604,7 @@ async fn mode_mixed_add_remove() {
         &config,
         None,
         &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
     );
 
     let chan_name = ChannelName::new("#test").unwrap();

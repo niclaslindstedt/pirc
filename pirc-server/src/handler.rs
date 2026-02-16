@@ -32,6 +32,7 @@ use crate::handler_oper::{handle_die, handle_kill, handle_oper, handle_restart, 
 use crate::handler_relay::handle_relay;
 #[allow(unused_imports)] // Re-exported for test submodules that use `super::*`
 pub(crate) use crate::handler_oper::{host_matches_mask, is_oper};
+use crate::offline_store::OfflineMessageStore;
 use crate::prekey_store::PreKeyBundleStore;
 use crate::registry::UserRegistry;
 use crate::user::UserSession;
@@ -93,6 +94,7 @@ pub fn handle_message(
     config: &ServerConfig,
     cluster_ctx: Option<&ClusterContext>,
     prekey_store: &Arc<PreKeyBundleStore>,
+    offline_store: &Arc<OfflineMessageStore>,
 ) -> HandleResult {
     if state.registered {
         // Update idle tracking for non-PING/PONG commands.
@@ -192,7 +194,14 @@ pub fn handle_message(
                 if msg.params.first().is_some_and(|t| t == "*") {
                     maybe_store_prekey_bundle(msg, connection_id, registry, sender, prekey_store);
                 } else {
-                    handle_key_exchange(msg, connection_id, registry, sender, prekey_store);
+                    handle_key_exchange(
+                        msg,
+                        connection_id,
+                        registry,
+                        sender,
+                        prekey_store,
+                        offline_store,
+                    );
                 }
             }
             Command::Pirc(
@@ -201,7 +210,7 @@ pub fn handle_message(
                 | PircSubcommand::KeyExchangeComplete
                 | PircSubcommand::Fingerprint),
             ) => {
-                handle_relay(sub, msg, connection_id, registry, sender);
+                handle_relay(sub, msg, connection_id, registry, sender, offline_store);
             }
             // PONG and other commands are silently absorbed.
             _ => {}
@@ -224,7 +233,7 @@ pub fn handle_message(
 
     // After processing NICK or USER, check if registration can complete.
     if state.is_ready() {
-        complete_registration(connection_id, registry, sender, state, config);
+        complete_registration(connection_id, registry, sender, state, config, offline_store);
     }
     HandleResult::Continue
 }
@@ -657,6 +666,7 @@ fn complete_registration(
     sender: &mpsc::UnboundedSender<Message>,
     state: &mut PreRegistrationState,
     config: &ServerConfig,
+    offline_store: &Arc<OfflineMessageStore>,
 ) {
     let nick = state.nick.clone().expect("nick set before registration");
     let username = state
@@ -731,6 +741,42 @@ fn complete_registration(
 
     // MOTD or ERR_NOMOTD
     send_motd(sender, nick_str, config);
+
+    // Deliver any offline messages queued while this user was disconnected.
+    deliver_offline_messages(&nick, sender, offline_store);
+}
+
+/// Deliver queued offline messages to a user who just connected.
+///
+/// Messages are sorted so that key exchange messages come before encrypted
+/// messages, ensuring the recipient can establish encryption sessions before
+/// attempting decryption.
+fn deliver_offline_messages(
+    nick: &Nickname,
+    sender: &mpsc::UnboundedSender<Message>,
+    offline_store: &Arc<OfflineMessageStore>,
+) {
+    let mut messages = offline_store.take_messages(nick);
+
+    if messages.is_empty() {
+        return;
+    }
+
+    // Sort: key exchange messages first, then everything else in original order.
+    // Use a stable sort so relative ordering within each group is preserved.
+    messages.sort_by_key(|msg| match &msg.command {
+        Command::Pirc(PircSubcommand::KeyExchange) => 0,
+        Command::Pirc(PircSubcommand::KeyExchangeAck) => 1,
+        Command::Pirc(PircSubcommand::KeyExchangeComplete) => 2,
+        _ => 3,
+    });
+
+    let count = messages.len();
+    for msg in messages {
+        let _ = sender.send(msg);
+    }
+
+    debug!(nick = %nick, count, "delivered offline messages");
 }
 
 fn send_motd(sender: &mpsc::UnboundedSender<Message>, nick: &str, config: &ServerConfig) {
@@ -939,6 +985,7 @@ fn handle_key_exchange(
     registry: &Arc<UserRegistry>,
     sender: &mpsc::UnboundedSender<Message>,
     prekey_store: &Arc<PreKeyBundleStore>,
+    offline_store: &Arc<OfflineMessageStore>,
 ) {
     // Get the sender's nickname.
     let sender_nick = match registry.get_by_connection(connection_id) {
@@ -1007,33 +1054,37 @@ fn handle_key_exchange(
         }
     } else {
         // Relay the key exchange message to the target user.
+        let sender_session = registry
+            .get_by_connection(connection_id)
+            .expect("sender session must exist");
+        let (username, hostname) = {
+            let s = sender_session.read().expect("session lock poisoned");
+            (s.username.clone(), s.hostname.clone())
+        };
+        let relay = Message::builder(Command::Pirc(PircSubcommand::KeyExchange))
+            .prefix(Prefix::User {
+                nick: sender_nick.clone(),
+                user: username,
+                host: hostname,
+            })
+            .param(target_nick.as_ref())
+            .param(&msg.params[1])
+            .build();
+
         if let Some(session_arc) = registry.get_by_nick(&target_nick) {
             let session = session_arc.read().expect("session lock poisoned");
-            // Forward as: :sender!user@host PIRC KEYEXCHANGE <target> <data>
-            let sender_session = registry
-                .get_by_connection(connection_id)
-                .expect("sender session must exist");
-            let (username, hostname) = {
-                let s = sender_session.read().expect("session lock poisoned");
-                (s.username.clone(), s.hostname.clone())
-            };
-            let relay = Message::builder(Command::Pirc(PircSubcommand::KeyExchange))
-                .prefix(Prefix::User {
-                    nick: sender_nick,
-                    user: username,
-                    host: hostname,
-                })
-                .param(target_nick.as_ref())
-                .param(&msg.params[1])
-                .build();
             let _ = session.sender.send(relay);
         } else {
-            send_numeric(
-                sender,
-                ERR_NOSUCHNICK,
-                &[sender_nick.as_ref(), target_str],
-                "No such nick/channel",
-            );
+            // Target is offline — queue the message for delivery on reconnect.
+            offline_store.queue_message(&target_nick, relay);
+            let notice = Message::builder(Command::Notice)
+                .prefix(Prefix::server(SERVER_NAME))
+                .param(sender_nick.as_ref())
+                .trailing(&format!(
+                    "{target_nick} is offline. Message will be delivered when they reconnect."
+                ))
+                .build();
+            let _ = sender.send(notice);
         }
     }
 }
@@ -1179,3 +1230,7 @@ mod keyexchange_tests;
 #[cfg(test)]
 #[path = "relay_tests.rs"]
 mod relay_tests;
+
+#[cfg(test)]
+#[path = "offline_delivery_tests.rs"]
+mod offline_delivery_tests;

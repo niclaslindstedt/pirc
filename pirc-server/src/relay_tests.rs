@@ -6,6 +6,7 @@ use tokio::sync::mpsc;
 use crate::channel_registry::ChannelRegistry;
 use crate::config::ServerConfig;
 use crate::handler::{handle_message, PreRegistrationState};
+use crate::offline_store::OfflineMessageStore;
 use crate::prekey_store::PreKeyBundleStore;
 use crate::registry::UserRegistry;
 
@@ -49,6 +50,7 @@ fn register_user(
     channels: &Arc<ChannelRegistry>,
     config: &ServerConfig,
     prekey_store: &Arc<PreKeyBundleStore>,
+    offline_store: &Arc<OfflineMessageStore>,
 ) -> (
     mpsc::UnboundedSender<Message>,
     mpsc::UnboundedReceiver<Message>,
@@ -66,6 +68,7 @@ fn register_user(
         config,
         None,
         prekey_store,
+        offline_store,
     );
     handle_message(
         &user_msg(username, &format!("{nick} Test")),
@@ -77,6 +80,7 @@ fn register_user(
         config,
         None,
         prekey_store,
+        offline_store,
     );
     assert!(state.registered, "registration should have completed");
     // Drain welcome burst.
@@ -92,12 +96,13 @@ async fn encrypted_relay_to_target() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx_alice, _rx_alice, mut state_alice) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
     let (_tx_bob, mut rx_bob, _state_bob) = register_user(
-        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     let msg = Message::new(
@@ -106,7 +111,7 @@ async fn encrypted_relay_to_target() {
     );
 
     handle_message(
-        &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store,
+        &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
     );
 
     let relay = rx_bob.recv().await.unwrap();
@@ -126,9 +131,10 @@ async fn encrypted_relay_target_not_found() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx, mut rx, mut state) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     let msg = Message::new(
@@ -136,10 +142,11 @@ async fn encrypted_relay_target_not_found() {
         vec!["Ghost".to_owned(), "payload".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NOSUCHNICK));
+    assert_eq!(reply.command, Command::Notice);
+    assert!(reply.trailing().unwrap().contains("offline"));
 }
 
 #[tokio::test]
@@ -148,14 +155,15 @@ async fn encrypted_relay_no_params() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx, mut rx, mut state) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     let msg = Message::new(Command::Pirc(PircSubcommand::Encrypted), vec![]);
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NEEDMOREPARAMS));
@@ -169,12 +177,13 @@ async fn keyexchange_ack_relay_to_target() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx_alice, _rx_alice, mut state_alice) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
     let (_tx_bob, mut rx_bob, _state_bob) = register_user(
-        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     let msg = Message::new(
@@ -183,7 +192,7 @@ async fn keyexchange_ack_relay_to_target() {
     );
 
     handle_message(
-        &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store,
+        &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
     );
 
     let relay = rx_bob.recv().await.unwrap();
@@ -203,9 +212,10 @@ async fn keyexchange_ack_relay_target_not_found() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx, mut rx, mut state) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     let msg = Message::new(
@@ -213,10 +223,11 @@ async fn keyexchange_ack_relay_target_not_found() {
         vec!["Ghost".to_owned(), "data".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NOSUCHNICK));
+    assert_eq!(reply.command, Command::Notice);
+    assert!(reply.trailing().unwrap().contains("offline"));
 }
 
 // ---- PIRC KEYEXCHANGE-COMPLETE relay ----
@@ -227,12 +238,13 @@ async fn keyexchange_complete_relay_to_target() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx_alice, _rx_alice, mut state_alice) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
     let (_tx_bob, mut rx_bob, _state_bob) = register_user(
-        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     let msg = Message::new(
@@ -241,7 +253,7 @@ async fn keyexchange_complete_relay_to_target() {
     );
 
     handle_message(
-        &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store,
+        &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
     );
 
     let relay = rx_bob.recv().await.unwrap();
@@ -260,9 +272,10 @@ async fn keyexchange_complete_relay_target_not_found() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx, mut rx, mut state) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     let msg = Message::new(
@@ -270,10 +283,11 @@ async fn keyexchange_complete_relay_target_not_found() {
         vec!["Ghost".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NOSUCHNICK));
+    assert_eq!(reply.command, Command::Notice);
+    assert!(reply.trailing().unwrap().contains("offline"));
 }
 
 // ---- PIRC FINGERPRINT relay ----
@@ -284,12 +298,13 @@ async fn fingerprint_relay_to_target() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx_alice, _rx_alice, mut state_alice) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
     let (_tx_bob, mut rx_bob, _state_bob) = register_user(
-        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     let msg = Message::new(
@@ -298,7 +313,7 @@ async fn fingerprint_relay_to_target() {
     );
 
     handle_message(
-        &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store,
+        &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
     );
 
     let relay = rx_bob.recv().await.unwrap();
@@ -318,9 +333,10 @@ async fn fingerprint_relay_target_not_found() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx, mut rx, mut state) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     let msg = Message::new(
@@ -328,10 +344,11 @@ async fn fingerprint_relay_target_not_found() {
         vec!["Ghost".to_owned(), "fingerprint-data".to_owned()],
     );
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
 
     let reply = rx.recv().await.unwrap();
-    assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NOSUCHNICK));
+    assert_eq!(reply.command, Command::Notice);
+    assert!(reply.trailing().unwrap().contains("offline"));
 }
 
 #[tokio::test]
@@ -340,14 +357,15 @@ async fn fingerprint_relay_no_params() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx, mut rx, mut state) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     let msg = Message::new(Command::Pirc(PircSubcommand::Fingerprint), vec![]);
 
-    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store);
+    handle_message(&msg, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store);
 
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NEEDMOREPARAMS));
@@ -361,12 +379,13 @@ async fn encrypted_payload_forwarded_verbatim() {
     let channels = make_channels();
     let config = make_config();
     let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
 
     let (tx_alice, _rx_alice, mut state_alice) = register_user(
-        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
     let (_tx_bob, mut rx_bob, _state_bob) = register_user(
-        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store,
+        "Bob", "bob", 2, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
     );
 
     // Send arbitrary binary-safe payload — server must not decode or modify it.
@@ -377,7 +396,7 @@ async fn encrypted_payload_forwarded_verbatim() {
     );
 
     handle_message(
-        &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store,
+        &msg, 1, &registry, &channels, &tx_alice, &mut state_alice, &config, None, &prekey_store, &offline_store,
     );
 
     let relay = rx_bob.recv().await.unwrap();
