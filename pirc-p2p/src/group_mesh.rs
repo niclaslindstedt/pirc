@@ -150,6 +150,10 @@ impl GroupMesh {
     /// Transitions the member to `Connected` and emits a `MemberConnected`
     /// event. May also emit `MeshReady` if all members are now connected.
     pub fn member_connected(&mut self, member: String, transport: EncryptedP2pTransport) {
+        if !self.members.contains_key(&member) && !self.tracked_members.contains_key(&member) {
+            warn!(group = %self.group_id, member = %member, "ignoring connected event for unknown member");
+            return;
+        }
         info!(group = %self.group_id, member = %member, "member P2P connected");
         self.tracked_members.remove(&member);
         self.members.insert(
@@ -170,6 +174,10 @@ impl GroupMesh {
     /// Transitions the member to `RelayFallback` and emits a
     /// `MemberDegraded` event. May also emit `MeshDegraded`.
     pub fn member_degraded(&mut self, member: &str, reason: String) {
+        if !self.members.contains_key(member) && !self.tracked_members.contains_key(member) {
+            warn!(group = %self.group_id, member = %member, "ignoring degraded event for unknown member");
+            return;
+        }
         warn!(
             group = %self.group_id,
             member = %member,
@@ -194,18 +202,19 @@ impl GroupMesh {
     /// Transitions the member to `Disconnected` and emits a
     /// `MemberDisconnected` event.
     pub fn member_disconnected(&mut self, member: &str) {
-        let was_connected = self
-            .members
-            .get(member)
-            .is_some_and(|mt| mt.state == PeerConnectionState::Connected);
+        let was_connected = self.members.contains_key(member);
+        let was_tracked = self.tracked_members.contains_key(member);
+
+        if !was_connected && !was_tracked {
+            warn!(group = %self.group_id, member = %member, "ignoring disconnected event for unknown member");
+            return;
+        }
 
         self.members.remove(member);
-
-        let was_tracked = self.tracked_members.contains_key(member);
         self.tracked_members
             .insert(member.to_owned(), PeerConnectionState::Disconnected);
 
-        if was_connected || was_tracked {
+        if was_connected {
             info!(group = %self.group_id, member = %member, "member disconnected");
             self.events.push(GroupMeshEvent::MemberDisconnected {
                 member: member.to_owned(),
@@ -496,6 +505,23 @@ mod tests {
         let mut mesh = GroupMesh::new("g1".into());
         mesh.member_disconnected("ghost");
         assert!(mesh.drain_events().is_empty());
+        assert_eq!(mesh.member_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn member_connected_unknown_is_noop() {
+        let mut mesh = GroupMesh::new("g1".into());
+        mesh.member_connected("ghost".into(), mock_transport().await);
+        assert!(mesh.drain_events().is_empty());
+        assert_eq!(mesh.member_count(), 0);
+    }
+
+    #[test]
+    fn member_degraded_unknown_is_noop() {
+        let mut mesh = GroupMesh::new("g1".into());
+        mesh.member_degraded("ghost", "ICE timeout".into());
+        assert!(mesh.drain_events().is_empty());
+        assert_eq!(mesh.member_count(), 0);
     }
 
     // --- Transport access ---
