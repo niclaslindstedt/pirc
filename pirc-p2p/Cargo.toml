@@ -1,0 +1,27 @@
+[package]
+name = "pirc-p2p"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "P2P connectivity with STUN/TURN NAT traversal for pirc"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["net", "time", "rt", "macros"] }
+
+# Logging
+tracing = "0.1"
+
+# Error handling
+thiserror = "2"
+
+# Randomness for transaction IDs
+rand = "0.8"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["net", "time", "rt", "macros", "test-util"] }

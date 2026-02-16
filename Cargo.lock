@@ -698,6 +698,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pirc-p2p"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "pirc-plugin"
 version = "0.1.0"
 dependencies = [
