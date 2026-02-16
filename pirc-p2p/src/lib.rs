@@ -8,12 +8,14 @@
 //! - **Connectivity** — [`connectivity`] ICE connectivity checks and UDP hole-punching
 //! - **Session** — [`session`] P2P session state machine for connection lifecycle
 //! - **Group session** — [`group_session`] group P2P mesh session state machine
+//! - **Group mesh** — [`group_mesh`] full mesh topology manager for group P2P connections
 //! - **Transport** — [`transport`] framed UDP transport for P2P data exchange
 //! - **Error handling** — [`error`] error types for P2P operations
 
 pub mod connectivity;
 pub mod encrypted_transport;
 pub mod error;
+pub mod group_mesh;
 pub mod group_session;
 pub mod ice;
 pub mod session;
@@ -25,6 +27,7 @@ pub use connectivity::{
     compute_pair_priority, form_pairs, CandidatePair, ConnectivityChecker, IceRole, PairState,
 };
 pub use error::{P2pError, Result};
+pub use group_mesh::{GroupMesh, GroupMeshEvent, PeerConnectionState};
 pub use group_session::{GroupSession, GroupSessionEvent, GroupSessionState};
 pub use ice::{
     compute_priority, CandidateGatherer, CandidateType, GathererConfig, IceCandidate,
