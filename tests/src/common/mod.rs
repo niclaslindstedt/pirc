@@ -363,6 +363,21 @@ pub fn mode_msg_with_params(target: &str, mode: &str, params: &[&str]) -> Messag
     Message::new(Command::Mode, p)
 }
 
+/// `WHOIS <nick>`
+pub fn whois_msg(nick: &str) -> Message {
+    Message::new(Command::Whois, vec![nick.to_owned()])
+}
+
+/// `AWAY :<message>` — set away status.
+pub fn away_msg(message: &str) -> Message {
+    Message::new(Command::Away, vec![message.to_owned()])
+}
+
+/// `AWAY` — clear away status.
+pub fn away_clear() -> Message {
+    Message::new(Command::Away, vec![])
+}
+
 /// `JOIN <channel> <key>`
 pub fn join_msg_with_key(channel: &str, key: &str) -> Message {
     Message::new(
