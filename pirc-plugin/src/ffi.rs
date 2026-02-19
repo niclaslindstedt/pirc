@@ -522,4 +522,28 @@ mod tests {
         assert_eq!(PluginStatus::Ok as u32, 0);
         assert_eq!(PluginStatus::Error as u32, 1);
     }
+
+    #[test]
+    fn plugin_event_ffi_strings_can_be_freed_via_destructure() {
+        // Mirrors the cleanup pattern used in dispatch_command/dispatch_event:
+        // create a PluginEvent with FfiString allocations, then destructure
+        // and free the strings after the FFI call returns.
+        let event = PluginEvent {
+            event_type: PluginEventType::CommandExecuted,
+            data: FfiString::new("test-command"),
+            source: FfiString::new("arg1 arg2"),
+        };
+
+        // Verify strings are valid before cleanup.
+        assert!(!event.data.is_null());
+        assert!(!event.source.is_null());
+
+        // Destructure and free — the same pattern used in dispatch.rs.
+        let PluginEvent { data, source, .. } = event;
+        #[allow(unsafe_code)]
+        unsafe {
+            data.free();
+            source.free();
+        }
+    }
 }

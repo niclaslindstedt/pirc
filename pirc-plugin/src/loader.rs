@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn plugin_loader_default() {
-        let loader = PluginLoader::default();
+        let loader = PluginLoader;
         // Just verify it can be constructed via Default
         let _ = format!("{loader:?}");
     }
