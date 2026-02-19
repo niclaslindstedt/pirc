@@ -19,3 +19,4 @@ pub mod loader;
 pub mod macros;
 pub mod manager;
 pub mod plugin;
+pub mod registry;
