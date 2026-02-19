@@ -5,6 +5,8 @@ use std::time::Duration;
 use pirc_common::config::keys_dir;
 use pirc_network::connection::AsyncTransport;
 use pirc_network::{Connection, Connector, ShutdownController, ShutdownSignal};
+use pirc_plugin::ffi::PluginEventType;
+use pirc_plugin::manager::PluginManager;
 use pirc_protocol::{Command, Message};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -79,6 +81,8 @@ pub struct App {
     p2p: P2pManager,
     /// Encrypted group chat manager.
     group_chat: GroupChatManager,
+    /// Plugin manager for native plugins.
+    plugin_manager: PluginManager,
 }
 
 impl App {
@@ -127,6 +131,7 @@ impl App {
             encryption,
             p2p,
             group_chat: GroupChatManager::new(),
+            plugin_manager: PluginManager::new(),
         }
     }
 
@@ -172,6 +177,9 @@ impl App {
             ),
             line_type: LineType::System,
         });
+
+        // Initialize plugins
+        self.init_plugins();
 
         // Initial render
         self.render(&mut renderer)?;
@@ -437,6 +445,13 @@ impl App {
             return;
         }
 
+        // Handle /plugin subcommands
+        if let ClientCommand::Plugin(ref sub) = cmd {
+            let sub = sub.clone();
+            self.handle_plugin_command(&sub);
+            return;
+        }
+
         // Handle /group subcommands
         if let ClientCommand::Group(ref sub) = cmd {
             let sub = sub.clone();
@@ -456,6 +471,14 @@ impl App {
         if let ClientCommand::Query(ref nick, Some(ref message)) = cmd {
             self.handle_private_msg_command(nick, message).await;
             return;
+        }
+
+        // Try plugin commands for unknown commands before sending to server.
+        if let ClientCommand::Unknown(ref name, ref args) = cmd {
+            let args_str = args.join(" ");
+            if self.dispatch_plugin_command(name, &args_str) {
+                return;
+            }
         }
 
         // Determine context (current channel name) for to_message
@@ -657,6 +680,13 @@ impl App {
 
                     self.push_status(&message);
 
+                    // Notify plugins of connection.
+                    self.dispatch_plugin_event(
+                        PluginEventType::Connected,
+                        &self.connection_mgr.server_addr().to_string(),
+                        "",
+                    );
+
                     // Rejoin channels if this was a reconnect
                     self.rejoin_channels().await;
 
@@ -706,6 +736,9 @@ impl App {
         if self.handle_group_message(msg) {
             return;
         }
+
+        // Dispatch IRC events to plugins.
+        self.dispatch_irc_event_to_plugins(msg);
 
         // Route the message to the appropriate buffer(s).
         let ts = current_timestamp(&self.config.ui.timestamp_format);
@@ -815,6 +848,9 @@ impl App {
             .connection_mgr
             .transition(ConnectionState::Disconnected);
         self.push_status(reason);
+
+        // Notify plugins of disconnection.
+        self.dispatch_plugin_event(PluginEventType::Disconnected, reason, "");
 
         // Schedule auto-reconnect if enabled
         if self.connection_mgr.auto_reconnect() {
@@ -1078,6 +1114,7 @@ fn derive_machine_passphrase(nick: &str) -> Vec<u8> {
 mod encryption;
 mod group;
 mod p2p;
+mod plugin;
 
 #[cfg(test)]
 mod tests;

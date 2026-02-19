@@ -108,6 +108,10 @@ pub enum ClientCommand {
     /// `/group <subcommand> [args]`
     Group(GroupSubcommand),
 
+    // ── Plugins ──────────────────────────────────────────────────
+    /// `/plugin <subcommand> [args]`
+    Plugin(PluginSubcommand),
+
     // ── Encryption ──────────────────────────────────────────────
     /// `/encryption <subcommand> [args]`
     Encryption(EncryptionSubcommand),
@@ -129,6 +133,25 @@ pub enum EncryptionSubcommand {
     /// `/encryption reset <nick>` — reset encrypted session with a peer.
     Reset(String),
     /// `/encryption info <nick>` — show detailed session info.
+    Info(String),
+}
+
+/// Subcommands for the `/plugin` command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginSubcommand {
+    /// `/plugin list` — show loaded plugins with name, version, status.
+    List,
+    /// `/plugin load <path>` — load a specific plugin file.
+    Load(String),
+    /// `/plugin unload <name>` — unload a plugin by name.
+    Unload(String),
+    /// `/plugin reload <name>` — hot-reload a plugin.
+    Reload(String),
+    /// `/plugin enable <name>` — enable a disabled plugin.
+    Enable(String),
+    /// `/plugin disable <name>` — disable an enabled plugin.
+    Disable(String),
+    /// `/plugin info <name>` — show detailed plugin info.
     Info(String),
 }
 
@@ -207,6 +230,9 @@ impl ClientCommand {
 
             // ── Group chat ──────────────────────────────────────
             "group" => parse_group(args),
+
+            // ── Plugins ──────────────────────────────────────────
+            "plugin" => parse_plugin(args),
 
             // ── Encryption ─────────────────────────────────────
             "encryption" => parse_encryption(args),
@@ -404,6 +430,9 @@ impl ClientCommand {
 
             // ── Group chat (client-local) ────────────────────────
             ClientCommand::Group(_) => None,
+
+            // ── Plugins (client-local) ───────────────────────────
+            ClientCommand::Plugin(_) => None,
 
             // ── Encryption (client-local) ───────────────────────
             ClientCommand::Encryption(_) | ClientCommand::Fingerprint(_) => None,
@@ -640,6 +669,84 @@ fn parse_kill(args: &[String]) -> Result<ClientCommand, CommandError> {
         argument: "reason".into(),
     })?;
     Ok(ClientCommand::Kill(nick.clone(), reason.clone()))
+}
+
+fn parse_plugin(args: &[String]) -> Result<ClientCommand, CommandError> {
+    let sub = args.first().ok_or_else(|| CommandError::MissingArgument {
+        command: "plugin".into(),
+        argument: "subcommand".into(),
+    })?;
+
+    match sub.to_ascii_lowercase().as_str() {
+        "list" => Ok(ClientCommand::Plugin(PluginSubcommand::List)),
+        "load" => {
+            let trailing = args.get(1).ok_or_else(|| CommandError::MissingArgument {
+                command: "plugin load".into(),
+                argument: "path".into(),
+            })?;
+            let (path, _) = split_second_arg(trailing);
+            Ok(ClientCommand::Plugin(PluginSubcommand::Load(
+                path.to_owned(),
+            )))
+        }
+        "unload" => {
+            let trailing = args.get(1).ok_or_else(|| CommandError::MissingArgument {
+                command: "plugin unload".into(),
+                argument: "name".into(),
+            })?;
+            let (name, _) = split_second_arg(trailing);
+            Ok(ClientCommand::Plugin(PluginSubcommand::Unload(
+                name.to_owned(),
+            )))
+        }
+        "reload" => {
+            let trailing = args.get(1).ok_or_else(|| CommandError::MissingArgument {
+                command: "plugin reload".into(),
+                argument: "name".into(),
+            })?;
+            let (name, _) = split_second_arg(trailing);
+            Ok(ClientCommand::Plugin(PluginSubcommand::Reload(
+                name.to_owned(),
+            )))
+        }
+        "enable" => {
+            let trailing = args.get(1).ok_or_else(|| CommandError::MissingArgument {
+                command: "plugin enable".into(),
+                argument: "name".into(),
+            })?;
+            let (name, _) = split_second_arg(trailing);
+            Ok(ClientCommand::Plugin(PluginSubcommand::Enable(
+                name.to_owned(),
+            )))
+        }
+        "disable" => {
+            let trailing = args.get(1).ok_or_else(|| CommandError::MissingArgument {
+                command: "plugin disable".into(),
+                argument: "name".into(),
+            })?;
+            let (name, _) = split_second_arg(trailing);
+            Ok(ClientCommand::Plugin(PluginSubcommand::Disable(
+                name.to_owned(),
+            )))
+        }
+        "info" => {
+            let trailing = args.get(1).ok_or_else(|| CommandError::MissingArgument {
+                command: "plugin info".into(),
+                argument: "name".into(),
+            })?;
+            let (name, _) = split_second_arg(trailing);
+            Ok(ClientCommand::Plugin(PluginSubcommand::Info(
+                name.to_owned(),
+            )))
+        }
+        _ => Err(CommandError::InvalidArgument {
+            command: "plugin".into(),
+            argument: "subcommand".into(),
+            reason: format!(
+                "unknown subcommand '{sub}' (expected: list, load, unload, reload, enable, disable, info)"
+            ),
+        }),
+    }
 }
 
 fn parse_encryption(args: &[String]) -> Result<ClientCommand, CommandError> {

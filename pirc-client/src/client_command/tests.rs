@@ -1777,3 +1777,141 @@ fn group_join_to_message_is_none() {
     let cmd = ClientCommand::Group(GroupSubcommand::Join(GroupId::new(1)));
     assert!(cmd.to_message(None).is_none());
 }
+
+// ── Plugin commands ──────────────────────────────────────
+
+#[test]
+fn plugin_list() {
+    assert_eq!(
+        ClientCommand::from_parsed("plugin", &args(&["list"])),
+        Ok(ClientCommand::Plugin(PluginSubcommand::List))
+    );
+}
+
+#[test]
+fn plugin_load() {
+    assert_eq!(
+        ClientCommand::from_parsed("plugin", &args(&["load", "/path/to/plugin.dylib"])),
+        Ok(ClientCommand::Plugin(PluginSubcommand::Load(
+            "/path/to/plugin.dylib".into()
+        )))
+    );
+}
+
+#[test]
+fn plugin_unload() {
+    assert_eq!(
+        ClientCommand::from_parsed("plugin", &args(&["unload", "myplugin"])),
+        Ok(ClientCommand::Plugin(PluginSubcommand::Unload(
+            "myplugin".into()
+        )))
+    );
+}
+
+#[test]
+fn plugin_reload() {
+    assert_eq!(
+        ClientCommand::from_parsed("plugin", &args(&["reload", "myplugin"])),
+        Ok(ClientCommand::Plugin(PluginSubcommand::Reload(
+            "myplugin".into()
+        )))
+    );
+}
+
+#[test]
+fn plugin_enable() {
+    assert_eq!(
+        ClientCommand::from_parsed("plugin", &args(&["enable", "myplugin"])),
+        Ok(ClientCommand::Plugin(PluginSubcommand::Enable(
+            "myplugin".into()
+        )))
+    );
+}
+
+#[test]
+fn plugin_disable() {
+    assert_eq!(
+        ClientCommand::from_parsed("plugin", &args(&["disable", "myplugin"])),
+        Ok(ClientCommand::Plugin(PluginSubcommand::Disable(
+            "myplugin".into()
+        )))
+    );
+}
+
+#[test]
+fn plugin_info() {
+    assert_eq!(
+        ClientCommand::from_parsed("plugin", &args(&["info", "myplugin"])),
+        Ok(ClientCommand::Plugin(PluginSubcommand::Info(
+            "myplugin".into()
+        )))
+    );
+}
+
+#[test]
+fn plugin_missing_subcommand() {
+    assert_eq!(
+        ClientCommand::from_parsed("plugin", &[]),
+        Err(CommandError::MissingArgument {
+            command: "plugin".into(),
+            argument: "subcommand".into(),
+        })
+    );
+}
+
+#[test]
+fn plugin_unknown_subcommand() {
+    let result = ClientCommand::from_parsed("plugin", &args(&["bogus"]));
+    assert!(result.is_err());
+    if let Err(CommandError::InvalidArgument { command, .. }) = result {
+        assert_eq!(command, "plugin");
+    }
+}
+
+#[test]
+fn plugin_load_missing_path() {
+    assert_eq!(
+        ClientCommand::from_parsed("plugin", &args(&["load"])),
+        Err(CommandError::MissingArgument {
+            command: "plugin load".into(),
+            argument: "path".into(),
+        })
+    );
+}
+
+#[test]
+fn plugin_unload_missing_name() {
+    assert_eq!(
+        ClientCommand::from_parsed("plugin", &args(&["unload"])),
+        Err(CommandError::MissingArgument {
+            command: "plugin unload".into(),
+            argument: "name".into(),
+        })
+    );
+}
+
+#[test]
+fn plugin_to_message_is_none() {
+    let cmd = ClientCommand::Plugin(PluginSubcommand::List);
+    assert!(cmd.to_message(None).is_none());
+}
+
+#[test]
+fn plugin_info_to_message_is_none() {
+    let cmd = ClientCommand::Plugin(PluginSubcommand::Info("test".into()));
+    assert!(cmd.to_message(None).is_none());
+}
+
+#[test]
+fn plugin_subcommand_case_insensitive() {
+    assert_eq!(
+        ClientCommand::from_parsed("plugin", &args(&["LIST"])),
+        Ok(ClientCommand::Plugin(PluginSubcommand::List))
+    );
+    assert_eq!(
+        ClientCommand::from_parsed("plugin", &args(&["Load", "/path/file.dylib"])),
+        Ok(ClientCommand::Plugin(PluginSubcommand::Load(
+            "/path/file.dylib".into()
+        )))
+    );
+}
