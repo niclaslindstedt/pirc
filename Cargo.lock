@@ -726,6 +726,7 @@ name = "pirc-integration-tests"
 version = "0.1.0"
 dependencies = [
  "pirc-common",
+ "pirc-crypto",
  "pirc-network",
  "pirc-protocol",
  "pirc-server",
