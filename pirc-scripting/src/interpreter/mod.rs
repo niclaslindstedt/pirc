@@ -14,6 +14,7 @@ pub mod command;
 mod environment;
 pub mod event;
 mod functions;
+pub mod timer;
 mod value;
 
 #[cfg(test)]
@@ -24,6 +25,7 @@ pub use command::AliasRegistry;
 pub use environment::Environment;
 pub use event::{EventContext, EventDispatcher};
 pub use functions::{FunctionRegistry, RegexState};
+pub use timer::{FiredTimer, TimerManager};
 pub use value::Value;
 
 use crate::ast::{
@@ -115,6 +117,7 @@ pub struct Interpreter<'a> {
     regex_state: &'a RegexState,
     aliases: Option<&'a AliasRegistry>,
     echo_output: Option<&'a mut Vec<String>>,
+    timer_manager: Option<&'a mut TimerManager>,
     alias_depth: usize,
     /// Owned builtin context override used during alias execution.
     /// When set, this takes precedence over `builtin_ctx`.
@@ -141,6 +144,7 @@ impl<'a> Interpreter<'a> {
             regex_state: &DEFAULT_REGEX,
             aliases: None,
             echo_output: None,
+            timer_manager: None,
             alias_depth: 0,
             ctx_override: None,
         }
@@ -162,6 +166,7 @@ impl<'a> Interpreter<'a> {
             regex_state,
             aliases: None,
             echo_output: None,
+            timer_manager: None,
             alias_depth: 0,
             ctx_override: None,
         }
@@ -175,6 +180,11 @@ impl<'a> Interpreter<'a> {
     /// Sets the echo output buffer for the `/echo` built-in command.
     pub fn set_echo_output(&mut self, output: &'a mut Vec<String>) {
         self.echo_output = Some(output);
+    }
+
+    /// Sets the timer manager for built-in timer commands (`/timers`, `/timeoff`).
+    pub fn set_timer_manager(&mut self, timer_manager: &'a mut TimerManager) {
+        self.timer_manager = Some(timer_manager);
     }
 
     /// Sets the current alias recursion depth.
@@ -506,6 +516,46 @@ impl<'a> Interpreter<'a> {
             }
             "noop" => Some(Ok(Value::Null)),
             "halt" => Some(Err(RuntimeError::Halt)),
+            "timer" => {
+                // /timer -r name — remove a timer
+                if args.len() >= 2 && args[0].to_string() == "-r" {
+                    if let Some(ref mut tm) = self.timer_manager {
+                        tm.remove(&args[1].to_string());
+                    }
+                    Some(Ok(Value::Null))
+                } else {
+                    // Timer definitions are handled at the script loading level,
+                    // not as runtime commands. Pass through to external handler.
+                    None
+                }
+            }
+            "timeoff" => {
+                // /timeoff name — remove a timer
+                if let Some(ref mut tm) = self.timer_manager {
+                    if let Some(timer_name) = args.first() {
+                        tm.remove(&timer_name.to_string());
+                    }
+                }
+                Some(Ok(Value::Null))
+            }
+            "timers" => {
+                // /timers — list active timers
+                if let Some(ref tm) = self.timer_manager {
+                    let info = tm.timer_info();
+                    if info.is_empty() {
+                        if let Some(ref mut output) = self.echo_output {
+                            output.push("No active timers".to_string());
+                        }
+                    } else {
+                        for line in info {
+                            if let Some(ref mut output) = self.echo_output {
+                                output.push(line);
+                            }
+                        }
+                    }
+                }
+                Some(Ok(Value::Null))
+            }
             _ => None,
         }
     }
