@@ -729,6 +729,7 @@ dependencies = [
  "pirc-network",
  "pirc-protocol",
  "pirc-server",
+ "serde",
  "tokio",
 ]
 

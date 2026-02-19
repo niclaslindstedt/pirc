@@ -15,4 +15,5 @@ pirc-server = { path = "../pirc-server" }
 pirc-network = { path = "../pirc-network" }
 pirc-protocol = { path = "../pirc-protocol" }
 pirc-common = { path = "../pirc-common" }
+serde = "1"
 tokio = { version = "1", features = ["full"] }
