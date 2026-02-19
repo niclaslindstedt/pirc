@@ -581,6 +581,42 @@ impl fmt::Debug for PluginManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ffi::{FfiString, PluginResult};
+
+    /// Creates a noop [`PluginHostApi`] for tests that need one but don't
+    /// exercise any host callbacks.
+    fn noop_host_api() -> PluginHostApi {
+        extern "C" fn noop_register(
+            _name: FfiString,
+            _cb: extern "C" fn(FfiString) -> PluginResult,
+        ) -> PluginResult {
+            PluginResult::ok()
+        }
+        extern "C" fn noop_unregister(_name: FfiString) -> PluginResult {
+            PluginResult::ok()
+        }
+        extern "C" fn noop_hook(_et: PluginEventType) -> PluginResult {
+            PluginResult::ok()
+        }
+        extern "C" fn noop_unhook(_et: PluginEventType) -> PluginResult {
+            PluginResult::ok()
+        }
+        extern "C" fn noop_echo(_msg: FfiString) {}
+        extern "C" fn noop_log(_level: u32, _msg: FfiString) {}
+        extern "C" fn noop_get_config(_key: FfiString) -> FfiString {
+            FfiString::empty()
+        }
+
+        PluginHostApi {
+            register_command: noop_register,
+            unregister_command: noop_unregister,
+            hook_event: noop_hook,
+            unhook_event: noop_unhook,
+            echo: noop_echo,
+            log: noop_log,
+            get_config_value: noop_get_config,
+        }
+    }
 
     // -- PluginState tests ---------------------------------------------------
 
@@ -744,39 +780,7 @@ mod tests {
 
     #[test]
     fn load_plugin_invalid_path_returns_error() {
-        use crate::ffi::{FfiString, PluginResult};
-
-        extern "C" fn noop_register(
-            _name: FfiString,
-            _cb: extern "C" fn(FfiString) -> PluginResult,
-        ) -> PluginResult {
-            PluginResult::ok()
-        }
-        extern "C" fn noop_unregister(_name: FfiString) -> PluginResult {
-            PluginResult::ok()
-        }
-        extern "C" fn noop_hook(_et: PluginEventType) -> PluginResult {
-            PluginResult::ok()
-        }
-        extern "C" fn noop_unhook(_et: PluginEventType) -> PluginResult {
-            PluginResult::ok()
-        }
-        extern "C" fn noop_echo(_msg: FfiString) {}
-        extern "C" fn noop_log(_level: u32, _msg: FfiString) {}
-        extern "C" fn noop_get_config(_key: FfiString) -> FfiString {
-            FfiString::empty()
-        }
-
-        let host_api = PluginHostApi {
-            register_command: noop_register,
-            unregister_command: noop_unregister,
-            hook_event: noop_hook,
-            unhook_event: noop_unhook,
-            echo: noop_echo,
-            log: noop_log,
-            get_config_value: noop_get_config,
-        };
-
+        let host_api = noop_host_api();
         let mut manager = PluginManager::new();
         let result = manager.load_plugin(Path::new("/nonexistent/plugin.dylib"), &host_api);
         assert!(result.is_err());
@@ -787,39 +791,7 @@ mod tests {
 
     #[test]
     fn load_plugins_dir_nonexistent_returns_empty() {
-        use crate::ffi::{FfiString, PluginResult};
-
-        extern "C" fn noop_register(
-            _name: FfiString,
-            _cb: extern "C" fn(FfiString) -> PluginResult,
-        ) -> PluginResult {
-            PluginResult::ok()
-        }
-        extern "C" fn noop_unregister(_name: FfiString) -> PluginResult {
-            PluginResult::ok()
-        }
-        extern "C" fn noop_hook(_et: PluginEventType) -> PluginResult {
-            PluginResult::ok()
-        }
-        extern "C" fn noop_unhook(_et: PluginEventType) -> PluginResult {
-            PluginResult::ok()
-        }
-        extern "C" fn noop_echo(_msg: FfiString) {}
-        extern "C" fn noop_log(_level: u32, _msg: FfiString) {}
-        extern "C" fn noop_get_config(_key: FfiString) -> FfiString {
-            FfiString::empty()
-        }
-
-        let host_api = PluginHostApi {
-            register_command: noop_register,
-            unregister_command: noop_unregister,
-            hook_event: noop_hook,
-            unhook_event: noop_unhook,
-            echo: noop_echo,
-            log: noop_log,
-            get_config_value: noop_get_config,
-        };
-
+        let host_api = noop_host_api();
         let mut manager = PluginManager::new();
         let loaded = manager.load_plugins_dir(Path::new("/nonexistent/dir"), &host_api);
         assert!(loaded.is_empty());
@@ -827,38 +799,7 @@ mod tests {
 
     #[test]
     fn load_plugins_dir_empty_directory() {
-        use crate::ffi::{FfiString, PluginResult};
-
-        extern "C" fn noop_register(
-            _name: FfiString,
-            _cb: extern "C" fn(FfiString) -> PluginResult,
-        ) -> PluginResult {
-            PluginResult::ok()
-        }
-        extern "C" fn noop_unregister(_name: FfiString) -> PluginResult {
-            PluginResult::ok()
-        }
-        extern "C" fn noop_hook(_et: PluginEventType) -> PluginResult {
-            PluginResult::ok()
-        }
-        extern "C" fn noop_unhook(_et: PluginEventType) -> PluginResult {
-            PluginResult::ok()
-        }
-        extern "C" fn noop_echo(_msg: FfiString) {}
-        extern "C" fn noop_log(_level: u32, _msg: FfiString) {}
-        extern "C" fn noop_get_config(_key: FfiString) -> FfiString {
-            FfiString::empty()
-        }
-
-        let host_api = PluginHostApi {
-            register_command: noop_register,
-            unregister_command: noop_unregister,
-            hook_event: noop_hook,
-            unhook_event: noop_unhook,
-            echo: noop_echo,
-            log: noop_log,
-            get_config_value: noop_get_config,
-        };
+        let host_api = noop_host_api();
 
         let dir = std::env::temp_dir().join("pirc_test_empty_plugins_dir");
         let _ = std::fs::create_dir(&dir);
