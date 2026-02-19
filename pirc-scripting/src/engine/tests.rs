@@ -1,32 +1,96 @@
 use super::*;
 use crate::ast::EventType;
+use crate::interpreter::{CommandHandler, ScriptRuntimeError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// A test command handler that records all dispatched commands.
-struct TestCmdHandler {
-    commands: Arc<Mutex<Vec<(String, Vec<String>)>>>,
+/// A mock [`ScriptHost`] that records all calls for test assertions.
+///
+/// Tracks commands dispatched, echo output, errors, and warnings.
+/// Provides configurable client state for built-in identifier testing.
+pub struct MockScriptHost {
+    /// Recorded command dispatches: `(name, args)`.
+    pub commands: Arc<Mutex<Vec<(String, Vec<String>)>>>,
+    /// Recorded echo output lines.
+    pub echoed: Arc<Mutex<Vec<String>>>,
+    /// Recorded runtime errors.
+    pub errors: Arc<Mutex<Vec<String>>>,
+    /// Recorded warnings.
+    pub warnings: Arc<Mutex<Vec<String>>>,
+    /// The mock client's nickname.
+    pub nick: String,
+    /// The mock server hostname.
+    pub server: Option<String>,
+    /// The mock active channel.
+    pub channel: Option<String>,
+    /// The mock server port.
+    pub port: u16,
 }
 
-impl TestCmdHandler {
+impl MockScriptHost {
     fn new() -> Self {
         Self {
             commands: Arc::new(Mutex::new(Vec::new())),
+            echoed: Arc::new(Mutex::new(Vec::new())),
+            errors: Arc::new(Mutex::new(Vec::new())),
+            warnings: Arc::new(Mutex::new(Vec::new())),
+            nick: "testbot".to_string(),
+            server: Some("irc.example.com".to_string()),
+            channel: Some("#test".to_string()),
+            port: 6667,
         }
     }
 
     fn commands(&self) -> Vec<(String, Vec<String>)> {
         self.commands.lock().unwrap().clone()
     }
+
+    fn echoed(&self) -> Vec<String> {
+        self.echoed.lock().unwrap().clone()
+    }
+
+    fn errors(&self) -> Vec<String> {
+        self.errors.lock().unwrap().clone()
+    }
 }
 
-impl CommandHandler for TestCmdHandler {
+impl CommandHandler for MockScriptHost {
     fn handle_command(&mut self, name: &str, args: &[Value]) -> Result<(), RuntimeError> {
         self.commands.lock().unwrap().push((
             name.to_string(),
             args.iter().map(ToString::to_string).collect(),
         ));
         Ok(())
+    }
+}
+
+impl ScriptHost for MockScriptHost {
+    fn current_nick(&self) -> &str {
+        &self.nick
+    }
+
+    fn current_server(&self) -> Option<&str> {
+        self.server.as_deref()
+    }
+
+    fn current_channel(&self) -> Option<&str> {
+        self.channel.as_deref()
+    }
+
+    fn server_port(&self) -> u16 {
+        self.port
+    }
+
+    fn echo(&mut self, text: &str) {
+        self.echoed.lock().unwrap().push(text.to_string());
+    }
+
+    fn report_error(&mut self, error: &ScriptRuntimeError) {
+        self.errors.lock().unwrap().push(error.to_string());
+    }
+
+    fn report_warning(&mut self, warning: &str) {
+        self.warnings.lock().unwrap().push(warning.to_string());
     }
 }
 
@@ -254,7 +318,7 @@ on TEXT:*hello* {
 "#;
     engine.load_script(src, "test.pirc", now).unwrap();
 
-    let mut handler = TestCmdHandler::new();
+    let mut host = MockScriptHost::new();
     let ctx = EventContext {
         event_type: Some(EventType::Text),
         nick: Some("alice".to_string()),
@@ -263,9 +327,9 @@ on TEXT:*hello* {
         ..EventContext::default()
     };
 
-    engine.dispatch_event(EventType::Text, &ctx, &mut handler);
+    engine.dispatch_event(EventType::Text, &ctx, &mut host);
 
-    let cmds = handler.commands();
+    let cmds = host.commands();
     assert_eq!(cmds.len(), 1);
     assert_eq!(cmds[0].0, "msg");
 }
@@ -281,15 +345,15 @@ on TEXT:*goodbye* {
 "#;
     engine.load_script(src, "test.pirc", now).unwrap();
 
-    let mut handler = TestCmdHandler::new();
+    let mut host = MockScriptHost::new();
     let ctx = EventContext {
         event_type: Some(EventType::Text),
         text: Some("hello".to_string()),
         ..EventContext::default()
     };
 
-    engine.dispatch_event(EventType::Text, &ctx, &mut handler);
-    assert!(handler.commands().is_empty());
+    engine.dispatch_event(EventType::Text, &ctx, &mut host);
+    assert!(host.commands().is_empty());
 }
 
 // ── Alias execution tests ─────────────────────────────────────────
@@ -305,11 +369,11 @@ alias greet {
 "#;
     engine.load_script(src, "test.pirc", now).unwrap();
 
-    let mut handler = TestCmdHandler::new();
-    let found = engine.execute_alias("greet", "", &mut handler);
+    let mut host = MockScriptHost::new();
+    let found = engine.execute_alias("greet", "", &mut host);
     assert!(found);
 
-    let cmds = handler.commands();
+    let cmds = host.commands();
     assert_eq!(cmds.len(), 1);
     assert_eq!(cmds[0].0, "msg");
 }
@@ -317,8 +381,8 @@ alias greet {
 #[test]
 fn execute_alias_not_found() {
     let mut engine = ScriptEngine::new();
-    let mut handler = TestCmdHandler::new();
-    let found = engine.execute_alias("nonexistent", "", &mut handler);
+    let mut host = MockScriptHost::new();
+    let found = engine.execute_alias("nonexistent", "", &mut host);
     assert!(!found);
 }
 
@@ -335,24 +399,24 @@ alias greet {
 "#;
     engine.load_script(src, "test.pirc", now).unwrap();
 
-    let mut handler = TestCmdHandler::new();
-    let handled = engine.execute_command("greet alice", &mut handler);
+    let mut host = MockScriptHost::new();
+    let handled = engine.execute_command("greet alice", &mut host);
     assert!(handled);
 }
 
 #[test]
 fn execute_command_no_match_returns_false() {
     let mut engine = ScriptEngine::new();
-    let mut handler = TestCmdHandler::new();
-    let handled = engine.execute_command("unknown", &mut handler);
+    let mut host = MockScriptHost::new();
+    let handled = engine.execute_command("unknown", &mut host);
     assert!(!handled);
 }
 
 #[test]
 fn execute_command_empty_input() {
     let mut engine = ScriptEngine::new();
-    let mut handler = TestCmdHandler::new();
-    let handled = engine.execute_command("", &mut handler);
+    let mut host = MockScriptHost::new();
+    let handled = engine.execute_command("", &mut host);
     assert!(!handled);
 }
 
@@ -369,15 +433,15 @@ timer heartbeat 5 1 {
 "#;
     engine.load_script(src, "test.pirc", now).unwrap();
 
-    let mut handler = TestCmdHandler::new();
+    let mut host = MockScriptHost::new();
 
     // Before interval: nothing fires
-    engine.tick_timers(now + Duration::from_secs(3), &mut handler);
-    assert!(handler.commands().is_empty());
+    engine.tick_timers(now + Duration::from_secs(3), &mut host);
+    assert!(host.commands().is_empty());
 
     // At interval: timer fires
-    engine.tick_timers(now + Duration::from_secs(5), &mut handler);
-    let cmds = handler.commands();
+    engine.tick_timers(now + Duration::from_secs(5), &mut host);
+    let cmds = host.commands();
     assert_eq!(cmds.len(), 1);
     assert_eq!(cmds[0].0, "msg");
 }
@@ -396,8 +460,6 @@ alias whoami {
 }
 "#;
     engine.load_script(src, "test.pirc", now).unwrap();
-    // Alias uses the builtin context set above
-    // (Full verification requires dispatch, covered by integration tests)
     assert!(engine.aliases().contains("whoami"));
 }
 
@@ -438,19 +500,11 @@ alias alpha { msg $chan "a" }
     assert_eq!(engine.list_aliases(), vec!["alpha", "zebra"]);
 }
 
-// ── Error callback tests ──────────────────────────────────────────
+// ── Error reporting tests ─────────────────────────────────────────
 
 #[test]
-fn error_callback_called_on_runtime_error() {
-    let errors = Arc::new(Mutex::new(Vec::new()));
-    let errors_clone = errors.clone();
-
+fn error_reported_via_script_host_on_runtime_error() {
     let mut engine = ScriptEngine::new();
-    engine.set_error_callback(move |msg| {
-        errors_clone.lock().unwrap().push(msg.to_string());
-    });
-
-    // Load a script with a handler that causes a runtime error (division by zero)
     let now = Instant::now();
     let src = r#"
 on TEXT:* {
@@ -459,18 +513,175 @@ on TEXT:* {
 "#;
     engine.load_script(src, "test.pirc", now).unwrap();
 
-    let mut handler = TestCmdHandler::new();
+    let mut host = MockScriptHost::new();
     let ctx = EventContext {
         event_type: Some(EventType::Text),
         text: Some("hello".to_string()),
         ..EventContext::default()
     };
 
-    engine.dispatch_event(EventType::Text, &ctx, &mut handler);
+    engine.dispatch_event(EventType::Text, &ctx, &mut host);
 
-    let errors = errors.lock().unwrap();
+    let errors = host.errors();
     assert_eq!(errors.len(), 1);
     assert!(errors[0].contains("division by zero"));
+    assert!(errors[0].contains("event handler"));
+}
+
+#[test]
+fn alias_runtime_error_reported_with_context() {
+    let mut engine = ScriptEngine::new();
+    let now = Instant::now();
+    let src = r#"
+alias bad {
+    var %x = 1 / 0
+}
+"#;
+    engine.load_script(src, "test.pirc", now).unwrap();
+
+    let mut host = MockScriptHost::new();
+    engine.execute_alias("bad", "", &mut host);
+
+    let errors = host.errors();
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].contains("division by zero"));
+    assert!(errors[0].contains("alias 'bad'"));
+}
+
+#[test]
+fn timer_runtime_error_reported_with_context() {
+    let mut engine = ScriptEngine::new();
+    let now = Instant::now();
+    let src = r#"
+timer broken 1 1 {
+    var %x = 1 / 0
+}
+"#;
+    engine.load_script(src, "test.pirc", now).unwrap();
+
+    let mut host = MockScriptHost::new();
+    engine.tick_timers(now + Duration::from_secs(1), &mut host);
+
+    let errors = host.errors();
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].contains("division by zero"));
+    assert!(errors[0].contains("timer 'broken'"));
+}
+
+// ── ScriptHost builtin sync tests ─────────────────────────────────
+
+#[test]
+fn builtins_synced_from_script_host() {
+    let mut engine = ScriptEngine::new();
+    let now = Instant::now();
+    let src = r#"
+alias whoami {
+    msg $chan $me
+}
+"#;
+    engine.load_script(src, "test.pirc", now).unwrap();
+
+    let mut host = MockScriptHost::new();
+    host.nick = "mybot".to_string();
+    host.channel = Some("#mychan".to_string());
+
+    engine.execute_alias("whoami", "", &mut host);
+
+    let cmds = host.commands();
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds[0].0, "msg");
+    // $chan resolves from ScriptHost::current_channel
+    assert_eq!(cmds[0].1[0], "#mychan");
+    // $me resolves from ScriptHost::current_nick
+    assert_eq!(cmds[0].1[1], "mybot");
+}
+
+#[test]
+fn server_and_port_builtins_from_host() {
+    let mut engine = ScriptEngine::new();
+    let now = Instant::now();
+    let src = r#"
+alias serverinfo {
+    msg $chan "$server $port"
+}
+"#;
+    engine.load_script(src, "test.pirc", now).unwrap();
+
+    let mut host = MockScriptHost::new();
+    host.server = Some("irc.test.net".to_string());
+    host.port = 6697;
+
+    engine.execute_alias("serverinfo", "", &mut host);
+
+    let cmds = host.commands();
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds[0].1[0], "#test");
+    assert_eq!(cmds[0].1[1], "irc.test.net 6697");
+}
+
+// ── Echo through ScriptHost tests ─────────────────────────────────
+
+#[test]
+fn echo_routed_through_script_host() {
+    let mut engine = ScriptEngine::new();
+    let now = Instant::now();
+    let src = r#"
+alias sayhi {
+    echo "Hello from script!"
+}
+"#;
+    engine.load_script(src, "test.pirc", now).unwrap();
+
+    let mut host = MockScriptHost::new();
+    engine.execute_alias("sayhi", "", &mut host);
+
+    let echoed = host.echoed();
+    assert_eq!(echoed.len(), 1);
+    assert_eq!(echoed[0], "Hello from script!");
+}
+
+#[test]
+fn echo_in_event_handler_routed_through_host() {
+    let mut engine = ScriptEngine::new();
+    let now = Instant::now();
+    let src = r#"
+on TEXT:* {
+    echo "Event received"
+}
+"#;
+    engine.load_script(src, "test.pirc", now).unwrap();
+
+    let mut host = MockScriptHost::new();
+    let ctx = EventContext {
+        event_type: Some(EventType::Text),
+        text: Some("hello".to_string()),
+        ..EventContext::default()
+    };
+
+    engine.dispatch_event(EventType::Text, &ctx, &mut host);
+
+    let echoed = host.echoed();
+    assert_eq!(echoed.len(), 1);
+    assert_eq!(echoed[0], "Event received");
+}
+
+#[test]
+fn echo_in_timer_routed_through_host() {
+    let mut engine = ScriptEngine::new();
+    let now = Instant::now();
+    let src = r#"
+timer announce 1 1 {
+    echo "Timer fired!"
+}
+"#;
+    engine.load_script(src, "test.pirc", now).unwrap();
+
+    let mut host = MockScriptHost::new();
+    engine.tick_timers(now + Duration::from_secs(1), &mut host);
+
+    let echoed = host.echoed();
+    assert_eq!(echoed.len(), 1);
+    assert_eq!(echoed[0], "Timer fired!");
 }
 
 // ── File loading tests ────────────────────────────────────────────
@@ -493,7 +704,7 @@ fn load_scripts_dir_nonexistent() {
     assert!(results[0].1.is_err());
 }
 
-// ── Integration test: full pipeline ───────────────────────────────
+// ── Integration tests ─────────────────────────────────────────────
 
 #[test]
 fn integration_load_dispatch_alias() {
@@ -511,21 +722,21 @@ on TEXT:*hi* {
     engine.load_script(src, "main.pirc", now).unwrap();
 
     // Execute the alias
-    let mut handler = TestCmdHandler::new();
-    assert!(engine.execute_alias("greet", "", &mut handler));
-    assert_eq!(handler.commands().len(), 1);
-    assert_eq!(handler.commands()[0].0, "msg");
+    let mut host = MockScriptHost::new();
+    assert!(engine.execute_alias("greet", "", &mut host));
+    assert_eq!(host.commands().len(), 1);
+    assert_eq!(host.commands()[0].0, "msg");
 
     // Dispatch an event
-    let mut handler2 = TestCmdHandler::new();
+    let mut host2 = MockScriptHost::new();
     let ctx = EventContext {
         event_type: Some(EventType::Text),
         text: Some("hi there".to_string()),
         channel: Some("#general".to_string()),
         ..EventContext::default()
     };
-    engine.dispatch_event(EventType::Text, &ctx, &mut handler2);
-    assert_eq!(handler2.commands().len(), 1);
+    engine.dispatch_event(EventType::Text, &ctx, &mut host2);
+    assert_eq!(host2.commands().len(), 1);
 }
 
 #[test]
@@ -568,18 +779,65 @@ timer ping 10 2 {
     engine.load_script(src, "test.pirc", now).unwrap();
     assert_eq!(engine.list_timers(), vec!["ping"]);
 
-    let mut handler = TestCmdHandler::new();
+    let mut host = MockScriptHost::new();
 
     // First tick at +10s
-    engine.tick_timers(now + Duration::from_secs(10), &mut handler);
-    assert_eq!(handler.commands().len(), 1);
+    engine.tick_timers(now + Duration::from_secs(10), &mut host);
+    assert_eq!(host.commands().len(), 1);
 
     // Second tick at +20s (last repetition)
-    engine.tick_timers(now + Duration::from_secs(20), &mut handler);
-    assert_eq!(handler.commands().len(), 2);
+    engine.tick_timers(now + Duration::from_secs(20), &mut host);
+    assert_eq!(host.commands().len(), 2);
 
     // Timer should be exhausted
     assert!(engine.timers().is_empty());
+}
+
+#[test]
+fn integration_script_host_full_pipeline() {
+    let mut engine = ScriptEngine::new();
+    let now = Instant::now();
+
+    // A script that uses builtins, sends commands, and echoes
+    let src = r#"
+on TEXT:*hello* {
+    msg $chan "Hi from $me on $server!"
+    echo "Greeted someone"
+}
+
+alias greet {
+    msg $chan "Hello, I am $me!"
+}
+"#;
+    engine.load_script(src, "test.pirc", now).unwrap();
+
+    let mut host = MockScriptHost::new();
+    host.nick = "pirc_bot".to_string();
+    host.server = Some("irc.freenode.net".to_string());
+    host.channel = Some("#rust".to_string());
+
+    // Dispatch event
+    let ctx = EventContext {
+        event_type: Some(EventType::Text),
+        nick: Some("alice".to_string()),
+        channel: Some("#rust".to_string()),
+        text: Some("hello everyone".to_string()),
+        ..EventContext::default()
+    };
+    engine.dispatch_event(EventType::Text, &ctx, &mut host);
+
+    // Verify msg was sent with correct interpolated builtins
+    let cmds = host.commands();
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds[0].0, "msg");
+    // $chan from event context, $me and $server from ScriptHost
+    assert_eq!(cmds[0].1[0], "#rust");
+    assert_eq!(cmds[0].1[1], "Hi from pirc_bot on irc.freenode.net!");
+
+    // Verify echo went through ScriptHost
+    let echoed = host.echoed();
+    assert_eq!(echoed.len(), 1);
+    assert_eq!(echoed[0], "Greeted someone");
 }
 
 #[test]
@@ -601,4 +859,32 @@ fn load_error_display() {
         message: "file not found".to_string(),
     };
     assert!(err.to_string().contains("I/O error"));
+}
+
+// ── ScriptRuntimeError display tests ──────────────────────────────
+
+#[test]
+fn script_runtime_error_display_with_filename() {
+    let err = ScriptRuntimeError {
+        error: RuntimeError::DivisionByZero,
+        filename: Some("test.pirc".to_string()),
+        context: "event handler".to_string(),
+    };
+    let msg = err.to_string();
+    assert!(msg.contains("[test.pirc]"));
+    assert!(msg.contains("event handler"));
+    assert!(msg.contains("division by zero"));
+}
+
+#[test]
+fn script_runtime_error_display_without_filename() {
+    let err = ScriptRuntimeError {
+        error: RuntimeError::LoopLimit,
+        filename: None,
+        context: "alias 'test'".to_string(),
+    };
+    let msg = err.to_string();
+    assert!(!msg.contains('['));
+    assert!(msg.contains("alias 'test'"));
+    assert!(msg.contains("loop iteration limit"));
 }

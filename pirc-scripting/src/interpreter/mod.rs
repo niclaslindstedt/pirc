@@ -28,6 +28,9 @@ pub use functions::{FunctionRegistry, RegexState};
 pub use timer::{FiredTimer, TimerManager};
 pub use value::Value;
 
+// Re-export ScriptHost and related types at the interpreter module level.
+// (ScriptHost and ScriptRuntimeError are defined in this module.)
+
 use crate::ast::{
     BinaryOp, CommandStatement, ExprStatement, Expression, IfStatement, ReturnStatement,
     SetStatement, Statement, StringPart, UnaryOp, VarDeclStatement, WhileStatement,
@@ -102,6 +105,65 @@ pub trait CommandHandler {
     ///
     /// Returns a [`RuntimeError`] if the command is unknown or fails.
     fn handle_command(&mut self, name: &str, args: &[Value]) -> Result<(), RuntimeError>;
+}
+
+/// Callback interface for the scripting engine to interact with the IRC client.
+///
+/// The client implements this trait to provide the scripting engine with:
+/// - Command dispatch (via [`CommandHandler`])
+/// - Client state queries (`$me`, `$server`, `$channel`, `$port`)
+/// - User-facing output (`/echo`)
+/// - Error and warning reporting
+///
+/// This decouples the scripting engine from the client without tight coupling.
+pub trait ScriptHost: CommandHandler {
+    /// Returns the client's current nickname.
+    fn current_nick(&self) -> &str;
+
+    /// Returns the server hostname the client is connected to, if any.
+    fn current_server(&self) -> Option<&str>;
+
+    /// Returns the currently active channel, if any.
+    fn current_channel(&self) -> Option<&str>;
+
+    /// Returns the server port number.
+    fn server_port(&self) -> u16;
+
+    /// Displays text to the user (like the `/echo` command).
+    fn echo(&mut self, text: &str);
+
+    /// Reports a runtime error to the client.
+    ///
+    /// The error includes a human-readable message with source context
+    /// (filename, line/column) when available.
+    fn report_error(&mut self, error: &ScriptRuntimeError);
+
+    /// Reports a non-fatal warning to the client.
+    fn report_warning(&mut self, warning: &str);
+}
+
+/// A runtime error with optional source location context.
+///
+/// Wraps a [`RuntimeError`] with the filename and location where
+/// the error occurred, enabling informative error messages.
+#[derive(Debug, Clone)]
+pub struct ScriptRuntimeError {
+    /// The underlying runtime error.
+    pub error: RuntimeError,
+    /// The script filename where the error occurred.
+    pub filename: Option<String>,
+    /// Human-readable context (e.g., "event handler", "alias 'greet'", "timer 'keepalive'").
+    pub context: String,
+}
+
+impl std::fmt::Display for ScriptRuntimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(ref filename) = self.filename {
+            write!(f, "[{filename}] {}: {}", self.context, self.error)
+        } else {
+            write!(f, "{}: {}", self.context, self.error)
+        }
+    }
 }
 
 /// The script interpreter.

@@ -11,8 +11,8 @@ use std::time::Instant;
 use crate::ast::{EventType, TopLevelItem};
 use crate::error::{ScriptError, SemanticWarning};
 use crate::interpreter::{
-    BuiltinContext, CommandHandler, Environment, EventContext, EventDispatcher, FunctionRegistry,
-    Interpreter, RegexState, RuntimeError, TimerManager, Value,
+    BuiltinContext, Environment, EventContext, EventDispatcher, FunctionRegistry, Interpreter,
+    RegexState, RuntimeError, ScriptHost, ScriptRuntimeError, TimerManager, Value,
 };
 use crate::interpreter::command::AliasRegistry;
 use crate::lexer::Lexer;
@@ -73,6 +73,10 @@ pub struct LoadResult {
 /// Coordinates the interpreter, event dispatcher, alias registry,
 /// timer manager, and builtin context. Provides the public API for
 /// loading scripts and dispatching events/commands.
+///
+/// Client interaction goes through the [`ScriptHost`] trait, which is
+/// passed to methods that execute scripts. The host provides command
+/// dispatch, client state, output, and error reporting.
 pub struct ScriptEngine {
     /// Shared variable environment (global variables persist across scripts).
     env: Environment,
@@ -90,9 +94,6 @@ pub struct ScriptEngine {
     regex_state: RegexState,
     /// Loaded scripts indexed by filename.
     scripts: HashMap<String, LoadedScript>,
-    /// Runtime error callback.
-    #[allow(clippy::type_complexity)]
-    error_callback: Option<Box<dyn Fn(&str) + Send>>,
 }
 
 impl ScriptEngine {
@@ -108,15 +109,7 @@ impl ScriptEngine {
             functions: FunctionRegistry::new(),
             regex_state: RegexState::new(),
             scripts: HashMap::new(),
-            error_callback: None,
         }
-    }
-
-    /// Sets a callback for reporting runtime errors.
-    ///
-    /// The callback receives a human-readable error message string.
-    pub fn set_error_callback<F: Fn(&str) + Send + 'static>(&mut self, callback: F) {
-        self.error_callback = Some(Box::new(callback));
     }
 
     // ── Script loading ────────────────────────────────────────────────
@@ -332,27 +325,67 @@ impl ScriptEngine {
 
     // ── Public API ────────────────────────────────────────────────────
 
+    /// Populates built-in identifiers from the [`ScriptHost`] state.
+    ///
+    /// Called before each execution to ensure `$me`, `$server`, `$chan`, and
+    /// `$port` reflect the current client state.
+    fn sync_builtins_from_host(&mut self, host: &dyn ScriptHost) {
+        let nick = host.current_nick();
+        self.builtin_ctx
+            .set("me", Value::String(nick.to_string()));
+
+        if let Some(server) = host.current_server() {
+            self.builtin_ctx
+                .set("server", Value::String(server.to_string()));
+        }
+        if let Some(channel) = host.current_channel() {
+            self.builtin_ctx
+                .set("chan", Value::String(channel.to_string()));
+        }
+
+        let port = host.server_port();
+        self.builtin_ctx
+            .set("port", Value::Int(i64::from(port)));
+    }
+
     /// Dispatches an event to all matching handlers.
     ///
-    /// Runtime errors in handlers are reported via the error callback
-    /// (if set) rather than being propagated.
+    /// Runtime errors in handlers are reported via [`ScriptHost::report_error`]
+    /// rather than being propagated.
     pub fn dispatch_event(
         &mut self,
         event_type: EventType,
         context: &EventContext,
-        cmd_handler: &mut dyn CommandHandler,
+        host: &mut dyn ScriptHost,
     ) {
-        let result = self.events.dispatch(
+        self.sync_builtins_from_host(host);
+
+        let mut echo_output = Vec::new();
+
+        let result = self.events.dispatch_full(
             event_type,
             context,
             &mut self.env,
-            cmd_handler,
+            host,
             &self.functions,
             &self.regex_state,
+            Some(&self.builtin_ctx),
+            Some(&mut echo_output),
+            Some(&self.aliases),
+            Some(&mut self.timers),
         );
 
+        // Flush echo output through the host
+        for line in &echo_output {
+            host.echo(line);
+        }
+
         if let Err(e) = result {
-            self.report_error(&format!("event handler error: {e}"));
+            host.report_error(&ScriptRuntimeError {
+                error: e,
+                filename: None,
+                context: "event handler".to_string(),
+            });
         }
     }
 
@@ -363,12 +396,14 @@ impl ScriptEngine {
         &mut self,
         name: &str,
         args: &str,
-        cmd_handler: &mut dyn CommandHandler,
+        host: &mut dyn ScriptHost,
     ) -> bool {
         let body = match self.aliases.get(name) {
             Some(body) => body.to_vec(),
             None => return false,
         };
+
+        self.sync_builtins_from_host(host);
 
         // Create a builtin context with $0-$9 populated from arguments
         let mut alias_ctx = self.builtin_ctx.clone();
@@ -376,24 +411,35 @@ impl ScriptEngine {
 
         self.env.push_scope();
 
+        let mut echo_output = Vec::new();
         let mut interp = Interpreter::with_context(
             &mut self.env,
-            cmd_handler,
+            host,
             &alias_ctx,
             &self.functions,
             &self.regex_state,
         );
         interp.set_aliases(&self.aliases);
         interp.set_timer_manager(&mut self.timers);
+        interp.set_echo_output(&mut echo_output);
 
         // Use exec_stmts; catch Return as normal completion
         let result = interp.exec_stmts(&body);
 
         self.env.pop_scope();
 
+        // Flush echo output through the host
+        for line in &echo_output {
+            host.echo(line);
+        }
+
         match result {
             Ok(_) | Err(RuntimeError::Return(_)) => {}
-            Err(e) => self.report_error(&format!("alias '{name}' error: {e}")),
+            Err(e) => host.report_error(&ScriptRuntimeError {
+                error: e,
+                filename: None,
+                context: format!("alias '{name}'"),
+            }),
         }
 
         true
@@ -409,7 +455,7 @@ impl ScriptEngine {
     pub fn execute_command(
         &mut self,
         input: &str,
-        cmd_handler: &mut dyn CommandHandler,
+        host: &mut dyn ScriptHost,
     ) -> bool {
         let input = input.trim();
         if input.is_empty() {
@@ -421,27 +467,54 @@ impl ScriptEngine {
             None => (input, ""),
         };
 
-        self.execute_alias(name, args, cmd_handler)
+        self.execute_alias(name, args, host)
     }
 
     /// Advances timers and fires any that are due.
     ///
-    /// Runtime errors in timer bodies are reported via the error callback.
-    pub fn tick_timers(&mut self, now: Instant, cmd_handler: &mut dyn CommandHandler) {
+    /// Runtime errors in timer bodies are reported via [`ScriptHost::report_error`].
+    pub fn tick_timers(&mut self, now: Instant, host: &mut dyn ScriptHost) {
+        self.sync_builtins_from_host(host);
+
         let fired = self.timers.tick(now);
 
         for timer in &fired {
-            let result = TimerManager::execute_fired(
-                timer,
-                &mut self.env,
-                cmd_handler,
-                &self.builtin_ctx,
-                &self.functions,
-                &self.regex_state,
-            );
+            let mut echo_output = Vec::new();
+
+            let result = {
+                self.env.push_scope();
+
+                let mut interp = Interpreter::with_context(
+                    &mut self.env,
+                    host,
+                    &self.builtin_ctx,
+                    &self.functions,
+                    &self.regex_state,
+                );
+                interp.set_aliases(&self.aliases);
+                interp.set_timer_manager(&mut self.timers);
+                interp.set_echo_output(&mut echo_output);
+                let result = interp.exec_stmts(&timer.body);
+
+                self.env.pop_scope();
+
+                match result {
+                    Ok(_) | Err(RuntimeError::Return(_)) => Ok(()),
+                    Err(e) => Err(e),
+                }
+            };
+
+            // Flush echo output through the host
+            for line in &echo_output {
+                host.echo(line);
+            }
 
             if let Err(e) = result {
-                self.report_error(&format!("timer '{}' error: {e}", timer.name));
+                host.report_error(&ScriptRuntimeError {
+                    error: e,
+                    filename: None,
+                    context: format!("timer '{}'", timer.name),
+                });
             }
         }
     }
@@ -509,13 +582,6 @@ impl ScriptEngine {
             crate::ast::Expression::IntLiteral { value, .. } => *value as f64,
             crate::ast::Expression::NumberLiteral { value, .. } => *value,
             _ => 0.0,
-        }
-    }
-
-    /// Reports a runtime error via the error callback (if set).
-    fn report_error(&self, message: &str) {
-        if let Some(ref callback) = self.error_callback {
-            callback(message);
         }
     }
 }

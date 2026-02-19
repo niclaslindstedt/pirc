@@ -9,8 +9,10 @@ use std::collections::HashMap;
 use crate::ast::{EventHandler, EventType, Statement};
 
 use super::builtins::BuiltinContext;
+use super::command::AliasRegistry;
 use super::environment::Environment;
 use super::functions::{FunctionRegistry, RegexState};
+use super::timer::TimerManager;
 use super::value::Value;
 use super::{CommandHandler, Interpreter, RuntimeError};
 
@@ -49,7 +51,16 @@ impl EventContext {
     #[must_use]
     pub fn to_builtin_context(&self) -> BuiltinContext {
         let mut ctx = BuiltinContext::new();
+        self.apply_to_context(&mut ctx);
+        ctx
+    }
 
+    /// Applies event-specific values to an existing [`BuiltinContext`].
+    ///
+    /// Only fields present in the event context are set; absent fields
+    /// are left unchanged. This allows merging with a base context that
+    /// contains engine-level defaults (e.g., `$me`, `$server` from the host).
+    pub fn apply_to_context(&self, ctx: &mut BuiltinContext) {
         if let Some(ref nick) = self.nick {
             ctx.set("nick", Value::String(nick.clone()));
         }
@@ -73,8 +84,6 @@ impl EventContext {
             .or(self.text.as_deref())
             .unwrap_or("");
         ctx.set_event_text(event_text);
-
-        ctx
     }
 }
 
@@ -159,12 +168,66 @@ impl EventDispatcher {
         functions: &FunctionRegistry,
         regex_state: &RegexState,
     ) -> Result<(), RuntimeError> {
+        self.dispatch_full(
+            event_type,
+            context,
+            env,
+            cmd_handler,
+            functions,
+            regex_state,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
+    /// Dispatches an event with full interpreter configuration.
+    ///
+    /// When `base_ctx` is provided, its identifiers are used as defaults
+    /// (e.g., `$me`, `$server`) that event-specific values override.
+    /// When `echo_output` is provided, the interpreter captures `/echo` output.
+    /// When `aliases` is provided, the interpreter enables the full three-level
+    /// command dispatch chain (built-in commands, aliases, external handler).
+    ///
+    /// # Errors
+    ///
+    /// Returns the first [`RuntimeError`] encountered during handler execution
+    /// (except `Return`, which is caught and treated as normal completion).
+    #[allow(clippy::too_many_arguments)]
+    pub fn dispatch_full(
+        &self,
+        event_type: EventType,
+        context: &EventContext,
+        env: &mut Environment,
+        cmd_handler: &mut dyn CommandHandler,
+        functions: &FunctionRegistry,
+        regex_state: &RegexState,
+        base_ctx: Option<&BuiltinContext>,
+        echo_output: Option<&mut Vec<String>>,
+        aliases: Option<&AliasRegistry>,
+        timer_manager: Option<&mut TimerManager>,
+    ) -> Result<(), RuntimeError> {
         let Some(handlers) = self.handlers.get(&event_type) else {
             return Ok(());
         };
 
         let match_text = Self::match_text_for(event_type, context);
-        let builtin_ctx = context.to_builtin_context();
+
+        // Merge base context (engine-level builtins like $me, $server) with
+        // event-specific context. Event values override base values.
+        let builtin_ctx = match base_ctx {
+            Some(base) => {
+                let mut ctx = base.clone();
+                context.apply_to_context(&mut ctx);
+                ctx
+            }
+            None => context.to_builtin_context(),
+        };
+
+        // Reborrow-friendly bindings for iteration
+        let mut echo_buf = echo_output;
+        let mut tm = timer_manager;
 
         for handler in handlers {
             if !glob_match(&handler.pattern, &match_text.to_lowercase()) {
@@ -176,6 +239,15 @@ impl EventDispatcher {
 
             let mut interp =
                 Interpreter::with_context(env, cmd_handler, &builtin_ctx, functions, regex_state);
+            if let Some(ref mut buf) = echo_buf {
+                interp.set_echo_output(buf);
+            }
+            if let Some(a) = aliases {
+                interp.set_aliases(a);
+            }
+            if let Some(ref mut t) = tm {
+                interp.set_timer_manager(t);
+            }
             let result = interp.exec_stmts(&handler.body);
 
             env.pop_scope();
