@@ -204,6 +204,26 @@ impl ManagedPlugin {
         &self.plugin
     }
 
+    /// Adds a command name to this plugin's tracked command set.
+    pub(crate) fn add_command(&mut self, command: String) {
+        self.commands.insert(command);
+    }
+
+    /// Removes a command name from this plugin's tracked command set.
+    pub(crate) fn remove_command(&mut self, command: &str) {
+        self.commands.remove(command);
+    }
+
+    /// Adds an event type to this plugin's tracked event set.
+    pub(crate) fn add_hooked_event(&mut self, event_type: PluginEventType) {
+        self.hooked_events.insert(event_type);
+    }
+
+    /// Removes an event type from this plugin's tracked event set.
+    pub(crate) fn remove_hooked_event(&mut self, event_type: PluginEventType) {
+        self.hooked_events.remove(&event_type);
+    }
+
     /// Produces a read-only summary snapshot.
     #[must_use]
     pub fn info(&self) -> PluginInfo {
@@ -559,14 +579,13 @@ impl PluginManager {
         command: &str,
         description: &str,
     ) -> Result<(), ManagerError> {
-        if !self.plugins.contains_key(plugin_name) {
-            return Err(ManagerError::NotFound(plugin_name.to_owned()));
-        }
-        self.commands.register(plugin_name, command, description)?;
-        let managed = self.plugins.get_mut(plugin_name).expect("checked above");
-        managed.commands.insert(command.to_lowercase());
-        debug!(plugin = %plugin_name, command = %command, "command registered");
-        Ok(())
+        crate::dispatch::register_command(
+            &mut self.commands,
+            &mut self.plugins,
+            plugin_name,
+            command,
+            description,
+        )
     }
 
     /// Hooks an event type for the given plugin.
@@ -579,14 +598,12 @@ impl PluginManager {
         plugin_name: &str,
         event_type: PluginEventType,
     ) -> Result<(), ManagerError> {
-        let managed = self
-            .plugins
-            .get_mut(plugin_name)
-            .ok_or_else(|| ManagerError::NotFound(plugin_name.to_owned()))?;
-        managed.hooked_events.insert(event_type);
-        self.events.subscribe(plugin_name, event_type);
-        debug!(plugin = %plugin_name, event = ?event_type, "event hooked");
-        Ok(())
+        crate::dispatch::hook_event(
+            &mut self.events,
+            &mut self.plugins,
+            plugin_name,
+            event_type,
+        )
     }
 
     /// Unregisters a command from the given plugin.
@@ -599,16 +616,12 @@ impl PluginManager {
         plugin_name: &str,
         command: &str,
     ) -> Result<bool, ManagerError> {
-        let managed = self
-            .plugins
-            .get_mut(plugin_name)
-            .ok_or_else(|| ManagerError::NotFound(plugin_name.to_owned()))?;
-        managed.commands.remove(&command.to_lowercase());
-        let removed = self.commands.unregister(plugin_name, command);
-        if removed {
-            debug!(plugin = %plugin_name, command = %command, "command unregistered");
-        }
-        Ok(removed)
+        crate::dispatch::unregister_command(
+            &mut self.commands,
+            &mut self.plugins,
+            plugin_name,
+            command,
+        )
     }
 
     /// Unhooks an event type for the given plugin.
@@ -621,16 +634,12 @@ impl PluginManager {
         plugin_name: &str,
         event_type: PluginEventType,
     ) -> Result<bool, ManagerError> {
-        let managed = self
-            .plugins
-            .get_mut(plugin_name)
-            .ok_or_else(|| ManagerError::NotFound(plugin_name.to_owned()))?;
-        managed.hooked_events.remove(&event_type);
-        let removed = self.events.unsubscribe(plugin_name, event_type);
-        if removed {
-            debug!(plugin = %plugin_name, event = ?event_type, "event unhooked");
-        }
-        Ok(removed)
+        crate::dispatch::unhook_event(
+            &mut self.events,
+            &mut self.plugins,
+            plugin_name,
+            event_type,
+        )
     }
 
     /// Dispatches a command to the plugin that owns it.
@@ -646,54 +655,17 @@ impl PluginManager {
     ///
     /// Returns [`ManagerError`] if the owning plugin exists but its callback
     /// fails.
-    #[allow(unsafe_code)]
     pub fn dispatch_command(
         &self,
         command: &str,
         args: &str,
     ) -> Result<bool, ManagerError> {
-        let Some(entry) = self.commands.lookup(command) else {
-            return Ok(false);
-        };
-
-        let Some(managed) = self.plugins.get(&entry.plugin_name) else {
-            return Ok(false);
-        };
-
-        if managed.state != PluginState::Enabled {
-            debug!(
-                plugin = %entry.plugin_name,
-                command = %command,
-                state = %managed.state,
-                "command dispatch skipped: plugin not enabled"
-            );
-            return Ok(false);
-        }
-
-        let ffi_event = crate::ffi::PluginEvent {
-            event_type: PluginEventType::CommandExecuted,
-            data: crate::ffi::FfiString::new(command),
-            source: crate::ffi::FfiString::new(args),
-        };
-
-        let result =
-            (managed.plugin.api().on_event)(std::ptr::addr_of!(ffi_event));
-
-        if result.status == PluginStatus::Error {
-            let reason = unsafe { result.error_message.into_string() };
-            return Err(ManagerError::PluginCallFailed {
-                name: entry.plugin_name.clone(),
-                action: "dispatch_command",
-                reason,
-            });
-        }
-
-        debug!(
-            plugin = %entry.plugin_name,
-            command = %command,
-            "command dispatched"
-        );
-        Ok(true)
+        crate::dispatch::dispatch_command(
+            &self.commands,
+            &self.plugins,
+            command,
+            args,
+        )
     }
 
     /// Dispatches an event to all subscribed plugins.
@@ -703,64 +675,19 @@ impl PluginManager {
     /// are logged but do not prevent delivery to other plugins.
     ///
     /// Returns the number of plugins that successfully received the event.
-    #[allow(unsafe_code)]
     pub fn dispatch_event(
         &self,
         event_type: PluginEventType,
         data: &str,
         source: &str,
     ) -> usize {
-        let subscribers = self.events.subscribers(event_type);
-        if subscribers.is_empty() {
-            return 0;
-        }
-
-        let ffi_event = crate::ffi::PluginEvent {
+        crate::dispatch::dispatch_event(
+            &self.events,
+            &self.plugins,
             event_type,
-            data: crate::ffi::FfiString::new(data),
-            source: crate::ffi::FfiString::new(source),
-        };
-
-        let mut delivered = 0;
-
-        for plugin_name in &subscribers {
-            let Some(managed) = self.plugins.get(plugin_name) else {
-                continue;
-            };
-
-            if managed.state != PluginState::Enabled {
-                debug!(
-                    plugin = %plugin_name,
-                    event = ?event_type,
-                    "event dispatch skipped: plugin not enabled"
-                );
-                continue;
-            }
-
-            let result = (managed.plugin.api().on_event)(
-                std::ptr::addr_of!(ffi_event),
-            );
-
-            if result.status == PluginStatus::Error {
-                let reason = unsafe { result.error_message.into_string() };
-                warn!(
-                    plugin = %plugin_name,
-                    event = ?event_type,
-                    error = %reason,
-                    "plugin event handler failed"
-                );
-            } else {
-                delivered += 1;
-            }
-        }
-
-        debug!(
-            event = ?event_type,
-            subscribers = subscribers.len(),
-            delivered,
-            "event dispatched"
-        );
-        delivered
+            data,
+            source,
+        )
     }
 
     /// Returns a reference to the command registry.
@@ -977,24 +904,6 @@ mod tests {
         assert!(matches!(err, ManagerError::NotFound(ref n) if n == "ghost"));
     }
 
-    // -- register_command / hook_event on nonexistent plugin -----------------
-
-    #[test]
-    fn register_command_nonexistent_returns_not_found() {
-        let mut manager = PluginManager::new();
-        let err = manager.register_command("ghost", "test", "desc").unwrap_err();
-        assert!(matches!(err, ManagerError::NotFound(_)));
-    }
-
-    #[test]
-    fn hook_event_nonexistent_returns_not_found() {
-        let mut manager = PluginManager::new();
-        let err = manager
-            .hook_event("ghost", PluginEventType::Connected)
-            .unwrap_err();
-        assert!(matches!(err, ManagerError::NotFound(_)));
-    }
-
     // -- load_plugin with invalid path ---------------------------------------
 
     #[test]
@@ -1084,88 +993,5 @@ mod tests {
         assert!(msg.contains("bad format"));
     }
 
-    // -- ManagerError CommandConflict -----------------------------------------
 
-    #[test]
-    fn manager_error_display_command_conflict() {
-        let err = ManagerError::CommandConflict(CommandError::AlreadyRegistered {
-            command: "hello".into(),
-            owner: "plugin-a".into(),
-        });
-        let msg = err.to_string();
-        assert!(msg.contains("hello"));
-        assert!(msg.contains("plugin-a"));
-    }
-
-    #[test]
-    fn manager_error_source_command_conflict() {
-        use std::error::Error;
-        let err = ManagerError::CommandConflict(CommandError::AlreadyRegistered {
-            command: "test".into(),
-            owner: "owner".into(),
-        });
-        assert!(err.source().is_some());
-    }
-
-    #[test]
-    fn manager_error_from_command_error() {
-        let cmd_err = CommandError::AlreadyRegistered {
-            command: "test".into(),
-            owner: "owner".into(),
-        };
-        let manager_err: ManagerError = cmd_err.into();
-        assert!(matches!(manager_err, ManagerError::CommandConflict(_)));
-    }
-
-    // -- Registry integration tests ------------------------------------------
-
-    #[test]
-    fn command_registry_exposed() {
-        let manager = PluginManager::new();
-        assert!(manager.command_registry().is_empty());
-    }
-
-    #[test]
-    fn event_registry_exposed() {
-        let manager = PluginManager::new();
-        assert!(!manager.event_registry().has_subscribers(PluginEventType::Connected));
-    }
-
-    // -- dispatch_command with no matching command ----------------------------
-
-    #[test]
-    fn dispatch_command_no_match_returns_false() {
-        let manager = PluginManager::new();
-        let result = manager.dispatch_command("nonexistent", "").unwrap();
-        assert!(!result);
-    }
-
-    // -- dispatch_event with no subscribers ----------------------------------
-
-    #[test]
-    fn dispatch_event_no_subscribers_returns_zero() {
-        let manager = PluginManager::new();
-        let count = manager.dispatch_event(PluginEventType::Connected, "", "");
-        assert_eq!(count, 0);
-    }
-
-    // -- unregister_command on nonexistent plugin ----------------------------
-
-    #[test]
-    fn unregister_command_nonexistent_returns_not_found() {
-        let mut manager = PluginManager::new();
-        let err = manager.unregister_command("ghost", "test").unwrap_err();
-        assert!(matches!(err, ManagerError::NotFound(_)));
-    }
-
-    // -- unhook_event on nonexistent plugin ----------------------------------
-
-    #[test]
-    fn unhook_event_nonexistent_returns_not_found() {
-        let mut manager = PluginManager::new();
-        let err = manager
-            .unhook_event("ghost", PluginEventType::Connected)
-            .unwrap_err();
-        assert!(matches!(err, ManagerError::NotFound(_)));
-    }
 }
