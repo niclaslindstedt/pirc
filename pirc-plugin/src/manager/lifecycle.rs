@@ -9,6 +9,7 @@ use tracing::{debug, error, info, warn};
 use crate::config::{self, PluginConfig};
 use crate::ffi::{PluginHostApi, PluginStatus};
 use crate::loader::PluginLoader;
+use crate::sandbox::CapabilityChecker;
 
 use super::types::{ManagedPlugin, ManagerError, PluginState};
 use super::PluginManager;
@@ -54,12 +55,18 @@ impl PluginManager {
     ) -> Result<String, ManagerError> {
         let loaded = self.loader.load(path)?;
 
-        let (name, version) = unsafe {
+        let (name, version, capabilities) = unsafe {
             let info = (loaded.api().info)();
             let n = info.name.as_str().to_owned();
             let v = info.version.as_str().to_owned();
+            let caps = if info.capabilities.is_null() || info.capabilities_len == 0 {
+                Vec::new()
+            } else {
+                std::slice::from_raw_parts(info.capabilities, info.capabilities_len)
+                    .to_vec()
+            };
             (loaded.api().free_info)(info);
-            (n, v)
+            (n, v, caps)
         };
 
         if self.plugins.contains_key(&name) {
@@ -77,10 +84,13 @@ impl PluginManager {
             });
         }
 
+        let checker = CapabilityChecker::new(&name, &capabilities);
+
         info!(
             plugin = %name,
             version = %version,
             enabled = plugin_config.enabled,
+            capabilities = capabilities.len(),
             "plugin loaded with config"
         );
 
@@ -92,6 +102,7 @@ impl PluginManager {
             commands: HashSet::new(),
             hooked_events: HashSet::new(),
             config: plugin_config,
+            capabilities: checker,
         };
 
         self.plugins.insert(name.clone(), managed);

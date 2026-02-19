@@ -10,6 +10,7 @@ use crate::config::PluginConfig;
 use crate::ffi::PluginEventType;
 use crate::loader::{LoadError, LoadedPlugin};
 use crate::registry::CommandError;
+use crate::sandbox::CapabilityChecker;
 
 // ---------------------------------------------------------------------------
 // PluginState
@@ -65,6 +66,11 @@ pub enum ManagerError {
     },
     /// A command registration conflict (another plugin already owns the command).
     CommandConflict(CommandError),
+    /// The plugin lacks the required capability for the attempted action.
+    PermissionDenied {
+        name: String,
+        action: String,
+    },
 }
 
 impl fmt::Display for ManagerError {
@@ -95,6 +101,9 @@ impl fmt::Display for ManagerError {
                 write!(f, "plugin `{name}` {action} failed: {reason}")
             }
             Self::CommandConflict(err) => write!(f, "{err}"),
+            Self::PermissionDenied { name, action } => {
+                write!(f, "plugin `{name}` denied: {action}")
+            }
         }
     }
 }
@@ -160,6 +169,8 @@ pub struct ManagedPlugin {
     pub(super) hooked_events: HashSet<PluginEventType>,
     /// Per-plugin configuration loaded from TOML.
     pub(super) config: PluginConfig,
+    /// Capability checker based on the plugin's declared capabilities.
+    pub(super) capabilities: CapabilityChecker,
 }
 
 impl ManagedPlugin {
@@ -203,6 +214,12 @@ impl ManagedPlugin {
     #[must_use]
     pub fn config(&self) -> &PluginConfig {
         &self.config
+    }
+
+    /// Returns a reference to the plugin's capability checker.
+    #[must_use]
+    pub fn capabilities(&self) -> &CapabilityChecker {
+        &self.capabilities
     }
 
     /// Looks up a plugin-specific config setting by key.
@@ -253,6 +270,7 @@ impl fmt::Debug for ManagedPlugin {
             .field("commands", &self.commands)
             .field("hooked_events", &self.hooked_events)
             .field("config", &self.config)
+            .field("capabilities", &self.capabilities)
             .finish_non_exhaustive()
     }
 }

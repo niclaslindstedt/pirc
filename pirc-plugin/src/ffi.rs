@@ -171,7 +171,7 @@ impl PluginResult {
 /// Capabilities a plugin may request. Used for sandboxing: the host checks
 /// that a plugin only uses APIs matching its declared capabilities.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PluginCapability {
     /// Plugin may read its own configuration values.
     ReadConfig,

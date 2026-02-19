@@ -58,6 +58,13 @@ pub enum PluginError {
     CommandFailed(String),
     /// An event handler failed.
     EventFailed(String),
+    /// The plugin attempted an action it lacks the capability for.
+    PermissionDenied {
+        /// Name of the plugin that was denied.
+        plugin: String,
+        /// Human-readable description of the denied action.
+        action: String,
+    },
     /// Catch-all for other failures.
     Other(String),
 }
@@ -69,6 +76,9 @@ impl fmt::Display for PluginError {
             Self::ShutdownFailed(msg) => write!(f, "shutdown failed: {msg}"),
             Self::CommandFailed(msg) => write!(f, "command failed: {msg}"),
             Self::EventFailed(msg) => write!(f, "event failed: {msg}"),
+            Self::PermissionDenied { plugin, action } => {
+                write!(f, "plugin `{plugin}` denied: {action}")
+            }
             Self::Other(msg) => write!(f, "{msg}"),
         }
     }
@@ -231,6 +241,13 @@ mod tests {
             (
                 PluginError::EventFailed("bad event".into()),
                 "event failed: bad event",
+            ),
+            (
+                PluginError::PermissionDenied {
+                    plugin: "my-plugin".into(),
+                    action: "register commands".into(),
+                },
+                "plugin `my-plugin` denied: register commands",
             ),
             (PluginError::Other("misc".into()), "misc"),
         ];

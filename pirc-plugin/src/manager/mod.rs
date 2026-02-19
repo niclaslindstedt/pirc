@@ -16,8 +16,10 @@ pub use types::{ManagedPlugin, ManagerError, PluginInfo, PluginState};
 use std::collections::HashMap;
 use std::fmt;
 
+use tracing::warn;
+
 use crate::config::PluginConfig;
-use crate::ffi::PluginEventType;
+use crate::ffi::{PluginCapability, PluginEventType};
 use crate::loader::PluginLoader;
 use crate::registry::{CommandRegistry, EventRegistry};
 
@@ -100,6 +102,7 @@ impl PluginManager {
         command: &str,
         description: &str,
     ) -> Result<(), ManagerError> {
+        self.check_capability(plugin_name, PluginCapability::RegisterCommands)?;
         crate::dispatch::register_command(
             &mut self.commands,
             &mut self.plugins,
@@ -119,6 +122,7 @@ impl PluginManager {
         plugin_name: &str,
         event_type: PluginEventType,
     ) -> Result<(), ManagerError> {
+        self.check_capability(plugin_name, PluginCapability::HookEvents)?;
         crate::dispatch::hook_event(
             &mut self.events,
             &mut self.plugins,
@@ -237,6 +241,48 @@ impl PluginManager {
     #[must_use]
     pub fn event_registry(&self) -> &EventRegistry {
         &self.events
+    }
+
+    /// Checks that a plugin has the required capability, logging a warning
+    /// and returning [`ManagerError::PermissionDenied`] if it does not.
+    fn check_capability(
+        &self,
+        plugin_name: &str,
+        capability: PluginCapability,
+    ) -> Result<(), ManagerError> {
+        let Some(managed) = self.plugins.get(plugin_name) else {
+            return Err(ManagerError::NotFound(plugin_name.to_owned()));
+        };
+        if let Err(e) = managed.capabilities.require(capability) {
+            warn!(
+                plugin = %plugin_name,
+                capability = ?capability,
+                "capability denied"
+            );
+            return Err(ManagerError::PermissionDenied {
+                name: plugin_name.to_owned(),
+                action: e.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Checks that a plugin has [`PluginCapability::SendMessages`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ManagerError::PermissionDenied`] if the check fails.
+    pub fn check_send_capability(&self, plugin_name: &str) -> Result<(), ManagerError> {
+        self.check_capability(plugin_name, PluginCapability::SendMessages)
+    }
+
+    /// Checks that a plugin has [`PluginCapability::ReadConfig`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ManagerError::PermissionDenied`] if the check fails.
+    pub fn check_read_config_capability(&self, plugin_name: &str) -> Result<(), ManagerError> {
+        self.check_capability(plugin_name, PluginCapability::ReadConfig)
     }
 }
 
@@ -559,5 +605,45 @@ mod tests {
         );
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ManagerError::LoadFailed(_)));
+    }
+
+    // -- ManagerError PermissionDenied ----------------------------------------
+
+    #[test]
+    fn manager_error_display_permission_denied() {
+        let err = ManagerError::PermissionDenied {
+            name: "restricted".into(),
+            action: "register commands".into(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "plugin `restricted` denied: register commands"
+        );
+    }
+
+    #[test]
+    fn manager_error_permission_denied_has_no_source() {
+        use std::error::Error;
+        let err = ManagerError::PermissionDenied {
+            name: "test".into(),
+            action: "hook events".into(),
+        };
+        assert!(err.source().is_none());
+    }
+
+    // -- Capability checks on empty manager -----------------------------------
+
+    #[test]
+    fn check_send_capability_nonexistent_plugin() {
+        let manager = PluginManager::new();
+        let err = manager.check_send_capability("ghost").unwrap_err();
+        assert!(matches!(err, ManagerError::NotFound(ref n) if n == "ghost"));
+    }
+
+    #[test]
+    fn check_read_config_capability_nonexistent_plugin() {
+        let manager = PluginManager::new();
+        let err = manager.check_read_config_capability("ghost").unwrap_err();
+        assert!(matches!(err, ManagerError::NotFound(ref n) if n == "ghost"));
     }
 }
