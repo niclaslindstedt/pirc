@@ -21,5 +21,6 @@ pub mod loader;
 pub mod macros;
 pub mod manager;
 pub mod plugin;
+pub mod prelude;
 pub mod registry;
 pub mod sandbox;
