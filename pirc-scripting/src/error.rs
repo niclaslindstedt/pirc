@@ -217,6 +217,82 @@ impl SemanticError {
     }
 }
 
+/// Warnings produced during semantic analysis (informational, non-fatal).
+#[derive(Debug, Clone, PartialEq)]
+pub enum SemanticWarning {
+    /// A local variable was used without a prior `var` declaration.
+    UndeclaredLocal {
+        /// The variable name.
+        name: String,
+        /// Source span.
+        span: Span,
+        /// Human-readable location.
+        location: SourceLocation,
+    },
+
+    /// An unknown built-in identifier was referenced.
+    UnknownBuiltin {
+        /// The identifier name (without `$`).
+        name: String,
+        /// Source span.
+        span: Span,
+        /// Human-readable location.
+        location: SourceLocation,
+    },
+
+    /// A duplicate alias or event handler definition was found.
+    DuplicateDefinition {
+        /// The duplicated name.
+        name: String,
+        /// Source span of the duplicate.
+        span: Span,
+        /// Human-readable location.
+        location: SourceLocation,
+    },
+
+    /// An unrecognized event type was used.
+    UnrecognizedEventType {
+        /// The event type name.
+        name: String,
+        /// Source span.
+        span: Span,
+        /// Human-readable location.
+        location: SourceLocation,
+    },
+}
+
+impl SemanticWarning {
+    /// Returns the span of this warning.
+    #[must_use]
+    pub fn span(&self) -> Span {
+        match self {
+            Self::UndeclaredLocal { span, .. }
+            | Self::UnknownBuiltin { span, .. }
+            | Self::DuplicateDefinition { span, .. }
+            | Self::UnrecognizedEventType { span, .. } => *span,
+        }
+    }
+}
+
+impl std::fmt::Display for SemanticWarning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UndeclaredLocal { name, location, .. } => {
+                write!(f, "undeclared local variable '%{name}' at {location}")
+            }
+            Self::UnknownBuiltin { name, location, .. } => {
+                write!(f, "unknown built-in identifier '${name}' at {location}")
+            }
+            Self::DuplicateDefinition { name, location, .. } => {
+                write!(f, "duplicate definition '{name}' at {location}")
+            }
+            Self::UnrecognizedEventType { name, location, .. } => {
+                write!(f, "unrecognized event type '{name}' at {location}")
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
