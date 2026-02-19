@@ -17,4 +17,5 @@ pub mod ffi;
 pub mod loader;
 #[macro_use]
 pub mod macros;
+pub mod manager;
 pub mod plugin;
