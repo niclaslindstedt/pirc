@@ -227,7 +227,7 @@ pub struct PluginInfo {
 
 /// Types of events the host can deliver to plugins.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PluginEventType {
     /// A message was received in a channel or query.
     MessageReceived,
