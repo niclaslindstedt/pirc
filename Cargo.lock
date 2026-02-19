@@ -728,6 +728,7 @@ dependencies = [
  "pirc-common",
  "pirc-crypto",
  "pirc-network",
+ "pirc-p2p",
  "pirc-protocol",
  "pirc-server",
  "serde",
