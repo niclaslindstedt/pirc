@@ -1,6 +1,7 @@
 use crate::ast::{
-    AliasDefinition, CommandStatement, EventHandler, EventType, Expression, Script, Statement,
-    TimerDefinition, TopLevelItem,
+    AliasDefinition, CommandStatement, ElseIfBranch, EventHandler, EventType, Expression,
+    IfStatement, Script, SetStatement, Statement, TimerDefinition, TopLevelItem, VarDeclStatement,
+    WhileStatement,
 };
 use crate::error::{ParseError, SourceLocation};
 use crate::token::{Span, Token, TokenKind};
@@ -404,14 +405,12 @@ impl<'src> Parser<'src> {
     }
 
     /// Parses a single statement.
-    ///
-    /// For this initial parser, supports:
-    /// - Command statements: `[/]identifier args...`
-    /// - Return, break, continue keywords
-    ///
-    /// Full statement parsing (if/while/var/set) will be added in a later ticket.
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         match self.peek_kind().clone() {
+            TokenKind::If => self.parse_if_statement(),
+            TokenKind::While => self.parse_while_statement(),
+            TokenKind::Var => self.parse_var_statement(),
+            TokenKind::Set => self.parse_set_statement(),
             TokenKind::Return => self.parse_return_statement(),
             TokenKind::Break => {
                 let span = self.current_span();
@@ -455,6 +454,118 @@ impl<'src> Parser<'src> {
         let end_span = value.as_ref().map_or(start_span, Expression::span);
 
         Ok(Statement::Return(crate::ast::ReturnStatement {
+            value,
+            span: start_span.merge(end_span),
+        }))
+    }
+
+    /// Parses an if/elseif/else statement.
+    fn parse_if_statement(&mut self) -> Result<Statement, ParseError> {
+        let start_span = self.current_span();
+        self.advance(); // consume 'if'
+
+        self.expect(&TokenKind::LeftParen, "'('")?;
+        let condition = self.parse_expression_until_rparen()?;
+        self.expect(&TokenKind::RightParen, "')'")?;
+
+        self.skip_trivia();
+        let then_body = self.parse_block()?;
+
+        let mut elseif_branches = Vec::new();
+        let mut else_body = None;
+
+        loop {
+            self.skip_trivia();
+            if self.check(&TokenKind::ElseIf) {
+                let branch_start = self.current_span();
+                self.advance(); // consume 'elseif'
+
+                self.expect(&TokenKind::LeftParen, "'('")?;
+                let branch_cond = self.parse_expression_until_rparen()?;
+                self.expect(&TokenKind::RightParen, "')'")?;
+
+                self.skip_trivia();
+                let branch_body = self.parse_block()?;
+
+                let branch_end = self.current_span();
+                elseif_branches.push(ElseIfBranch {
+                    condition: branch_cond,
+                    body: branch_body,
+                    span: branch_start.merge(branch_end),
+                });
+            } else if self.check(&TokenKind::Else) {
+                self.advance(); // consume 'else'
+                self.skip_trivia();
+                else_body = Some(self.parse_block()?);
+                break;
+            } else {
+                break;
+            }
+        }
+
+        let end_span = self.current_span();
+        Ok(Statement::If(IfStatement {
+            condition,
+            then_body,
+            elseif_branches,
+            else_body,
+            span: start_span.merge(end_span),
+        }))
+    }
+
+    /// Parses a while loop: `while (<expr>) { <stmts> }`.
+    fn parse_while_statement(&mut self) -> Result<Statement, ParseError> {
+        let start_span = self.current_span();
+        self.advance(); // consume 'while'
+
+        self.expect(&TokenKind::LeftParen, "'('")?;
+        let condition = self.parse_expression_until_rparen()?;
+        self.expect(&TokenKind::RightParen, "')'")?;
+
+        self.skip_trivia();
+        let body = self.parse_block()?;
+
+        let end_span = self.current_span();
+        Ok(Statement::While(WhileStatement {
+            condition,
+            body,
+            span: start_span.merge(end_span),
+        }))
+    }
+
+    /// Parses a variable declaration: `var %name = <expr>`.
+    fn parse_var_statement(&mut self) -> Result<Statement, ParseError> {
+        let start_span = self.current_span();
+        self.advance(); // consume 'var'
+
+        let (name, global) = self.expect_variable("variable name")?;
+
+        self.expect(&TokenKind::Equal, "'='")?;
+
+        let value = self.parse_primary_expression()?;
+        let end_span = value.span();
+
+        Ok(Statement::VarDecl(VarDeclStatement {
+            name,
+            global,
+            value,
+            span: start_span.merge(end_span),
+        }))
+    }
+
+    /// Parses a set statement: `set %name <expr>`.
+    fn parse_set_statement(&mut self) -> Result<Statement, ParseError> {
+        let start_span = self.current_span();
+        self.advance(); // consume 'set'
+
+        let (name, global) = self.expect_variable("variable name")?;
+
+        let value = self.parse_primary_expression()?;
+        let end_span = value.span();
+
+        Ok(Statement::Set(SetStatement {
+            name,
+            global,
             value,
             span: start_span.merge(end_span),
         }))
@@ -592,6 +703,55 @@ impl<'src> Parser<'src> {
     // Utility helpers
     // -----------------------------------------------------------------------
 
+    /// Expects the current token to be a variable (`%name` or `%%name`).
+    ///
+    /// Returns `(name, is_global)`.
+    fn expect_variable(&mut self, desc: &str) -> Result<(String, bool), ParseError> {
+        if self.at_end() {
+            return Err(ParseError::UnexpectedEof {
+                expected: desc.to_string(),
+                span: self.current_span(),
+                location: SourceLocation::from_offset(self.source, self.current_span().offset),
+            });
+        }
+        match &self.tokens[self.pos].kind {
+            TokenKind::Variable(name) => {
+                let name = name.clone();
+                self.advance();
+                Ok((name, false))
+            }
+            TokenKind::GlobalVariable(name) => {
+                let name = name.clone();
+                self.advance();
+                Ok((name, true))
+            }
+            _ => {
+                let found = Self::describe_token(self.peek());
+                Err(ParseError::UnexpectedToken {
+                    expected: desc.to_string(),
+                    found,
+                    span: self.current_span(),
+                    location: SourceLocation::from_offset(
+                        self.source,
+                        self.current_span().offset,
+                    ),
+                })
+            }
+        }
+    }
+
+    /// Parses expressions inside parentheses for conditions.
+    ///
+    /// Collects primary expressions until `)` is reached. For this basic
+    /// version, if multiple tokens appear (e.g., `%x == 1`), they are
+    /// combined into a flat list with the first as the "main" expression.
+    /// Full operator-precedence parsing comes in T235.
+    fn parse_expression_until_rparen(&mut self) -> Result<Expression, ParseError> {
+        // For now, parse a single primary expression.
+        // T235 will replace this with proper operator-precedence parsing.
+        self.parse_primary_expression()
+    }
+
     /// Expects the current token to be an identifier and returns its name.
     fn expect_identifier(&mut self, desc: &str) -> Result<String, ParseError> {
         if self.at_end() {
@@ -621,364 +781,4 @@ impl<'src> Parser<'src> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lexer::Lexer;
-
-    /// Helper: lex and parse source text, returning the Script AST.
-    fn parse_source(source: &str) -> Result<Script, ParseError> {
-        let mut lexer = Lexer::new(source);
-        let tokens = lexer.tokenize().expect("lexer should succeed");
-        let mut parser = Parser::new(tokens, source);
-        parser.parse()
-    }
-
-    #[test]
-    fn parse_empty_script() {
-        let script = parse_source("").unwrap();
-        assert!(script.items.is_empty());
-    }
-
-    #[test]
-    fn parse_empty_script_with_whitespace_and_comments() {
-        let script = parse_source("\n\n; comment\n\n").unwrap();
-        assert!(script.items.is_empty());
-    }
-
-    #[test]
-    fn parse_alias_block_form() {
-        let script = parse_source("alias greet {\n  echo hello\n}").unwrap();
-        assert_eq!(script.items.len(), 1);
-        match &script.items[0] {
-            TopLevelItem::Alias(alias) => {
-                assert_eq!(alias.name, "greet");
-                assert_eq!(alias.body.len(), 1);
-                match &alias.body[0] {
-                    Statement::Command(cmd) => {
-                        assert_eq!(cmd.name, "echo");
-                        assert_eq!(cmd.args.len(), 1);
-                    }
-                    other => panic!("expected Command, got {other:?}"),
-                }
-            }
-            other => panic!("expected Alias, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_alias_single_line_form() {
-        let script = parse_source("alias greet echo hello").unwrap();
-        assert_eq!(script.items.len(), 1);
-        match &script.items[0] {
-            TopLevelItem::Alias(alias) => {
-                assert_eq!(alias.name, "greet");
-                assert_eq!(alias.body.len(), 1);
-                match &alias.body[0] {
-                    Statement::Command(cmd) => {
-                        assert_eq!(cmd.name, "echo");
-                        assert_eq!(cmd.args.len(), 1);
-                    }
-                    other => panic!("expected Command, got {other:?}"),
-                }
-            }
-            other => panic!("expected Alias, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_event_with_pattern() {
-        let script = parse_source("on TEXT:*hello* {\n  msg $chan \"Hi!\"\n}").unwrap();
-        assert_eq!(script.items.len(), 1);
-        match &script.items[0] {
-            TopLevelItem::Event(event) => {
-                assert_eq!(event.event_type, EventType::Text);
-                assert_eq!(event.pattern, "*hello*");
-                assert_eq!(event.body.len(), 1);
-            }
-            other => panic!("expected Event, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_event_without_pattern() {
-        let script = parse_source("on JOIN {\n  echo \"Someone joined\"\n}").unwrap();
-        assert_eq!(script.items.len(), 1);
-        match &script.items[0] {
-            TopLevelItem::Event(event) => {
-                assert_eq!(event.event_type, EventType::Join);
-                assert_eq!(event.pattern, "*");
-                assert_eq!(event.body.len(), 1);
-            }
-            other => panic!("expected Event, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_event_wildcard_pattern() {
-        let script = parse_source("on PART:* {\n  echo left\n}").unwrap();
-        assert_eq!(script.items.len(), 1);
-        match &script.items[0] {
-            TopLevelItem::Event(event) => {
-                assert_eq!(event.event_type, EventType::Part);
-                assert_eq!(event.pattern, "*");
-            }
-            other => panic!("expected Event, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_event_identifier_pattern() {
-        let script = parse_source("on JOIN:welcome {\n  echo joined\n}").unwrap();
-        assert_eq!(script.items.len(), 1);
-        match &script.items[0] {
-            TopLevelItem::Event(event) => {
-                assert_eq!(event.event_type, EventType::Join);
-                assert_eq!(event.pattern, "welcome");
-            }
-            other => panic!("expected Event, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_timer() {
-        let script = parse_source("timer mytimer 5000 0 {\n  echo tick\n}").unwrap();
-        assert_eq!(script.items.len(), 1);
-        match &script.items[0] {
-            TopLevelItem::Timer(timer) => {
-                assert_eq!(timer.name, "mytimer");
-                match &timer.interval {
-                    Expression::IntLiteral { value, .. } => assert_eq!(*value, 5000),
-                    other => panic!("expected IntLiteral for interval, got {other:?}"),
-                }
-                match &timer.repetitions {
-                    Expression::IntLiteral { value, .. } => assert_eq!(*value, 0),
-                    other => panic!("expected IntLiteral for repetitions, got {other:?}"),
-                }
-                assert_eq!(timer.body.len(), 1);
-            }
-            other => panic!("expected Timer, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_multiple_top_level_items() {
-        let source = "\
-alias greet {
-  echo hello
-}
-
-on TEXT:*hi* {
-  echo matched
-}
-
-timer tick 1000 0 {
-  echo tick
-}
-";
-        let script = parse_source(source).unwrap();
-        assert_eq!(script.items.len(), 3);
-        assert!(matches!(&script.items[0], TopLevelItem::Alias(_)));
-        assert!(matches!(&script.items[1], TopLevelItem::Event(_)));
-        assert!(matches!(&script.items[2], TopLevelItem::Timer(_)));
-    }
-
-    #[test]
-    fn parse_alias_with_command_args() {
-        let script = parse_source("alias greet {\n  msg $chan \"Hello everyone!\"\n}").unwrap();
-        match &script.items[0] {
-            TopLevelItem::Alias(alias) => {
-                assert_eq!(alias.body.len(), 1);
-                match &alias.body[0] {
-                    Statement::Command(cmd) => {
-                        assert_eq!(cmd.name, "msg");
-                        assert_eq!(cmd.args.len(), 2);
-                        match &cmd.args[0] {
-                            Expression::BuiltinId { name, .. } => assert_eq!(name, "chan"),
-                            other => panic!("expected BuiltinId, got {other:?}"),
-                        }
-                        match &cmd.args[1] {
-                            Expression::StringLiteral { value, .. } => {
-                                assert_eq!(value, "Hello everyone!");
-                            }
-                            other => panic!("expected StringLiteral, got {other:?}"),
-                        }
-                    }
-                    other => panic!("expected Command, got {other:?}"),
-                }
-            }
-            other => panic!("expected Alias, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_alias_with_slash_command() {
-        let script = parse_source("alias greet {\n  /msg $chan \"hi\"\n}").unwrap();
-        match &script.items[0] {
-            TopLevelItem::Alias(alias) => match &alias.body[0] {
-                Statement::Command(cmd) => {
-                    assert_eq!(cmd.name, "msg");
-                    assert_eq!(cmd.args.len(), 2);
-                }
-                other => panic!("expected Command, got {other:?}"),
-            },
-            other => panic!("expected Alias, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_multiple_statements_in_block() {
-        let source = "\
-alias test {
-  echo first
-  echo second
-  echo third
-}
-";
-        let script = parse_source(source).unwrap();
-        match &script.items[0] {
-            TopLevelItem::Alias(alias) => {
-                assert_eq!(alias.body.len(), 3);
-                for stmt in &alias.body {
-                    assert!(matches!(stmt, Statement::Command(_)));
-                }
-            }
-            other => panic!("expected Alias, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn error_unexpected_token_at_top_level() {
-        let result = parse_source("42");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(matches!(err, ParseError::UnexpectedToken { .. }));
-    }
-
-    #[test]
-    fn error_missing_brace_after_alias() {
-        let result = parse_source("alias greet :");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn error_missing_alias_name() {
-        let result = parse_source("alias { echo hi }");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(matches!(err, ParseError::UnexpectedToken { .. }));
-    }
-
-    #[test]
-    fn error_invalid_event_type() {
-        let result = parse_source("on BOGUS:* { echo hi }");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(matches!(err, ParseError::InvalidEventType { .. }));
-    }
-
-    #[test]
-    fn parse_return_statement_in_alias() {
-        let script = parse_source("alias greet {\n  return\n}").unwrap();
-        match &script.items[0] {
-            TopLevelItem::Alias(alias) => {
-                assert_eq!(alias.body.len(), 1);
-                match &alias.body[0] {
-                    Statement::Return(ret) => assert!(ret.value.is_none()),
-                    other => panic!("expected Return, got {other:?}"),
-                }
-            }
-            other => panic!("expected Alias, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_break_continue_statements() {
-        let script = parse_source("alias test {\n  break\n  continue\n}").unwrap();
-        match &script.items[0] {
-            TopLevelItem::Alias(alias) => {
-                assert_eq!(alias.body.len(), 2);
-                assert!(matches!(&alias.body[0], Statement::Break(_)));
-                assert!(matches!(&alias.body[1], Statement::Continue(_)));
-            }
-            other => panic!("expected Alias, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_all_event_types() {
-        let event_types = [
-            ("TEXT", EventType::Text),
-            ("JOIN", EventType::Join),
-            ("PART", EventType::Part),
-            ("KICK", EventType::Kick),
-            ("QUIT", EventType::Quit),
-            ("CONNECT", EventType::Connect),
-            ("DISCONNECT", EventType::Disconnect),
-            ("INVITE", EventType::Invite),
-            ("NOTICE", EventType::Notice),
-            ("NICK", EventType::Nick),
-            ("TOPIC", EventType::Topic),
-            ("MODE", EventType::Mode),
-            ("CTCP", EventType::Ctcp),
-            ("ACTION", EventType::Action),
-            ("NUMERIC", EventType::Numeric),
-        ];
-
-        for (name, expected_type) in event_types {
-            let source = format!("on {name}:* {{ echo hi }}");
-            let script = parse_source(&source).unwrap();
-            match &script.items[0] {
-                TopLevelItem::Event(event) => {
-                    assert_eq!(event.event_type, expected_type, "failed for event type {name}");
-                }
-                other => panic!("expected Event for {name}, got {other:?}"),
-            }
-        }
-    }
-
-    #[test]
-    fn parse_case_insensitive_event_type() {
-        // Event types should be case-insensitive
-        let script = parse_source("on text:* { echo hi }").unwrap();
-        match &script.items[0] {
-            TopLevelItem::Event(event) => {
-                assert_eq!(event.event_type, EventType::Text);
-            }
-            other => panic!("expected Event, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_comments_between_items() {
-        let source = "\
-; first alias
-alias greet { echo hello }
-; second alias
-alias bye { echo goodbye }
-";
-        let script = parse_source(source).unwrap();
-        assert_eq!(script.items.len(), 2);
-    }
-
-    #[test]
-    fn error_eof_in_block() {
-        let result = parse_source("alias greet {");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn parse_timer_with_variable_args() {
-        let script = parse_source("timer t1 %interval 10 {\n  echo hi\n}").unwrap();
-        match &script.items[0] {
-            TopLevelItem::Timer(timer) => {
-                assert_eq!(timer.name, "t1");
-                assert!(matches!(timer.interval, Expression::Variable { .. }));
-                match &timer.repetitions {
-                    Expression::IntLiteral { value, .. } => assert_eq!(*value, 10),
-                    other => panic!("expected IntLiteral, got {other:?}"),
-                }
-            }
-            other => panic!("expected Timer, got {other:?}"),
-        }
-    }
-}
+mod tests;
