@@ -620,3 +620,380 @@ alias complex {
         other => panic!("expected Alias, got {other:?}"),
     }
 }
+
+// =======================================================================
+// Expression parsing tests (T235)
+// =======================================================================
+
+use crate::ast::{BinaryOp, Expression, StringPart, UnaryOp};
+
+/// Helper: parse a single expression from `var %r = <expr>` inside an alias.
+fn parse_expr(expr_source: &str) -> Expression {
+    let source = format!("alias t {{ var %r = {expr_source} }}");
+    let script = parse_source(&source).unwrap();
+    match &script.items[0] {
+        TopLevelItem::Alias(alias) => match &alias.body[0] {
+            Statement::VarDecl(var) => var.value.clone(),
+            other => panic!("expected VarDecl, got {other:?}"),
+        },
+        other => panic!("expected Alias, got {other:?}"),
+    }
+}
+
+/// Helper: parse a condition expression from `if (<expr>) { ... }`.
+fn parse_condition(cond_source: &str) -> Expression {
+    let source = format!("alias t {{ if ({cond_source}) {{ echo ok }} }}");
+    let script = parse_source(&source).unwrap();
+    match &script.items[0] {
+        TopLevelItem::Alias(alias) => match &alias.body[0] {
+            Statement::If(if_stmt) => if_stmt.condition.clone(),
+            other => panic!("expected If, got {other:?}"),
+        },
+        other => panic!("expected Alias, got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_arithmetic_precedence() {
+    // 1 + 2 * 3 should be parsed as 1 + (2 * 3)
+    let expr = parse_expr("1 + 2 * 3");
+    match &expr {
+        Expression::BinaryOp { left, op, right, .. } => {
+            assert_eq!(*op, BinaryOp::Add);
+            assert!(matches!(**left, Expression::IntLiteral { value: 1, .. }));
+            match right.as_ref() {
+                Expression::BinaryOp { left: rl, op: rop, right: rr, .. } => {
+                    assert_eq!(*rop, BinaryOp::Mul);
+                    assert!(matches!(**rl, Expression::IntLiteral { value: 2, .. }));
+                    assert!(matches!(**rr, Expression::IntLiteral { value: 3, .. }));
+                }
+                other => panic!("expected BinaryOp(Mul), got {other:?}"),
+            }
+        }
+        other => panic!("expected BinaryOp(Add), got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_comparison() {
+    // %x >= 10
+    let expr = parse_condition("%x >= 10");
+    match &expr {
+        Expression::BinaryOp { left, op, right, .. } => {
+            assert_eq!(*op, BinaryOp::Gte);
+            assert!(matches!(**left, Expression::Variable { .. }));
+            assert!(matches!(**right, Expression::IntLiteral { value: 10, .. }));
+        }
+        other => panic!("expected BinaryOp(Gte), got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_logical_precedence() {
+    // %a && %b || %c  =>  (%a && %b) || %c
+    let expr = parse_condition("%a && %b || %c");
+    match &expr {
+        Expression::BinaryOp { left, op, right, .. } => {
+            assert_eq!(*op, BinaryOp::Or);
+            match left.as_ref() {
+                Expression::BinaryOp { op: inner_op, .. } => {
+                    assert_eq!(*inner_op, BinaryOp::And);
+                }
+                other => panic!("expected BinaryOp(And), got {other:?}"),
+            }
+            assert!(matches!(**right, Expression::Variable { .. }));
+        }
+        other => panic!("expected BinaryOp(Or), got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_unary_not() {
+    let expr = parse_condition("!%flag");
+    match &expr {
+        Expression::UnaryOp { op, operand, .. } => {
+            assert_eq!(*op, UnaryOp::Not);
+            assert!(matches!(**operand, Expression::Variable { .. }));
+        }
+        other => panic!("expected UnaryOp(Not), got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_unary_neg() {
+    let expr = parse_expr("-%x");
+    match &expr {
+        Expression::UnaryOp { op, operand, .. } => {
+            assert_eq!(*op, UnaryOp::Neg);
+            assert!(matches!(**operand, Expression::Variable { .. }));
+        }
+        other => panic!("expected UnaryOp(Neg), got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_parenthesized() {
+    // (%a + %b) * %c
+    let expr = parse_expr("(%a + %b) * %c");
+    match &expr {
+        Expression::BinaryOp { left, op, right, .. } => {
+            assert_eq!(*op, BinaryOp::Mul);
+            match left.as_ref() {
+                Expression::Grouped { expr: inner, .. } => {
+                    assert!(matches!(**inner, Expression::BinaryOp { op: BinaryOp::Add, .. }));
+                }
+                other => panic!("expected Grouped, got {other:?}"),
+            }
+            assert!(matches!(**right, Expression::Variable { .. }));
+        }
+        other => panic!("expected BinaryOp(Mul), got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_string_interpolation() {
+    let expr = parse_expr("\"Hello $nick\"");
+    match &expr {
+        Expression::Interpolated { parts, .. } => {
+            assert_eq!(parts.len(), 2);
+            match &parts[0] {
+                StringPart::Literal(s) => assert_eq!(s, "Hello "),
+                other => panic!("expected Literal, got {other:?}"),
+            }
+            match &parts[1] {
+                StringPart::Expr(Expression::BuiltinId { name, .. }) => {
+                    assert_eq!(name, "nick");
+                }
+                other => panic!("expected BuiltinId, got {other:?}"),
+            }
+        }
+        other => panic!("expected Interpolated, got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_string_interpolation_variable() {
+    let expr = parse_expr("\"You have %count messages\"");
+    match &expr {
+        Expression::Interpolated { parts, .. } => {
+            assert_eq!(parts.len(), 3);
+            assert!(matches!(&parts[0], StringPart::Literal(s) if s == "You have "));
+            assert!(matches!(&parts[1], StringPart::Expr(Expression::Variable { name, .. }) if name == "count"));
+            assert!(matches!(&parts[2], StringPart::Literal(s) if s == " messages"));
+        }
+        other => panic!("expected Interpolated, got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_plain_string_no_interpolation() {
+    let expr = parse_expr("\"hello world\"");
+    assert!(matches!(expr, Expression::StringLiteral { .. }));
+}
+
+#[test]
+fn expr_function_call() {
+    let expr = parse_expr("$len(%text)");
+    match &expr {
+        Expression::FunctionCall { name, args, .. } => {
+            assert_eq!(name, "len");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(&args[0], Expression::Variable { .. }));
+        }
+        other => panic!("expected FunctionCall, got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_nested_function_call() {
+    let expr = parse_expr("$upper($left(%text, 5))");
+    match &expr {
+        Expression::FunctionCall { name, args, .. } => {
+            assert_eq!(name, "upper");
+            assert_eq!(args.len(), 1);
+            match &args[0] {
+                Expression::FunctionCall { name: inner_name, args: inner_args, .. } => {
+                    assert_eq!(inner_name, "left");
+                    assert_eq!(inner_args.len(), 2);
+                    assert!(matches!(&inner_args[0], Expression::Variable { .. }));
+                    assert!(matches!(&inner_args[1], Expression::IntLiteral { value: 5, .. }));
+                }
+                other => panic!("expected inner FunctionCall, got {other:?}"),
+            }
+        }
+        other => panic!("expected FunctionCall, got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_mixed_comparison_and_logical() {
+    // $len(%name) > 0 && %active == true
+    let expr = parse_condition("$len(%name) > 0 && %active == true");
+    match &expr {
+        Expression::BinaryOp { left, op, right, .. } => {
+            assert_eq!(*op, BinaryOp::And);
+            // left: $len(%name) > 0
+            match left.as_ref() {
+                Expression::BinaryOp { left: ll, op: lop, right: lr, .. } => {
+                    assert_eq!(*lop, BinaryOp::Gt);
+                    assert!(matches!(**ll, Expression::FunctionCall { .. }));
+                    assert!(matches!(**lr, Expression::IntLiteral { value: 0, .. }));
+                }
+                other => panic!("expected BinaryOp(Gt), got {other:?}"),
+            }
+            // right: %active == true
+            match right.as_ref() {
+                Expression::BinaryOp { left: rl, op: rop, right: rr, .. } => {
+                    assert_eq!(*rop, BinaryOp::Eq);
+                    assert!(matches!(**rl, Expression::Variable { .. }));
+                    assert!(matches!(**rr, Expression::BoolLiteral { value: true, .. }));
+                }
+                other => panic!("expected BinaryOp(Eq), got {other:?}"),
+            }
+        }
+        other => panic!("expected BinaryOp(And), got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_complex_nested() {
+    // (1 + 2) * (3 - 4) / 5
+    let expr = parse_expr("(1 + 2) * (3 - 4) / 5");
+    // Should be ((1+2) * (3-4)) / 5 due to left-associativity
+    match &expr {
+        Expression::BinaryOp { op, right, .. } => {
+            assert_eq!(*op, BinaryOp::Div);
+            assert!(matches!(**right, Expression::IntLiteral { value: 5, .. }));
+        }
+        other => panic!("expected BinaryOp(Div), got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_all_binary_operators() {
+    // Verify each operator parses correctly
+    let ops = [
+        ("+", BinaryOp::Add),
+        ("-", BinaryOp::Sub),
+        ("*", BinaryOp::Mul),
+        ("/", BinaryOp::Div),
+        ("==", BinaryOp::Eq),
+        ("!=", BinaryOp::Neq),
+        ("<", BinaryOp::Lt),
+        (">", BinaryOp::Gt),
+        ("<=", BinaryOp::Lte),
+        (">=", BinaryOp::Gte),
+        ("&&", BinaryOp::And),
+        ("||", BinaryOp::Or),
+    ];
+    for (sym, expected_op) in ops {
+        let expr = parse_condition(&format!("1 {sym} 2"));
+        match &expr {
+            Expression::BinaryOp { op, .. } => {
+                assert_eq!(*op, expected_op, "failed for operator {sym}");
+            }
+            other => panic!("expected BinaryOp for {sym}, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn expr_modulo_operator() {
+    // 10 % 3 — test separately since % is also used for variables
+    let expr = parse_condition("10 % 3");
+    match &expr {
+        Expression::BinaryOp { left, op, right, .. } => {
+            assert_eq!(*op, BinaryOp::Mod);
+            assert!(matches!(**left, Expression::IntLiteral { value: 10, .. }));
+            assert!(matches!(**right, Expression::IntLiteral { value: 3, .. }));
+        }
+        other => panic!("expected BinaryOp(Mod), got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_if_with_full_condition() {
+    // Existing if tests used only primary expressions; verify full expressions work
+    let source = "alias test {\n  if (%x + 1 >= 10) {\n    echo yes\n  }\n}";
+    let script = parse_source(source).unwrap();
+    match &script.items[0] {
+        TopLevelItem::Alias(alias) => match &alias.body[0] {
+            Statement::If(if_stmt) => {
+                // %x + 1 >= 10  =>  (%x + 1) >= 10
+                match &if_stmt.condition {
+                    Expression::BinaryOp { op, .. } => {
+                        assert_eq!(*op, BinaryOp::Gte);
+                    }
+                    other => panic!("expected BinaryOp(Gte), got {other:?}"),
+                }
+            }
+            other => panic!("expected If, got {other:?}"),
+        },
+        other => panic!("expected Alias, got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_string_interpolation_mixed() {
+    // "Hello $nick, you have %count messages"
+    let expr = parse_expr("\"Hello $nick, you have %count messages\"");
+    match &expr {
+        Expression::Interpolated { parts, .. } => {
+            assert_eq!(parts.len(), 5);
+            assert!(matches!(&parts[0], StringPart::Literal(s) if s == "Hello "));
+            assert!(matches!(&parts[1], StringPart::Expr(Expression::BuiltinId { name, .. }) if name == "nick"));
+            assert!(matches!(&parts[2], StringPart::Literal(s) if s == ", you have "));
+            assert!(matches!(&parts[3], StringPart::Expr(Expression::Variable { name, .. }) if name == "count"));
+            assert!(matches!(&parts[4], StringPart::Literal(s) if s == " messages"));
+        }
+        other => panic!("expected Interpolated, got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_function_call_multiple_args() {
+    let expr = parse_expr("$replace(%text, \"old\", \"new\")");
+    match &expr {
+        Expression::FunctionCall { name, args, .. } => {
+            assert_eq!(name, "replace");
+            assert_eq!(args.len(), 3);
+            assert!(matches!(&args[0], Expression::Variable { .. }));
+            assert!(matches!(&args[1], Expression::StringLiteral { .. }));
+            assert!(matches!(&args[2], Expression::StringLiteral { .. }));
+        }
+        other => panic!("expected FunctionCall, got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_function_call_no_args() {
+    let expr = parse_expr("$time()");
+    match &expr {
+        Expression::FunctionCall { name, args, .. } => {
+            assert_eq!(name, "time");
+            assert!(args.is_empty());
+        }
+        other => panic!("expected FunctionCall, got {other:?}"),
+    }
+}
+
+#[test]
+fn expr_left_associativity() {
+    // 1 - 2 - 3  =>  (1 - 2) - 3
+    let expr = parse_expr("1 - 2 - 3");
+    match &expr {
+        Expression::BinaryOp { left, op, right, .. } => {
+            assert_eq!(*op, BinaryOp::Sub);
+            assert!(matches!(**right, Expression::IntLiteral { value: 3, .. }));
+            match left.as_ref() {
+                Expression::BinaryOp { left: ll, op: lop, right: lr, .. } => {
+                    assert_eq!(*lop, BinaryOp::Sub);
+                    assert!(matches!(**ll, Expression::IntLiteral { value: 1, .. }));
+                    assert!(matches!(**lr, Expression::IntLiteral { value: 2, .. }));
+                }
+                other => panic!("expected BinaryOp(Sub), got {other:?}"),
+            }
+        }
+        other => panic!("expected BinaryOp(Sub), got {other:?}"),
+    }
+}

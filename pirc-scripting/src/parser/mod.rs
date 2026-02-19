@@ -1,7 +1,7 @@
 use crate::ast::{
-    AliasDefinition, CommandStatement, ElseIfBranch, EventHandler, EventType, Expression,
-    IfStatement, Script, SetStatement, Statement, TimerDefinition, TopLevelItem, VarDeclStatement,
-    WhileStatement,
+    AliasDefinition, BinaryOp, CommandStatement, ElseIfBranch, EventHandler, EventType, Expression,
+    IfStatement, Script, SetStatement, Statement, StringPart, TimerDefinition, TopLevelItem,
+    UnaryOp, VarDeclStatement, WhileStatement,
 };
 use crate::error::{ParseError, SourceLocation};
 use crate::token::{Span, Token, TokenKind};
@@ -448,7 +448,7 @@ impl<'src> Parser<'src> {
             TokenKind::Newline | TokenKind::RightBrace | TokenKind::Eof | TokenKind::Comment(_) => {
                 None
             }
-            _ => Some(self.parse_primary_expression()?),
+            _ => Some(self.parse_expression()?),
         };
 
         let end_span = value.as_ref().map_or(start_span, Expression::span);
@@ -542,7 +542,7 @@ impl<'src> Parser<'src> {
 
         self.expect(&TokenKind::Equal, "'='")?;
 
-        let value = self.parse_primary_expression()?;
+        let value = self.parse_expression()?;
         let end_span = value.span();
 
         Ok(Statement::VarDecl(VarDeclStatement {
@@ -560,7 +560,7 @@ impl<'src> Parser<'src> {
 
         let (name, global) = self.expect_variable("variable name")?;
 
-        let value = self.parse_primary_expression()?;
+        let value = self.parse_expression()?;
         let end_span = value.span();
 
         Ok(Statement::Set(SetStatement {
@@ -610,13 +610,109 @@ impl<'src> Parser<'src> {
     }
 
     // -----------------------------------------------------------------------
-    // Expression parsing (primary only — full expression parsing in T235)
+    // Expression parsing (Pratt parsing / precedence climbing)
     // -----------------------------------------------------------------------
 
-    /// Parses a primary expression (literals, variables, identifiers).
+    /// Parses an expression with full operator precedence.
+    fn parse_expression(&mut self) -> Result<Expression, ParseError> {
+        self.parse_expression_bp(0)
+    }
+
+    /// Pratt parser: parses expressions with binding power >= `min_bp`.
+    fn parse_expression_bp(&mut self, min_bp: u8) -> Result<Expression, ParseError> {
+        // Parse the left-hand side (prefix: unary or primary)
+        let mut lhs = self.parse_prefix()?;
+
+        // Loop: consume infix operators with binding power >= min_bp
+        while let Some(op) = self.peek_infix_op() {
+            let (l_bp, r_bp) = Self::infix_binding_power(op);
+            if l_bp < min_bp {
+                break;
+            }
+
+            // Consume the operator token
+            self.advance();
+
+            let rhs = self.parse_expression_bp(r_bp)?;
+            let span = lhs.span().merge(rhs.span());
+            lhs = Expression::BinaryOp {
+                left: Box::new(lhs),
+                op,
+                right: Box::new(rhs),
+                span,
+            };
+        }
+
+        Ok(lhs)
+    }
+
+    /// Parses a prefix expression (unary operators or primary atoms).
+    fn parse_prefix(&mut self) -> Result<Expression, ParseError> {
+        match self.peek_kind().clone() {
+            TokenKind::Bang => {
+                let start_span = self.current_span();
+                self.advance();
+                let operand = self.parse_expression_bp(Self::PREFIX_BP)?;
+                let span = start_span.merge(operand.span());
+                Ok(Expression::UnaryOp {
+                    op: UnaryOp::Not,
+                    operand: Box::new(operand),
+                    span,
+                })
+            }
+            TokenKind::Minus => {
+                let start_span = self.current_span();
+                self.advance();
+                let operand = self.parse_expression_bp(Self::PREFIX_BP)?;
+                let span = start_span.merge(operand.span());
+                Ok(Expression::UnaryOp {
+                    op: UnaryOp::Neg,
+                    operand: Box::new(operand),
+                    span,
+                })
+            }
+            _ => self.parse_primary_expression(),
+        }
+    }
+
+    /// Binding power for prefix (unary) operators.
+    const PREFIX_BP: u8 = 13;
+
+    /// Returns the infix binary operator for the current token, if any.
+    fn peek_infix_op(&self) -> Option<BinaryOp> {
+        match self.peek_kind() {
+            TokenKind::PipePipe => Some(BinaryOp::Or),
+            TokenKind::AmpAmp => Some(BinaryOp::And),
+            TokenKind::EqualEqual => Some(BinaryOp::Eq),
+            TokenKind::BangEqual => Some(BinaryOp::Neq),
+            TokenKind::Less => Some(BinaryOp::Lt),
+            TokenKind::Greater => Some(BinaryOp::Gt),
+            TokenKind::LessEqual => Some(BinaryOp::Lte),
+            TokenKind::GreaterEqual => Some(BinaryOp::Gte),
+            TokenKind::Plus => Some(BinaryOp::Add),
+            TokenKind::Minus => Some(BinaryOp::Sub),
+            TokenKind::Star => Some(BinaryOp::Mul),
+            TokenKind::Slash => Some(BinaryOp::Div),
+            TokenKind::Percent => Some(BinaryOp::Mod),
+            _ => None,
+        }
+    }
+
+    /// Returns `(left_bp, right_bp)` for an infix operator.
     ///
-    /// This is a stub for the initial parser. Full expression parsing
-    /// with operator precedence will be implemented in a later ticket.
+    /// Left-associative operators have `right_bp = left_bp + 1`.
+    fn infix_binding_power(op: BinaryOp) -> (u8, u8) {
+        match op {
+            BinaryOp::Or => (1, 2),
+            BinaryOp::And => (3, 4),
+            BinaryOp::Eq | BinaryOp::Neq => (5, 6),
+            BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Lte | BinaryOp::Gte => (7, 8),
+            BinaryOp::Add | BinaryOp::Sub => (9, 10),
+            BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => (11, 12),
+        }
+    }
+
+    /// Parses a primary (atomic) expression.
     fn parse_primary_expression(&mut self) -> Result<Expression, ParseError> {
         let token = self.peek().clone();
         match &token.kind {
@@ -636,7 +732,7 @@ impl<'src> Parser<'src> {
                 let value = value.clone();
                 let span = self.current_span();
                 self.advance();
-                Ok(Expression::StringLiteral { value, span })
+                Ok(Self::parse_string_interpolation(value, span))
             }
             TokenKind::True => {
                 let span = self.current_span();
@@ -662,9 +758,17 @@ impl<'src> Parser<'src> {
             }
             TokenKind::BuiltinIdentifier(name) => {
                 let name = name.clone();
-                let span = self.current_span();
+                let start_span = self.current_span();
                 self.advance();
-                Ok(Expression::BuiltinId { name, span })
+                // Check for function call: $name(...)
+                if self.check(&TokenKind::LeftParen) {
+                    self.parse_function_call(name, start_span)
+                } else {
+                    Ok(Expression::BuiltinId {
+                        name,
+                        span: start_span,
+                    })
+                }
             }
             TokenKind::Identifier(name) => {
                 let name = name.clone();
@@ -675,7 +779,7 @@ impl<'src> Parser<'src> {
             TokenKind::LeftParen => {
                 let start_span = self.current_span();
                 self.advance(); // consume '('
-                let inner = self.parse_primary_expression()?;
+                let inner = self.parse_expression()?;
                 let end_span = self
                     .expect(&TokenKind::RightParen, "')'")
                     .map(|t| t.span)?;
@@ -697,6 +801,115 @@ impl<'src> Parser<'src> {
                 })
             }
         }
+    }
+
+    /// Parses a function call: `$name(arg1, arg2, ...)`.
+    ///
+    /// Called after `$name` has been consumed and `(` is the current token.
+    fn parse_function_call(
+        &mut self,
+        name: String,
+        start_span: Span,
+    ) -> Result<Expression, ParseError> {
+        self.advance(); // consume '('
+
+        let mut args = Vec::new();
+        if !self.check(&TokenKind::RightParen) {
+            args.push(self.parse_expression()?);
+            while self.check(&TokenKind::Comma) {
+                self.advance(); // consume ','
+                args.push(self.parse_expression()?);
+            }
+        }
+
+        let end_span = self
+            .expect(&TokenKind::RightParen, "')'")
+            .map(|t| t.span)?;
+
+        Ok(Expression::FunctionCall {
+            name,
+            args,
+            span: start_span.merge(end_span),
+        })
+    }
+
+    /// Parses a string literal for interpolation markers.
+    ///
+    /// If the string contains `$identifier` or `%variable` references,
+    /// it produces an `Interpolated` expression. Otherwise, a plain
+    /// `StringLiteral`.
+    fn parse_string_interpolation(raw: String, span: Span) -> Expression {
+        let mut parts: Vec<StringPart> = Vec::new();
+        let mut literal_buf = String::new();
+        let bytes = raw.as_bytes();
+        let mut i = 0;
+
+        while i < bytes.len() {
+            match bytes[i] {
+                b'$' if i + 1 < bytes.len() && is_interp_start(bytes[i + 1]) => {
+                    // Flush accumulated literal
+                    if !literal_buf.is_empty() {
+                        parts.push(StringPart::Literal(std::mem::take(&mut literal_buf)));
+                    }
+                    i += 1; // skip '$'
+                    let name_start = i;
+                    while i < bytes.len() && is_interp_continue(bytes[i]) {
+                        i += 1;
+                    }
+                    let name = raw[name_start..i].to_string();
+                    parts.push(StringPart::Expr(Expression::BuiltinId {
+                        name,
+                        span,
+                    }));
+                }
+                b'%' if i + 1 < bytes.len() && is_interp_start(bytes[i + 1]) => {
+                    // Flush accumulated literal
+                    if !literal_buf.is_empty() {
+                        parts.push(StringPart::Literal(std::mem::take(&mut literal_buf)));
+                    }
+                    i += 1; // skip '%'
+                    // Check for global %%
+                    let global = i < bytes.len() && bytes[i] == b'%';
+                    if global {
+                        i += 1;
+                    }
+                    let name_start = i;
+                    while i < bytes.len() && is_interp_continue(bytes[i]) {
+                        i += 1;
+                    }
+                    let name = raw[name_start..i].to_string();
+                    if global {
+                        parts.push(StringPart::Expr(Expression::GlobalVariable {
+                            name,
+                            span,
+                        }));
+                    } else {
+                        parts.push(StringPart::Expr(Expression::Variable {
+                            name,
+                            span,
+                        }));
+                    }
+                }
+                _ => {
+                    // Regular character - get the char properly for UTF-8
+                    let ch = raw[i..].chars().next().unwrap_or('\0');
+                    literal_buf.push(ch);
+                    i += ch.len_utf8();
+                }
+            }
+        }
+
+        // If no interpolation occurred, return a plain string literal
+        if parts.is_empty() {
+            return Expression::StringLiteral { value: raw, span };
+        }
+
+        // Flush any trailing literal
+        if !literal_buf.is_empty() {
+            parts.push(StringPart::Literal(literal_buf));
+        }
+
+        Expression::Interpolated { parts, span }
     }
 
     // -----------------------------------------------------------------------
@@ -740,16 +953,9 @@ impl<'src> Parser<'src> {
         }
     }
 
-    /// Parses expressions inside parentheses for conditions.
-    ///
-    /// Collects primary expressions until `)` is reached. For this basic
-    /// version, if multiple tokens appear (e.g., `%x == 1`), they are
-    /// combined into a flat list with the first as the "main" expression.
-    /// Full operator-precedence parsing comes in T235.
+    /// Parses an expression inside parentheses for conditions.
     fn parse_expression_until_rparen(&mut self) -> Result<Expression, ParseError> {
-        // For now, parse a single primary expression.
-        // T235 will replace this with proper operator-precedence parsing.
-        self.parse_primary_expression()
+        self.parse_expression()
     }
 
     /// Expects the current token to be an identifier and returns its name.
@@ -778,6 +984,16 @@ impl<'src> Parser<'src> {
             })
         }
     }
+}
+
+/// Returns true if the byte can start an interpolation name (`[a-zA-Z_]`).
+fn is_interp_start(b: u8) -> bool {
+    b.is_ascii_alphabetic() || b == b'_'
+}
+
+/// Returns true if the byte can continue an interpolation name (`[a-zA-Z0-9_-]`).
+fn is_interp_continue(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'-'
 }
 
 #[cfg(test)]
