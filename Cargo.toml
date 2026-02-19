@@ -12,6 +12,7 @@ members = [
     "examples/plugins/hello-plugin",
     "examples/plugins/auto-respond-plugin",
     "examples/plugins/logger-plugin",
+    "tests",
 ]
 resolver = "2"
 

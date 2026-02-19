@@ -722,6 +722,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pirc-integration-tests"
+version = "0.1.0"
+dependencies = [
+ "pirc-common",
+ "pirc-network",
+ "pirc-protocol",
+ "pirc-server",
+ "tokio",
+]
+
+[[package]]
 name = "pirc-network"
 version = "0.1.0"
 dependencies = [
