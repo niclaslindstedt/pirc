@@ -1,6 +1,7 @@
 mod helpers;
 
 mod builtin_tests;
+mod command_tests;
 mod env_tests;
 mod expr_tests;
 mod function_tests;

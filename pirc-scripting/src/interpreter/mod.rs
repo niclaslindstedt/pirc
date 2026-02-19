@@ -3,8 +3,14 @@
 //! Evaluates parsed AST nodes: expressions produce [`Value`]s,
 //! statements mutate [`Environment`] state and may produce side-effects
 //! via a [`CommandHandler`] trait.
+//!
+//! Commands are resolved through a three-level dispatch chain:
+//! 1. Built-in script commands (`/echo`, `/halt`, `/noop`)
+//! 2. Registered aliases (via [`AliasRegistry`])
+//! 3. External [`CommandHandler`] trait
 
 mod builtins;
+pub mod command;
 mod environment;
 pub mod event;
 mod functions;
@@ -14,6 +20,7 @@ mod value;
 mod tests;
 
 pub use builtins::BuiltinContext;
+pub use command::AliasRegistry;
 pub use environment::Environment;
 pub use event::{EventContext, EventDispatcher};
 pub use functions::{FunctionRegistry, RegexState};
@@ -26,6 +33,9 @@ use crate::ast::{
 
 /// Maximum number of loop iterations before the interpreter bails out.
 const MAX_LOOP_ITERATIONS: u64 = 100_000;
+
+/// Maximum alias recursion depth to prevent infinite loops.
+const MAX_ALIAS_DEPTH: usize = 100;
 
 /// Errors produced during script interpretation.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -58,6 +68,14 @@ pub enum RuntimeError {
     #[error("loop iteration limit exceeded ({MAX_LOOP_ITERATIONS})")]
     LoopLimit,
 
+    /// Alias recursion depth exceeded the limit.
+    #[error("alias recursion limit exceeded (max {MAX_ALIAS_DEPTH})")]
+    AliasRecursionLimit,
+
+    /// A `/halt` command was executed to stop script execution.
+    #[error("script halted")]
+    Halt,
+
     /// Internal: a `return` was executed (used for control flow).
     #[error("return outside of alias/event/timer body")]
     Return(Value),
@@ -87,19 +105,27 @@ pub trait CommandHandler {
 /// The script interpreter.
 ///
 /// Evaluates expressions and executes statements against an [`Environment`],
-/// dispatching commands through a [`CommandHandler`].
+/// dispatching commands through a three-level chain: built-in commands,
+/// registered aliases, and finally the external [`CommandHandler`].
 pub struct Interpreter<'a> {
     env: &'a mut Environment,
     cmd_handler: &'a mut dyn CommandHandler,
     builtin_ctx: &'a BuiltinContext,
     functions: &'a FunctionRegistry,
     regex_state: &'a RegexState,
+    aliases: Option<&'a AliasRegistry>,
+    echo_output: Option<&'a mut Vec<String>>,
+    alias_depth: usize,
+    /// Owned builtin context override used during alias execution.
+    /// When set, this takes precedence over `builtin_ctx`.
+    ctx_override: Option<BuiltinContext>,
 }
 
 impl<'a> Interpreter<'a> {
     /// Creates a new interpreter with the given environment and command handler.
     ///
     /// Uses default (empty) builtin context and function registry.
+    /// No alias registry or echo output is configured.
     pub fn new(env: &'a mut Environment, cmd_handler: &'a mut dyn CommandHandler) -> Self {
         static DEFAULT_CTX: std::sync::LazyLock<BuiltinContext> =
             std::sync::LazyLock::new(BuiltinContext::new);
@@ -113,6 +139,10 @@ impl<'a> Interpreter<'a> {
             builtin_ctx: &DEFAULT_CTX,
             functions: &DEFAULT_FUNCS,
             regex_state: &DEFAULT_REGEX,
+            aliases: None,
+            echo_output: None,
+            alias_depth: 0,
+            ctx_override: None,
         }
     }
 
@@ -130,7 +160,31 @@ impl<'a> Interpreter<'a> {
             builtin_ctx,
             functions,
             regex_state,
+            aliases: None,
+            echo_output: None,
+            alias_depth: 0,
+            ctx_override: None,
         }
+    }
+
+    /// Sets the alias registry for command dispatch.
+    pub fn set_aliases(&mut self, aliases: &'a AliasRegistry) {
+        self.aliases = Some(aliases);
+    }
+
+    /// Sets the echo output buffer for the `/echo` built-in command.
+    pub fn set_echo_output(&mut self, output: &'a mut Vec<String>) {
+        self.echo_output = Some(output);
+    }
+
+    /// Sets the current alias recursion depth.
+    pub fn set_alias_depth(&mut self, depth: usize) {
+        self.alias_depth = depth;
+    }
+
+    /// Returns the effective builtin context (override if set, else base).
+    fn effective_ctx(&self) -> &BuiltinContext {
+        self.ctx_override.as_ref().unwrap_or(self.builtin_ctx)
     }
 
     // ── Expression evaluation ──────────────────────────────────────────
@@ -159,7 +213,7 @@ impl<'a> Interpreter<'a> {
             }
 
             // Built-in identifiers: resolve from context
-            Expression::BuiltinId { name, .. } => Ok(self.builtin_ctx.resolve(name)),
+            Expression::BuiltinId { name, .. } => Ok(self.effective_ctx().resolve(name)),
 
             // Plain identifiers are treated as string literals (mIRC semantics)
             Expression::Identifier { name, .. } => Ok(Value::String(name.clone())),
@@ -406,8 +460,105 @@ impl<'a> Interpreter<'a> {
             .iter()
             .map(|a| self.eval_expr(a))
             .collect::<Result<_, _>>()?;
+
+        // Full dispatch chain is only active when aliases are configured.
+        // Without aliases, commands go directly to the external handler
+        // (preserving backward compatibility).
+        if self.aliases.is_some() {
+            // 1. Built-in script commands
+            if let Some(result) = self.try_builtin_command(&cmd.name, &args) {
+                return result;
+            }
+
+            // 2. Registered aliases
+            if let Some(aliases) = self.aliases {
+                if let Some(body) = aliases.get(&cmd.name) {
+                    let body = body.to_vec();
+                    return self.exec_alias_call(&body, &args);
+                }
+            }
+        }
+
+        // 3. External handler (or direct handler when no aliases configured)
         self.cmd_handler.handle_command(&cmd.name, &args)?;
         Ok(Value::Null)
+    }
+
+    /// Checks if the command is a built-in script command and handles it.
+    ///
+    /// Returns `Some(result)` if handled, `None` otherwise.
+    fn try_builtin_command(
+        &mut self,
+        name: &str,
+        args: &[Value],
+    ) -> Option<Result<Value, RuntimeError>> {
+        match name.to_lowercase().as_str() {
+            "echo" => {
+                let text: String = args
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if let Some(ref mut output) = self.echo_output {
+                    output.push(text);
+                }
+                Some(Ok(Value::Null))
+            }
+            "noop" => Some(Ok(Value::Null)),
+            "halt" => Some(Err(RuntimeError::Halt)),
+            _ => None,
+        }
+    }
+
+    /// Executes an alias body with argument binding and recursion protection.
+    ///
+    /// Pushes a fresh scope, populates `$0`–`$9` from the alias arguments,
+    /// executes the body, and pops the scope. `Return` is caught as normal
+    /// alias completion.
+    fn exec_alias_call(
+        &mut self,
+        body: &[Statement],
+        args: &[Value],
+    ) -> Result<Value, RuntimeError> {
+        if self.alias_depth >= MAX_ALIAS_DEPTH {
+            return Err(RuntimeError::AliasRecursionLimit);
+        }
+
+        // Build the argument string for $0-$9 splitting
+        let arg_text = args
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        // Create a builtin context with $0-$9 populated from alias arguments,
+        // inheriting other context identifiers from the current context.
+        let mut alias_ctx = self.effective_ctx().clone();
+        alias_ctx.set_event_text(&arg_text);
+
+        // Save previous state and set up alias execution context
+        let prev_override = self.ctx_override.take();
+        let prev_depth = self.alias_depth;
+
+        self.ctx_override = Some(alias_ctx);
+        self.alias_depth += 1;
+
+        // Push a fresh scope for the alias body
+        self.env.push_scope();
+
+        let result = self.exec_stmts(body);
+
+        self.env.pop_scope();
+
+        // Restore previous state
+        self.ctx_override = prev_override;
+        self.alias_depth = prev_depth;
+
+        // Catch Return as normal alias completion; propagate other errors
+        match result {
+            Ok(_) | Err(RuntimeError::Return(_)) => Ok(Value::Null),
+            Err(e) => Err(e),
+        }
     }
 }
 
