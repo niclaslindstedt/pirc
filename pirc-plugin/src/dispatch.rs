@@ -150,6 +150,13 @@ pub(crate) fn dispatch_command(
     let result =
         (managed.loaded_plugin().api().on_event)(std::ptr::addr_of!(ffi_event));
 
+    // Free FfiString allocations now that the plugin callback has returned.
+    let crate::ffi::PluginEvent { data, source, .. } = ffi_event;
+    unsafe {
+        data.free();
+        source.free();
+    }
+
     if result.status == PluginStatus::Error {
         let reason = unsafe { result.error_message.into_string() };
         return Err(ManagerError::PluginCallFailed {
@@ -224,6 +231,17 @@ pub(crate) fn dispatch_event(
         } else {
             delivered += 1;
         }
+    }
+
+    // Free FfiString allocations now that all plugin callbacks have returned.
+    let crate::ffi::PluginEvent {
+        data: ffi_data,
+        source: ffi_source,
+        ..
+    } = ffi_event;
+    unsafe {
+        ffi_data.free();
+        ffi_source.free();
     }
 
     debug!(
