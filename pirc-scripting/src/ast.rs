@@ -72,7 +72,7 @@ pub struct TimerDefinition {
 }
 
 /// IRC event types that can be handled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventType {
     /// A channel or private message.
     Text,

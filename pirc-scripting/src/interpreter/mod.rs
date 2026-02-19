@@ -6,6 +6,7 @@
 
 mod builtins;
 mod environment;
+pub mod event;
 mod functions;
 mod value;
 
@@ -14,6 +15,7 @@ mod tests;
 
 pub use builtins::BuiltinContext;
 pub use environment::Environment;
+pub use event::{EventContext, EventDispatcher};
 pub use functions::{FunctionRegistry, RegexState};
 pub use value::Value;
 
