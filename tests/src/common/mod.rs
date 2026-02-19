@@ -219,6 +219,15 @@ impl TestClient {
         }
     }
 
+    /// Try to receive a message with a short timeout (200ms), returning `None`
+    /// if nothing arrives. Useful for asserting no message was sent.
+    pub async fn try_recv_short(&mut self) -> Option<Message> {
+        match tokio::time::timeout(Duration::from_millis(200), self.conn.recv()).await {
+            Ok(Ok(Some(msg))) => Some(msg),
+            _ => None,
+        }
+    }
+
     /// Receive and discard `n` messages.
     pub async fn drain(&mut self, n: usize) {
         for _ in 0..n {
@@ -305,6 +314,60 @@ pub fn kick_msg(channel: &str, nick: &str) -> Message {
     Message::new(
         Command::Kick,
         vec![channel.to_owned(), nick.to_owned()],
+    )
+}
+
+/// `KICK <channel> <nick> :<reason>`
+pub fn kick_msg_with_reason(channel: &str, nick: &str, reason: &str) -> Message {
+    Message::new(
+        Command::Kick,
+        vec![channel.to_owned(), nick.to_owned(), reason.to_owned()],
+    )
+}
+
+/// `TOPIC <channel>`
+pub fn topic_query(channel: &str) -> Message {
+    Message::new(Command::Topic, vec![channel.to_owned()])
+}
+
+/// `TOPIC <channel> :<text>`
+pub fn topic_msg(channel: &str, text: &str) -> Message {
+    Message::new(
+        Command::Topic,
+        vec![channel.to_owned(), text.to_owned()],
+    )
+}
+
+/// `INVITE <nick> <channel>`
+pub fn invite_msg(nick: &str, channel: &str) -> Message {
+    Message::new(
+        Command::Invite,
+        vec![nick.to_owned(), channel.to_owned()],
+    )
+}
+
+/// `NOTICE <target> :<text>`
+pub fn notice_msg(target: &str, text: &str) -> Message {
+    Message::new(
+        Command::Notice,
+        vec![target.to_owned(), text.to_owned()],
+    )
+}
+
+/// `MODE <target> <modestring> [params...]`
+pub fn mode_msg_with_params(target: &str, mode: &str, params: &[&str]) -> Message {
+    let mut p = vec![target.to_owned(), mode.to_owned()];
+    for param in params {
+        p.push((*param).to_owned());
+    }
+    Message::new(Command::Mode, p)
+}
+
+/// `JOIN <channel> <key>`
+pub fn join_msg_with_key(channel: &str, key: &str) -> Message {
+    Message::new(
+        Command::Join,
+        vec![channel.to_owned(), key.to_owned()],
     )
 }
 
