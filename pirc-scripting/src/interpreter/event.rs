@@ -85,6 +85,8 @@ struct HandlerEntry {
     pattern: String,
     /// The handler body statements.
     body: Vec<Statement>,
+    /// Optional source tag for tracking which script registered this handler.
+    source: Option<String>,
 }
 
 /// Dispatches IRC events to matching script event handlers.
@@ -107,14 +109,29 @@ impl EventDispatcher {
 
     /// Registers an event handler from a parsed [`EventHandler`] AST node.
     pub fn register(&mut self, handler: &EventHandler) {
+        self.register_with_source(handler, None);
+    }
+
+    /// Registers an event handler with an optional source tag.
+    pub fn register_with_source(&mut self, handler: &EventHandler, source: Option<&str>) {
         let entry = HandlerEntry {
             pattern: handler.pattern.to_lowercase(),
             body: handler.body.clone(),
+            source: source.map(String::from),
         };
         self.handlers
             .entry(handler.event_type)
             .or_default()
             .push(entry);
+    }
+
+    /// Removes all handlers registered with the given source tag.
+    pub fn remove_by_source(&mut self, source: &str) {
+        for handlers in self.handlers.values_mut() {
+            handlers.retain(|h| h.source.as_deref() != Some(source));
+        }
+        // Remove event types with no handlers left
+        self.handlers.retain(|_, handlers| !handlers.is_empty());
     }
 
     /// Returns the number of registered handlers across all event types.

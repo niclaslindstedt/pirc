@@ -56,4 +56,17 @@ impl AliasRegistry {
     pub fn contains(&self, name: &str) -> bool {
         self.aliases.contains_key(&name.to_lowercase())
     }
+
+    /// Removes an alias by name (case-insensitive).
+    ///
+    /// Returns `true` if an alias was removed.
+    pub fn remove(&mut self, name: &str) -> bool {
+        self.aliases.remove(&name.to_lowercase()).is_some()
+    }
+
+    /// Returns the names of all registered aliases (lowercased).
+    #[must_use]
+    pub fn alias_names(&self) -> Vec<String> {
+        self.aliases.keys().cloned().collect()
+    }
 }

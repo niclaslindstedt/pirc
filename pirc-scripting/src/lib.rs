@@ -17,6 +17,7 @@
 //! and example scripts.
 
 pub mod ast;
+pub mod engine;
 pub mod error;
 pub mod grammar;
 pub mod interpreter;
