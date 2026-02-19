@@ -13,6 +13,7 @@
 //! Plugin authors implement the [`Plugin`](plugin::Plugin) trait and use the
 //! [`declare_plugin!`] macro to generate the C FFI bridge automatically.
 
+pub mod config;
 pub mod dispatch;
 pub mod ffi;
 pub mod loader;
