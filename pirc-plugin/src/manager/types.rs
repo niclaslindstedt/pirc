@@ -5,6 +5,7 @@
 
 use std::collections::HashSet;
 use std::fmt;
+use std::time::SystemTime;
 
 use crate::config::PluginConfig;
 use crate::ffi::PluginEventType;
@@ -171,6 +172,9 @@ pub struct ManagedPlugin {
     pub(super) config: PluginConfig,
     /// Capability checker based on the plugin's declared capabilities.
     pub(super) capabilities: CapabilityChecker,
+    /// File modification time at the point the library was loaded.
+    /// Used by the hot-reload system to detect changes.
+    pub(super) last_modified: Option<SystemTime>,
 }
 
 impl ManagedPlugin {
@@ -222,6 +226,12 @@ impl ManagedPlugin {
         &self.capabilities
     }
 
+    /// Returns the file modification time recorded when the library was loaded.
+    #[must_use]
+    pub fn last_modified(&self) -> Option<SystemTime> {
+        self.last_modified
+    }
+
     /// Looks up a plugin-specific config setting by key.
     #[must_use]
     pub fn get_config_value(&self, key: &str) -> Option<String> {
@@ -271,6 +281,7 @@ impl fmt::Debug for ManagedPlugin {
             .field("hooked_events", &self.hooked_events)
             .field("config", &self.config)
             .field("capabilities", &self.capabilities)
+            .field("last_modified", &self.last_modified)
             .finish_non_exhaustive()
     }
 }

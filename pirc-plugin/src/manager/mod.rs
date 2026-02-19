@@ -9,6 +9,7 @@
 //! ```
 
 mod lifecycle;
+mod reload;
 mod types;
 
 pub use types::{ManagedPlugin, ManagerError, PluginInfo, PluginState};

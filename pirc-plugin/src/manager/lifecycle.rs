@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::config::{self, PluginConfig};
 use crate::ffi::{PluginHostApi, PluginStatus};
@@ -55,6 +55,14 @@ impl PluginManager {
     ) -> Result<String, ManagerError> {
         let loaded = self.loader.load(path)?;
 
+        // Record the file modification time for hot-reload change detection.
+        let last_modified = std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .ok();
+        if last_modified.is_none() {
+            trace!(path = %path.display(), "could not read modification time");
+        }
+
         let (name, version, capabilities) = unsafe {
             let info = (loaded.api().info)();
             let n = info.name.as_str().to_owned();
@@ -103,6 +111,7 @@ impl PluginManager {
             hooked_events: HashSet::new(),
             config: plugin_config,
             capabilities: checker,
+            last_modified,
         };
 
         self.plugins.insert(name.clone(), managed);
