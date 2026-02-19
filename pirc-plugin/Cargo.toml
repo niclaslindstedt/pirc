@@ -10,4 +10,5 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+libloading = "0.8"
 pirc-common = { path = "../pirc-common" }

@@ -14,6 +14,7 @@
 //! [`declare_plugin!`] macro to generate the C FFI bridge automatically.
 
 pub mod ffi;
+pub mod loader;
 #[macro_use]
 pub mod macros;
 pub mod plugin;
