@@ -59,6 +59,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "auto-respond-plugin"
+version = "0.1.0"
+dependencies = [
+ "pirc-plugin",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

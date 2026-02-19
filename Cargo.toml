@@ -10,6 +10,7 @@ members = [
     "pirc-server",
     "pirc-p2p",
     "examples/plugins/hello-plugin",
+    "examples/plugins/auto-respond-plugin",
 ]
 resolver = "2"
 
