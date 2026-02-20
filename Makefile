@@ -1,4 +1,4 @@
-.PHONY: all build test lint fmt fmt-check clean check
+.PHONY: all build test lint fmt fmt-check clean check bench
 
 build:
 	cargo build --workspace
@@ -14,6 +14,9 @@ fmt:
 
 fmt-check:
 	cargo fmt --all -- --check
+
+bench:
+	cargo bench -p pirc-protocol -p pirc-server -p pirc-crypto -p pirc-network
 
 clean:
 	cargo clean

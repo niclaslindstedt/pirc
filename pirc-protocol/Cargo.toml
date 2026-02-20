@@ -12,3 +12,10 @@ workspace = true
 [dependencies]
 pirc-common = { path = "../pirc-common" }
 thiserror = "2"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "protocol_parsing"
+harness = false
