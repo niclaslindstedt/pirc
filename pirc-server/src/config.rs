@@ -369,11 +369,21 @@ pub struct MotdConfig {
 }
 
 /// IRC operator credentials.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct OperConfig {
     pub name: String,
     pub password: String,
     pub host_mask: Option<String>,
+}
+
+impl std::fmt::Debug for OperConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OperConfig")
+            .field("name", &self.name)
+            .field("password", &"[REDACTED]")
+            .field("host_mask", &self.host_mask)
+            .finish()
+    }
 }
 
 #[cfg(test)]
@@ -924,5 +934,18 @@ port = 6697
         };
         let raft = cluster.to_bootstrap_raft_config().unwrap();
         assert!(raft.peers.is_empty());
+    }
+
+    #[test]
+    fn oper_config_debug_redacts_password() {
+        let oper = OperConfig {
+            name: "admin".into(),
+            password: "super-secret".into(),
+            host_mask: None,
+        };
+        let debug = format!("{oper:?}");
+        assert!(debug.contains("REDACTED"), "password should be redacted in debug output");
+        assert!(!debug.contains("super-secret"), "password should not appear in debug output");
+        assert!(debug.contains("admin"), "name should appear in debug output");
     }
 }

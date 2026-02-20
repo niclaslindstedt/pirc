@@ -182,6 +182,15 @@ impl EncryptionManager {
         std::fs::write(&identity_path, encrypted.to_bytes())
             .map_err(|e| format!("failed to write {}: {e}", identity_path.display()))?;
 
+        // Restrict file permissions to owner-only (0o600) on Unix.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o600);
+            std::fs::set_permissions(&identity_path, perms)
+                .map_err(|e| format!("failed to set permissions on {}: {e}", identity_path.display()))?;
+        }
+
         Ok(())
     }
 
@@ -526,6 +535,16 @@ impl EncryptionManager {
 impl Default for EncryptionManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Drop for EncryptionManager {
+    fn drop(&mut self) {
+        // Zeroize the passphrase from memory to prevent secrets lingering
+        // after the manager is dropped.
+        if let Some(ref mut passphrase) = self.passphrase {
+            zeroize::Zeroize::zeroize(passphrase);
+        }
     }
 }
 
@@ -954,6 +973,34 @@ mod tests {
         // Reload and verify identity is preserved
         let mgr2 = EncryptionManager::load_or_create(dir.path(), passphrase);
         assert_eq!(mgr2.get_identity_fingerprint(), fp);
+    }
+
+    // ── File permissions ─────────────────────────────────────────────
+
+    #[cfg(unix)]
+    #[test]
+    fn identity_file_has_restricted_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _mgr = EncryptionManager::load_or_create(dir.path(), b"pass");
+
+        let path = dir.path().join("identity.enc");
+        let mode = std::fs::metadata(&path).expect("metadata").permissions().mode();
+        // Check file permission bits (mask out file-type bits)
+        assert_eq!(mode & 0o777, 0o600, "key file should be owner-only (0o600)");
+    }
+
+    #[test]
+    fn passphrase_is_zeroized_on_drop() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mgr = EncryptionManager::load_or_create(dir.path(), b"secret-pass");
+        // Verify the passphrase was stored
+        assert!(mgr.passphrase.is_some());
+        // Drop the manager - passphrase should be zeroized
+        drop(mgr);
+        // We can't directly verify the memory is zeroed (it's freed),
+        // but the Drop impl runs and zeroizes the Vec contents.
     }
 
     // ── Test helper ──────────────────────────────────────────────────

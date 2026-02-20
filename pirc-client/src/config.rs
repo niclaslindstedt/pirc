@@ -188,13 +188,24 @@ impl Default for PluginsConfig {
 }
 
 /// P2P connection settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct P2pConfig {
     pub stun_server: Option<String>,
     pub turn_server: Option<String>,
     pub turn_username: Option<String>,
     pub turn_password: Option<String>,
+}
+
+impl std::fmt::Debug for P2pConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("P2pConfig")
+            .field("stun_server", &self.stun_server)
+            .field("turn_server", &self.turn_server)
+            .field("turn_username", &self.turn_username)
+            .field("turn_password", &self.turn_password.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 #[cfg(test)]
@@ -511,5 +522,20 @@ nick = "mybot"
         assert_eq!(config.ui.timestamp_format, "%H:%M");
         assert!(config.scripting.enabled);
         assert!(config.plugins.enabled);
+    }
+
+    #[test]
+    fn p2p_config_debug_redacts_password() {
+        let p2p = P2pConfig {
+            stun_server: Some("stun.example.com".into()),
+            turn_server: Some("turn.example.com".into()),
+            turn_username: Some("user".into()),
+            turn_password: Some("secret-turn-pass".into()),
+        };
+        let debug = format!("{p2p:?}");
+        assert!(debug.contains("REDACTED"), "password should be redacted");
+        assert!(!debug.contains("secret-turn-pass"), "password should not appear");
+        assert!(debug.contains("stun.example.com"), "stun server should appear");
+        assert!(debug.contains("user"), "username should appear");
     }
 }

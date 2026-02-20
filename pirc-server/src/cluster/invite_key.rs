@@ -176,12 +176,24 @@ impl InviteKeyStore {
     }
 
     /// Save all invite keys to `data_dir/invite_keys.json`.
+    ///
+    /// On Unix, the file permissions are set to 0o600 (owner-only) since
+    /// invite keys are secret tokens.
     pub fn save(&self, data_dir: &Path) -> io::Result<()> {
         let path = Self::file_path(data_dir);
         let records: Vec<&InviteKeyRecord> = self.keys.values().collect();
         let json = serde_json::to_string_pretty(&records)
             .map_err(io::Error::other)?;
-        std::fs::write(path, json)
+        std::fs::write(&path, json)?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o600);
+            std::fs::set_permissions(&path, perms)?;
+        }
+
+        Ok(())
     }
 
     /// Load invite keys from `data_dir/invite_keys.json`.
@@ -589,5 +601,20 @@ mod tests {
             InviteKeyStore::file_path(dir),
             std::path::PathBuf::from("/data/raft/invite_keys.json")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saved_file_has_restricted_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut store = InviteKeyStore::new();
+        store.create(ServerId::new(1), None, true);
+        store.save(dir.path()).expect("save");
+
+        let path = InviteKeyStore::file_path(dir.path());
+        let mode = std::fs::metadata(&path).expect("metadata").permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "invite keys file should be owner-only (0o600)");
     }
 }
