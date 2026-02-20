@@ -533,26 +533,13 @@ where
             return;
         }
 
-        // Collect entries before applying (to get full LogEntry with correct index/term).
-        let mut entries_to_send = Vec::new();
-        let mut idx = last_applied.as_u64() + 1;
-        while idx <= commit_index.as_u64() {
-            let log_idx = LogIndex::new(idx);
-            if let Some(entry) = self.node.log().get(log_idx) {
-                entries_to_send.push(entry.clone());
-            }
-            idx += 1;
-        }
-
-        // Now apply them via the state machine and update last_applied.
-        self.node.apply_committed(|cmd| {
+        // Apply entries via the state machine and collect them in a single pass.
+        let commit_tx = &self.commit_tx;
+        self.node.apply_committed_with_entries(|cmd| {
             self.state_machine.apply(cmd);
+        }, |entry| {
+            let _ = commit_tx.send(entry);
         });
-
-        // Send entries to the commit channel.
-        for entry in entries_to_send {
-            let _ = self.commit_tx.send(entry);
-        }
     }
 
     async fn maybe_snapshot(&mut self) {
@@ -568,11 +555,20 @@ where
     }
 
     fn publish_state(&self) {
-        let _ = self.state_tx.send((
+        let new_state = (
             self.node.state(),
             self.node.current_term(),
             self.node.current_leader(),
-        ));
+        );
+        // Only send if the state actually changed (watch::Sender skips if unchanged).
+        self.state_tx.send_if_modified(|current| {
+            if *current == new_state {
+                false
+            } else {
+                *current = new_state;
+                true
+            }
+        });
     }
 
     /// Initialize the health monitor when this node becomes leader.

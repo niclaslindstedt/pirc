@@ -60,7 +60,12 @@ where
             Term::default()
         };
 
-        let entries = self.log.entries_from(next_idx).to_vec();
+        let entries_slice = self.log.entries_from(next_idx);
+        let entries = if entries_slice.is_empty() {
+            Vec::new() // No allocation for empty Vec
+        } else {
+            entries_slice.to_vec()
+        };
 
         let ae = AppendEntries {
             term: self.current_term,
@@ -216,11 +221,15 @@ where
         let last_index = self.log.last_index();
         let current_commit = self.volatile.commit_index;
 
+        // Cache quorum size to avoid repeated computation per iteration.
+        let quorum = self.quorum_size();
+
         // Scan from last_index down to current_commit+1 to find the highest N
         // that a majority has replicated and that is from the current term.
         let mut new_commit = current_commit;
         let mut n = last_index.as_u64();
-        while n > current_commit.as_u64() {
+        let commit_floor = current_commit.as_u64();
+        while n > commit_floor {
             let idx = LogIndex::new(n);
 
             // Only commit entries from the current term.
@@ -231,13 +240,21 @@ where
                     for match_idx in leader.match_index.values() {
                         if *match_idx >= idx {
                             replication_count += 1;
+                            // Early exit once quorum is reached.
+                            if replication_count >= quorum {
+                                break;
+                            }
                         }
                     }
 
-                    if replication_count >= self.quorum_size() {
+                    if replication_count >= quorum {
                         new_commit = idx;
                         break; // Found the highest committed index.
                     }
+                } else if entry_term < self.current_term {
+                    // Earlier-term entries can't be directly committed,
+                    // and all entries below have equal or lower terms.
+                    break;
                 }
             }
 
@@ -284,6 +301,32 @@ where
 
         self.volatile.last_applied = LogIndex::new(last);
         applied
+    }
+
+    /// Apply committed entries and emit full `LogEntry` values in a single pass.
+    ///
+    /// Combines the apply and entry-collection steps to avoid iterating the
+    /// log range twice. The `apply_fn` receives the command for state machine
+    /// application, while `emit_fn` receives the cloned `LogEntry` for
+    /// forwarding to the commit channel.
+    pub fn apply_committed_with_entries<F, E>(&mut self, mut apply_fn: F, mut emit_fn: E)
+    where
+        F: FnMut(&T),
+        E: FnMut(super::types::LogEntry<T>),
+    {
+        let commit = self.volatile.commit_index.as_u64();
+        let mut last = self.volatile.last_applied.as_u64();
+
+        while last < commit {
+            last += 1;
+            let idx = LogIndex::new(last);
+            if let Some(entry) = self.log.get(idx) {
+                apply_fn(&entry.command);
+                emit_fn(entry.clone());
+            }
+        }
+
+        self.volatile.last_applied = LogIndex::new(last);
     }
 
     /// Append a new command to the leader's log and start replication.

@@ -38,6 +38,8 @@ pub struct RaftNode<T: Send + Sync, S: RaftStorage<T>> {
     pub(crate) pending_snapshot: Option<Vec<u8>>,
     /// Cluster membership state (tracks voting members and pending changes).
     pub(crate) membership: ClusterMembership,
+    /// Cached election timeout (recomputed only when membership changes).
+    pub(crate) cached_election_timeout: std::time::Duration,
 }
 
 impl<T, S> RaftNode<T, S>
@@ -83,6 +85,7 @@ where
 
         let membership = ClusterMembership::new(config.node_id, &config.peers);
         let cluster_size = membership.member_count();
+        let cached_election_timeout = compute_election_timeout(&config);
         let node = Self {
             config,
             state: RaftState::Follower,
@@ -98,6 +101,7 @@ where
             last_snapshot,
             pending_snapshot: None,
             membership,
+            cached_election_timeout,
         };
 
         Ok((node, rx))
@@ -448,12 +452,17 @@ where
 
     // ---- Election timeout calculation ----
 
-    /// Compute the election timeout for this node based on its priority.
+    /// Return the cached election timeout for this node.
     ///
     /// Higher-priority nodes (earlier in the peer list) get shorter timeouts,
     /// implementing deterministic pre-planned succession.
     pub fn election_timeout(&self) -> std::time::Duration {
-        compute_election_timeout(&self.config)
+        self.cached_election_timeout
+    }
+
+    /// Recompute and cache the election timeout (call after membership changes).
+    pub(crate) fn recompute_election_timeout(&mut self) {
+        self.cached_election_timeout = compute_election_timeout(&self.config);
     }
 
     // ---- Snapshot operations ----
@@ -710,6 +719,7 @@ where
 
         // Apply the membership change immediately (Raft single-server change rule).
         self.membership.begin_change(index, change);
+        self.recompute_election_timeout();
 
         // Update leader state for the new member if adding.
         if let Some(new_node) = added_node {
@@ -763,6 +773,7 @@ where
                     MembershipChange::RemoveServer(id) if *id == self.config.node_id
                 );
                 self.membership.commit_change();
+                self.recompute_election_timeout();
 
                 // If removing a server, clean up leader state.
                 if let Some(ref mut leader) = self.leader_state {

@@ -59,8 +59,8 @@ impl LeaderState {
     /// and `match_index` is set to 0.
     pub fn new(peers: &[NodeId], last_log_index: LogIndex) -> Self {
         let next = last_log_index + 1;
-        let mut next_index = HashMap::new();
-        let mut match_index = HashMap::new();
+        let mut next_index = HashMap::with_capacity(peers.len());
+        let mut match_index = HashMap::with_capacity(peers.len());
         for &peer in peers {
             next_index.insert(peer, next);
             match_index.insert(peer, LogIndex::new(0));

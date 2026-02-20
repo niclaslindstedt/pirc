@@ -60,16 +60,16 @@ pub fn compute_election_timeout(config: &RaftConfig) -> Duration {
     let max = config.election_timeout_max;
     let range = max.saturating_sub(min);
 
-    let mut all_nodes: Vec<NodeId> = config.peers.clone();
-    all_nodes.push(config.node_id);
-    all_nodes.sort_by_key(|n| n.as_u64());
+    // Count how many peers have a lower ID than us (our position in sorted order).
+    let our_id = config.node_id.as_u64();
+    let mut position: usize = 0;
+    for peer in &config.peers {
+        if peer.as_u64() < our_id {
+            position += 1;
+        }
+    }
 
-    let position = all_nodes
-        .iter()
-        .position(|&n| n == config.node_id)
-        .unwrap_or(0);
-
-    let total = all_nodes.len();
+    let total = config.peers.len() + 1; // peers + self
     if total <= 1 {
         return min;
     }
