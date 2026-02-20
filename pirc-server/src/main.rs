@@ -202,6 +202,15 @@ async fn main() {
         state._task_handles.push(migration_handle);
         info!("migration service started");
 
+        // Spawn periodic failover queue expiry to reclaim memory from users
+        // who never reconnect. Runs every 10 seconds.
+        let expiry_handle = pirc_server::failover_queue::spawn_failover_expiry_task(
+            Arc::clone(&failover_queue),
+            Duration::from_secs(10),
+        );
+        state._task_handles.push(expiry_handle);
+        info!("failover queue expiry task started");
+
         // Extract the Raft shutdown sender for the graceful shutdown handler.
         // The GracefulShutdown will signal Raft to stop after pre-migration.
         let raft_shutdown = std::mem::replace(

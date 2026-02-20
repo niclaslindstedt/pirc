@@ -896,11 +896,27 @@ impl App {
         }
     }
 
-    /// Schedule a reconnection attempt after an exponential backoff delay.
+    /// Schedule a reconnection attempt after an exponential backoff delay
+    /// with jitter to prevent thundering herd when many clients disconnect
+    /// simultaneously (e.g. server failover).
     fn schedule_reconnect(&mut self, attempt: u32) {
         let base = self.config.server.reconnect_delay_secs as f64;
         let delay_secs = base * BACKOFF_FACTOR.powi((attempt as i32) - 1);
-        let delay = Duration::from_secs_f64(delay_secs).min(MAX_RECONNECT_DELAY);
+        let capped = Duration::from_secs_f64(delay_secs).min(MAX_RECONNECT_DELAY);
+
+        // Add ±20% jitter using low-order time bits as a simple PRNG source
+        // to spread reconnection attempts across the window.
+        let jitter_frac = {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos();
+            #[allow(clippy::cast_precision_loss)]
+            let frac = (nanos % 1000) as f64 / 1000.0; // 0.0..1.0
+            0.8 + frac * 0.4 // 0.8..1.2 (±20%)
+        };
+        let delay = Duration::from_secs_f64(capped.as_secs_f64() * jitter_frac)
+            .min(MAX_RECONNECT_DELAY);
 
         self.reconnect_attempt = attempt;
         let _ = self
@@ -1001,17 +1017,25 @@ impl App {
     }
 
     /// Rejoin channels that were open before the disconnect.
+    /// Rejoin previously open channels after reconnection.
+    ///
+    /// Uses IRC's comma-separated JOIN syntax to batch channels into fewer
+    /// messages, reducing round-trips during failover reconnection.
     async fn rejoin_channels(&mut self) {
         let channels = std::mem::take(&mut self.channels_to_rejoin);
         if channels.is_empty() {
             return;
         }
 
-        for channel in &channels {
-            let msg = Message::new(Command::Join, vec![channel.clone()]);
+        // Batch channels into comma-separated JOIN commands.
+        // IRC servers typically accept long parameter lists, but we batch in
+        // groups of 10 to stay well under any line-length limits (~512 bytes).
+        for chunk in channels.chunks(10) {
+            let joined = chunk.join(",");
+            let msg = Message::new(Command::Join, vec![joined]);
             if let Some(ref mut conn) = self.connection {
                 if let Err(e) = conn.send(msg).await {
-                    warn!(%e, channel, "failed to rejoin channel");
+                    warn!(%e, channels = ?chunk, "failed to rejoin channels");
                 }
             }
         }

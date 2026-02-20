@@ -129,6 +129,29 @@ impl FailoverMessageQueue {
 /// Shared handle to the failover message queue.
 pub type SharedFailoverQueue = Arc<RwLock<FailoverMessageQueue>>;
 
+/// Spawn a background task that periodically expires stale messages from the
+/// failover queue, preventing memory accumulation from users who never
+/// reconnect.
+///
+/// Runs every `interval` and calls [`FailoverMessageQueue::expire_all`].
+pub fn spawn_failover_expiry_task(
+    queue: SharedFailoverQueue,
+    interval: Duration,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(interval);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // Skip the first immediate tick.
+        ticker.tick().await;
+
+        loop {
+            ticker.tick().await;
+            let mut q = queue.write().await;
+            q.expire_all();
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -78,10 +78,15 @@ struct PeerState {
 /// be driven by the Raft driver: the driver notifies the monitor
 /// when a peer responds, and periodically asks it to re-evaluate
 /// peer statuses.
+///
+/// Tracks whether any status changed since the last publish to avoid
+/// allocating a new `HashMap` on every heartbeat tick.
 pub struct NodeHealthMonitor {
     config: HealthConfig,
     peers: HashMap<NodeId, PeerState>,
     event_tx: mpsc::UnboundedSender<HealthEvent>,
+    /// Set to `true` whenever a peer status changes; cleared after publishing.
+    dirty: bool,
 }
 
 impl NodeHealthMonitor {
@@ -113,6 +118,7 @@ impl NodeHealthMonitor {
                 config,
                 peers,
                 event_tx,
+                dirty: false,
             },
             event_rx,
         )
@@ -129,6 +135,7 @@ impl NodeHealthMonitor {
             peer.status = PeerStatus::Online;
 
             if old_status != PeerStatus::Online {
+                self.dirty = true;
                 let _ = self.event_tx.send(HealthEvent::NodeUp(peer_id));
             }
         }
@@ -154,6 +161,7 @@ impl NodeHealthMonitor {
 
             if new_status != old_status {
                 peer.status = new_status;
+                self.dirty = true;
                 let event = match new_status {
                     PeerStatus::Down => HealthEvent::NodeDown(peer_id),
                     PeerStatus::Suspected => HealthEvent::NodeSuspected(peer_id),
@@ -162,6 +170,17 @@ impl NodeHealthMonitor {
                 let _ = self.event_tx.send(event);
             }
         }
+    }
+
+    /// Returns `true` if any peer status has changed since the last call to
+    /// [`clear_dirty`].
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    /// Clear the dirty flag after publishing peer statuses.
+    pub fn clear_dirty(&mut self) {
+        self.dirty = false;
     }
 
     /// Get the current status of all tracked peers.

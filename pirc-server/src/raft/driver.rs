@@ -349,7 +349,10 @@ where
         // Evaluate peer health on each heartbeat tick.
         if let Some(ref mut monitor) = self.health_monitor {
             monitor.evaluate();
-            self.publish_peer_statuses();
+            if monitor.is_dirty() {
+                let _ = self.peer_status_tx.send(monitor.peer_statuses());
+                monitor.clear_dirty();
+            }
         }
     }
 
@@ -409,7 +412,6 @@ where
                 }
             }
             RaftMessage::AppendEntriesResponse(resp) => {
-                let success = resp.success;
                 if let Err(e) = self.node.handle_append_entries_response(from, resp).await {
                     warn!(
                         node = %self.node.node_id(),
@@ -418,11 +420,10 @@ where
                         "error handling AppendEntriesResponse"
                     );
                 }
-                // Record the response in the health monitor (success means the peer is alive).
-                if success {
-                    if let Some(ref mut monitor) = self.health_monitor {
-                        monitor.record_response(from);
-                    }
+                // Any response (including success=false for log mismatch) proves
+                // the peer is alive and should reset its health timer.
+                if let Some(ref mut monitor) = self.health_monitor {
+                    monitor.record_response(from);
                 }
             }
             RaftMessage::InstallSnapshot(req) => self.handle_install_snapshot(from, req).await,
@@ -603,13 +604,6 @@ where
                 node = %self.node.node_id(),
                 "health monitor stopped"
             );
-        }
-    }
-
-    /// Publish current peer statuses from the health monitor.
-    fn publish_peer_statuses(&self) {
-        if let Some(ref monitor) = self.health_monitor {
-            let _ = self.peer_status_tx.send(monitor.peer_statuses());
         }
     }
 

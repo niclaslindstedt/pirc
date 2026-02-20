@@ -13,27 +13,58 @@ use crate::raft::{ClusterCommand, RaftHandle};
 /// Updated by the commit consumer as it processes committed Raft entries.
 /// Read by the migration service when a node goes down to determine which
 /// users need migration.
+///
+/// Maintains a reverse index (`node_to_users`) for O(1) lookup of all users
+/// on a given node, avoiding a full scan of the user map during migration.
 pub struct UserNodeIndex {
     /// Maps lowercase nickname to their home node.
     user_to_node: HashMap<String, NodeId>,
+    /// Reverse index: maps node ID to set of lowercase nicknames homed there.
+    node_to_users: HashMap<NodeId, HashSet<String>>,
 }
 
 impl UserNodeIndex {
     pub fn new() -> Self {
         Self {
             user_to_node: HashMap::new(),
+            node_to_users: HashMap::new(),
         }
     }
 
     /// Record a user registration with their home node.
     pub fn set_home_node(&mut self, nickname: &str, node_id: NodeId) {
-        self.user_to_node
-            .insert(nickname.to_ascii_lowercase(), node_id);
+        let key = nickname.to_ascii_lowercase();
+
+        // Remove from old node's reverse index if re-homing.
+        if let Some(&old_node) = self.user_to_node.get(&key) {
+            if old_node != node_id {
+                if let Some(users) = self.node_to_users.get_mut(&old_node) {
+                    users.remove(&key);
+                    if users.is_empty() {
+                        self.node_to_users.remove(&old_node);
+                    }
+                }
+            }
+        }
+
+        self.user_to_node.insert(key.clone(), node_id);
+        self.node_to_users
+            .entry(node_id)
+            .or_default()
+            .insert(key);
     }
 
     /// Remove a user (on quit or kill).
     pub fn remove_user(&mut self, nickname: &str) {
-        self.user_to_node.remove(&nickname.to_ascii_lowercase());
+        let key = nickname.to_ascii_lowercase();
+        if let Some(node_id) = self.user_to_node.remove(&key) {
+            if let Some(users) = self.node_to_users.get_mut(&node_id) {
+                users.remove(&key);
+                if users.is_empty() {
+                    self.node_to_users.remove(&node_id);
+                }
+            }
+        }
     }
 
     /// Update a user's nickname mapping.
@@ -41,22 +72,27 @@ impl UserNodeIndex {
         let old_key = old_nick.to_ascii_lowercase();
         let new_key = new_nick.to_ascii_lowercase();
         if let Some(node) = self.user_to_node.remove(&old_key) {
-            self.user_to_node.insert(new_key, node);
+            self.user_to_node.insert(new_key.clone(), node);
+            if let Some(users) = self.node_to_users.get_mut(&node) {
+                users.remove(&old_key);
+                users.insert(new_key);
+            }
         }
     }
 
     /// Get all nicknames homed to a specific node.
+    ///
+    /// Uses the reverse index for O(1) lookup instead of scanning all users.
     pub fn users_on_node(&self, node_id: NodeId) -> Vec<String> {
-        self.user_to_node
-            .iter()
-            .filter(|(_, &nid)| nid == node_id)
-            .map(|(nick, _)| nick.clone())
-            .collect()
+        self.node_to_users
+            .get(&node_id)
+            .map(|users| users.iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Get all known node IDs that have at least one user.
     pub fn active_nodes(&self) -> HashSet<NodeId> {
-        self.user_to_node.values().copied().collect()
+        self.node_to_users.keys().copied().collect()
     }
 }
 
@@ -136,14 +172,27 @@ pub fn spawn_migration_service(
                     );
 
                     // Distribute users round-robin across surviving nodes.
-                    for (i, nickname) in affected_users.iter().enumerate() {
-                        let target = surviving[i % surviving.len()];
-                        let cmd = ClusterCommand::UserMigrated {
-                            nickname: nickname.clone(),
-                            from_node: failed_node,
-                            to_node: target,
-                        };
+                    // Build all proposals first, then submit them to minimise
+                    // the time between individual propose() calls.
+                    let proposals: Vec<ClusterCommand> = affected_users
+                        .iter()
+                        .enumerate()
+                        .map(|(i, nickname)| {
+                            let target = surviving[i % surviving.len()];
+                            ClusterCommand::UserMigrated {
+                                nickname: nickname.clone(),
+                                from_node: failed_node,
+                                to_node: target,
+                            }
+                        })
+                        .collect();
 
+                    let mut proposed = 0usize;
+                    for cmd in proposals {
+                        let nickname = match &cmd {
+                            ClusterCommand::UserMigrated { nickname, .. } => nickname.clone(),
+                            _ => String::new(),
+                        };
                         if let Err(e) = raft_handle.propose(cmd) {
                             warn!(
                                 nickname,
@@ -151,10 +200,10 @@ pub fn spawn_migration_service(
                                 "failed to propose user migration"
                             );
                         } else {
+                            proposed += 1;
                             debug!(
                                 nickname,
                                 from = failed_node.as_u64(),
-                                to = target.as_u64(),
                                 "proposed user migration"
                             );
                         }
@@ -162,7 +211,8 @@ pub fn spawn_migration_service(
 
                     info!(
                         failed_node = failed_node.as_u64(),
-                        migrated = affected_users.len(),
+                        proposed,
+                        total = affected_users.len(),
                         "user migration proposals submitted"
                     );
                 }

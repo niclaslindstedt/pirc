@@ -227,6 +227,11 @@ impl PeerUpdater {
 /// Spawns the outbound transport task that reads messages from the Raft driver
 /// and sends them to the appropriate peer over TCP.
 ///
+/// Drains all pending messages from the channel before acquiring the
+/// connection lock, batching multiple sends under a single lock acquisition
+/// to reduce contention during high-throughput periods (e.g. replication
+/// catch-up after failover).
+///
 /// Returns a [`tokio::task::JoinHandle`] for the spawned task.
 pub fn spawn_outbound_transport<T>(
     mut outbound_rx: mpsc::UnboundedReceiver<(NodeId, RaftMessage<T>)>,
@@ -243,18 +248,38 @@ where
 {
     tokio::spawn(async move {
         info!("raft outbound transport started");
+
+        // Reusable buffer for batching serialized outbound messages.
+        let mut batch: Vec<(NodeId, pirc_protocol::Message)> = Vec::new();
+
         while let Some((target, raft_msg)) = outbound_rx.recv().await {
-            let proto_msg = match raft_msg.to_protocol_message() {
-                Ok(m) => m,
+            // Serialize the first message.
+            match raft_msg.to_protocol_message() {
+                Ok(m) => batch.push((target, m)),
                 Err(e) => {
                     error!(error = %e, "failed to serialize raft message");
-                    continue;
                 }
-            };
+            }
 
-            let mut conns = peer_connections.lock().await;
-            if let Err(e) = conns.send_to(target, proto_msg).await {
-                debug!(%target, error = %e, "outbound raft message dropped");
+            // Drain any additional pending messages without waiting, serializing
+            // them outside the lock.
+            while let Ok((target, raft_msg)) = outbound_rx.try_recv() {
+                match raft_msg.to_protocol_message() {
+                    Ok(m) => batch.push((target, m)),
+                    Err(e) => {
+                        error!(error = %e, "failed to serialize raft message");
+                    }
+                }
+            }
+
+            // Send the entire batch under a single lock acquisition.
+            if !batch.is_empty() {
+                let mut conns = peer_connections.lock().await;
+                for (target, proto_msg) in batch.drain(..) {
+                    if let Err(e) = conns.send_to(target, proto_msg).await {
+                        debug!(%target, error = %e, "outbound raft message dropped");
+                    }
+                }
             }
         }
         info!("raft outbound transport stopped");
