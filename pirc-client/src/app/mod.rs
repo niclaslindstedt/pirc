@@ -10,7 +10,7 @@ use pirc_plugin::manager::PluginManager;
 use pirc_protocol::{Command, Message};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::encryption::EncryptionManager;
 use crate::group_chat::GroupChatManager;
@@ -83,11 +83,16 @@ pub struct App {
     group_chat: GroupChatManager,
     /// Plugin manager for native plugins.
     plugin_manager: PluginManager,
+    /// Timestamp when the process started (for startup timing metrics).
+    startup_start: std::time::Instant,
 }
 
 impl App {
     /// Create a new `App` from the given configuration.
     pub fn new(config: ClientConfig) -> Self {
+        let startup_start = std::time::Instant::now();
+        let phase_start = std::time::Instant::now();
+
         let (width, height) = terminal_size().map_or((80, 24), |s| (s.cols, s.rows));
 
         let scrollback = config.ui.scrollback_lines as usize;
@@ -98,8 +103,12 @@ impl App {
 
         let (shutdown_controller, shutdown_signal) = ShutdownSignal::new();
 
+        let tui_elapsed = phase_start.elapsed();
+        debug!(elapsed_us = tui_elapsed.as_micros(), "startup: TUI state initialized");
+
         // Load or create encrypted identity keys from disk.
         // Uses a machine-specific passphrase derived from the nick and hostname.
+        let crypto_start = std::time::Instant::now();
         let encryption = match keys_dir() {
             Some(dir) => {
                 let passphrase = derive_machine_passphrase(connection_mgr.nick());
@@ -110,8 +119,13 @@ impl App {
                 EncryptionManager::new()
             }
         };
+        let crypto_elapsed = crypto_start.elapsed();
+        debug!(elapsed_us = crypto_elapsed.as_micros(), "startup: encryption keys loaded");
 
         let p2p = P2pManager::new(&config.p2p);
+
+        let total_new = phase_start.elapsed();
+        debug!(elapsed_us = total_new.as_micros(), "startup: App::new() complete");
 
         Self {
             config,
@@ -132,6 +146,7 @@ impl App {
             p2p,
             group_chat: GroupChatManager::new(),
             plugin_manager: PluginManager::new(),
+            startup_start,
         }
     }
 
@@ -141,6 +156,8 @@ impl App {
     /// the server connection, and enters the `tokio::select!` loop that handles
     /// stdin input, network messages, and shutdown concurrently.
     pub async fn run(mut self) -> io::Result<()> {
+        let run_start = std::time::Instant::now();
+
         // Enter raw mode (alternate screen, hide cursor)
         let _guard = RawModeGuard::enable()?;
 
@@ -178,13 +195,14 @@ impl App {
             line_type: LineType::System,
         });
 
-        // Initialize plugins
-        self.init_plugins();
-
-        // Initial render
+        // Render TUI immediately so the user sees the interface as fast as
+        // possible. Plugin loading and network connection happen after.
         self.render(&mut renderer)?;
 
-        // Spawn stdin reader task
+        let tui_ready = self.startup_start.elapsed();
+        debug!(elapsed_us = tui_ready.as_micros(), "startup: TUI visible");
+
+        // Spawn stdin reader task (non-blocking, starts accepting input immediately)
         let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<KeyEvent>();
         std::thread::spawn(move || {
             let mut reader = InputReader::from_stdin();
@@ -200,9 +218,29 @@ impl App {
             }
         });
 
-        // Initiate connection
+        // Initialize plugins (after initial render so TUI is already visible)
+        let plugin_start = std::time::Instant::now();
+        self.init_plugins();
+        let plugin_elapsed = plugin_start.elapsed();
+        debug!(elapsed_us = plugin_elapsed.as_micros(), "startup: plugins initialized");
+
+        // Initiate connection (DNS resolution + TCP connect)
+        let connect_start = std::time::Instant::now();
         self.initiate_connection().await;
+        let connect_elapsed = connect_start.elapsed();
+        debug!(elapsed_us = connect_elapsed.as_micros(), "startup: connection initiated");
+
         self.render(&mut renderer)?;
+
+        // Log total startup time (process start to event loop ready)
+        let total_startup = self.startup_start.elapsed();
+        let run_elapsed = run_start.elapsed();
+        info!(
+            total_ms = total_startup.as_millis(),
+            run_ms = run_elapsed.as_millis(),
+            tui_ready_ms = tui_ready.as_millis(),
+            "startup complete"
+        );
 
         // Keepalive timer
         let mut keepalive_interval = tokio::time::interval(KEEPALIVE_INTERVAL);
