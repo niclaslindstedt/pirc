@@ -253,8 +253,13 @@ fn parse_params(input: &str) -> Result<Vec<String>, ProtocolError> {
         rest = remainder;
 
         if params.len() == MAX_PARAMS - 1 && !rest.is_empty() {
-            // The 15th (last) param consumes the rest, even without ':'
-            params.push(rest.to_owned());
+            // The 15th (last) param consumes the rest, even without ':'.
+            // Strip leading ':' to stay consistent with the trailing handler.
+            if rest.as_bytes()[0] == b':' {
+                params.push(rest[1..].to_owned());
+            } else {
+                params.push(rest.to_owned());
+            }
             break;
         }
     }

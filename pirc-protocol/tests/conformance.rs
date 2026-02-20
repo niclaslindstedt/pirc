@@ -947,3 +947,44 @@ fn display_idempotent_for_all_standard_commands() {
         assert_eq!(wire1, wire2, "display not idempotent for: {input}");
     }
 }
+
+// ============================================================================
+// 17. Regression tests from fuzz testing
+// ============================================================================
+
+/// Regression: MAX_PARAMS boundary with trailing-colon parameter.
+///
+/// When 14 normal params are followed by a `:trailing` param, the 15th-param
+/// overflow logic must strip the leading `:` — otherwise the round-trip
+/// produces `::trailing` on re-serialization.
+#[test]
+fn fuzz_regression_max_params_trailing_roundtrip() {
+    let input = "PRIVMSG #chan p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 :trailing";
+    let msg = parse(input).unwrap();
+    assert_eq!(msg.params.len(), 15);
+    assert_eq!(msg.params[0], "#chan");
+    assert_eq!(msg.params[14], "trailing");
+
+    // Round-trip must be stable
+    assert_roundtrip(&format!("{input}\r\n"));
+}
+
+/// Verify the 15th param correctly strips `:` when it's a trailing param
+/// with spaces.
+#[test]
+fn fuzz_regression_max_params_trailing_with_spaces() {
+    let input = "MODE p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 :hello world";
+    let msg = parse(input).unwrap();
+    assert_eq!(msg.params.len(), 15);
+    assert_eq!(msg.params[14], "hello world");
+    assert_roundtrip(&format!("{input}\r\n"));
+}
+
+/// Verify the 15th param works correctly WITHOUT a trailing `:`.
+#[test]
+fn fuzz_regression_max_params_no_trailing_colon() {
+    let input = "MODE p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 overflow1 overflow2";
+    let msg = parse(input).unwrap();
+    assert_eq!(msg.params.len(), 15);
+    assert_eq!(msg.params[14], "overflow1 overflow2");
+}

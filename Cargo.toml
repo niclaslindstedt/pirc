@@ -14,6 +14,9 @@ members = [
     "examples/plugins/logger-plugin",
     "tests",
 ]
+exclude = [
+    "pirc-protocol/fuzz",
+]
 resolver = "2"
 
 [workspace.package]
