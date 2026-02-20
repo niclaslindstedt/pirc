@@ -730,8 +730,10 @@ dependencies = [
  "pirc-network",
  "pirc-p2p",
  "pirc-protocol",
+ "pirc-scripting",
  "pirc-server",
  "serde",
+ "tempfile",
  "tokio",
 ]
 
