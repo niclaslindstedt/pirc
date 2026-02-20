@@ -660,3 +660,56 @@ fn dh_ratchet_replaces_key_pair() {
         "DH key pair must be replaced after ratchet steps"
     );
 }
+
+// ── Security audit tests ──────────────────────────────────────
+
+#[test]
+fn tampered_encrypted_header_fails_body_decryption() {
+    // Verifies that the encrypted header is bound as AAD to the body
+    // ciphertext. Tampering with the encrypted header must cause
+    // body decryption to fail (AEAD authentication failure).
+    let (mut alice, mut bob) = make_session_pair();
+
+    let msg = alice.encrypt(b"secret message").expect("encrypt");
+
+    // Tamper with one byte of the encrypted header
+    let mut tampered = msg.clone();
+    if let Some(byte) = tampered.encrypted_header.first_mut() {
+        *byte ^= 0xFF;
+    }
+
+    // Decryption must fail — either header decryption fails (because
+    // the header ciphertext is invalid) or body decryption fails
+    // (because the AAD no longer matches).
+    let result = bob.decrypt(&tampered);
+    assert!(result.is_err(), "tampered encrypted header must cause decryption failure");
+}
+
+#[test]
+fn swapped_body_between_messages_fails() {
+    // Verifies that swapping the body ciphertext between two messages
+    // (while keeping the original encrypted headers) fails decryption,
+    // because the body is bound to its specific encrypted header via AAD.
+    let (mut alice, mut bob) = make_session_pair();
+
+    let msg1 = alice.encrypt(b"message one").expect("encrypt 1");
+    let msg2 = alice.encrypt(b"message two").expect("encrypt 2");
+
+    // Swap the body ciphertext and nonce from msg2 into msg1's header frame
+    let franken = crate::message::EncryptedMessage {
+        encrypted_header: msg1.encrypted_header.clone(),
+        header_nonce: msg1.header_nonce,
+        ciphertext: msg2.ciphertext.clone(),
+        body_nonce: msg2.body_nonce,
+    };
+
+    // Bob receives msg2 normally first so the symmetric ratchet advances
+    // past message_number=1. Then the franken-message re-uses msg1's
+    // header (message_number=0) but msg2's body — the AAD mismatch
+    // should cause AEAD authentication failure.
+    let dec2 = bob.decrypt(&msg2).expect("decrypt msg2");
+    assert_eq!(dec2, b"message two");
+
+    let result = bob.decrypt(&franken);
+    assert!(result.is_err(), "swapped body must fail AAD check");
+}

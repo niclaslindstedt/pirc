@@ -288,8 +288,12 @@ impl TripleRatchetSession {
         let (encrypted_header, header_nonce) =
             header::encrypt_header(&self.sending_header_key, &header)?;
 
+        // Bind the encrypted header as AAD to the body encryption.
+        // This prevents an attacker from substituting the body of one
+        // message into another message's encrypted header frame.
         let body_nonce = aead::generate_nonce();
-        let ciphertext = aead::encrypt(message_key.as_bytes(), &body_nonce, plaintext, b"")?;
+        let ciphertext =
+            aead::encrypt(message_key.as_bytes(), &body_nonce, plaintext, &encrypted_header)?;
         // message_key is dropped here — zeroized via ZeroizeOnDrop
 
         self.total_messages_sent += 1;
@@ -388,11 +392,12 @@ impl TripleRatchetSession {
             self.store_skipped_key(&header.dh_public, num, mk);
         }
 
+        // Use the encrypted header as AAD (must match what encrypt() used).
         let plaintext = aead::decrypt(
             message_key.as_bytes(),
             &message.body_nonce,
             &message.ciphertext,
-            b"",
+            &message.encrypted_header,
         )?;
         // message_key is dropped here — zeroized via ZeroizeOnDrop
 
@@ -461,7 +466,7 @@ impl TripleRatchetSession {
                 skipped.key.as_bytes(),
                 &message.body_nonce,
                 &message.ciphertext,
-                b"",
+                &message.encrypted_header,
             )?;
             // skipped.key is dropped here — zeroized via ZeroizeOnDrop
             self.total_messages_received += 1;

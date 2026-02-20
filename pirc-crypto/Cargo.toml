@@ -36,6 +36,9 @@ rand = "0.8"
 # Secure memory zeroing
 zeroize = { version = "1", features = ["derive"] }
 
+# Constant-time comparisons (already a transitive dep via x25519-dalek)
+subtle = "2"
+
 # Passphrase-based key derivation (Argon2id)
 argon2 = "0.5"
 

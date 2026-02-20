@@ -5,6 +5,7 @@
 //! key exchange component of the DH ratchet.
 
 use rand::rngs::OsRng;
+use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::{CryptoError, Result};
@@ -41,7 +42,7 @@ impl PublicKey {
 
 impl PartialEq for PublicKey {
     fn eq(&self, other: &Self) -> bool {
-        constant_time_eq(self.as_bytes(), other.as_bytes())
+        self.as_bytes().ct_eq(other.as_bytes()).into()
     }
 }
 
@@ -173,10 +174,14 @@ impl SharedSecret {
 /// Returns [`CryptoError::KeyExchange`] if the resulting shared secret is
 /// all zeros (indicating a low-order public key contribution).
 pub fn diffie_hellman(our_secret: &SecretKey, their_public: &PublicKey) -> Result<SharedSecret> {
-    let dalek_secret = x25519_dalek::StaticSecret::from(*our_secret.as_bytes());
+    // Copy secret bytes into a Zeroizing wrapper so the intermediate
+    // stack copy is erased even if StaticSecret::from() copies again.
+    let mut secret_copy = *our_secret.as_bytes();
+    let dalek_secret = x25519_dalek::StaticSecret::from(secret_copy);
+    secret_copy.zeroize();
     let raw = dalek_secret.diffie_hellman(&their_public.0);
     let bytes: [u8; KEY_LEN] = raw.to_bytes();
-    if bytes.iter().all(|&b| b == 0) {
+    if bytes.ct_eq(&[0u8; KEY_LEN]).into() {
         return Err(CryptoError::KeyExchange(
             "DH produced all-zero shared secret (low-order point)".into(),
         ));
@@ -195,24 +200,12 @@ pub fn diffie_hellman(our_secret: &SecretKey, their_public: &PublicKey) -> Resul
 pub fn diffie_hellman_keypair(our_keys: &KeyPair, their_public: &PublicKey) -> Result<SharedSecret> {
     let raw = our_keys.secret.diffie_hellman(&their_public.0);
     let bytes: [u8; KEY_LEN] = raw.to_bytes();
-    if bytes.iter().all(|&b| b == 0) {
+    if bytes.ct_eq(&[0u8; KEY_LEN]).into() {
         return Err(CryptoError::KeyExchange(
             "DH produced all-zero shared secret (low-order point)".into(),
         ));
     }
     Ok(SharedSecret { bytes })
-}
-
-/// Constant-time byte comparison to prevent timing attacks on public key equality.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
 }
 
 #[cfg(test)]

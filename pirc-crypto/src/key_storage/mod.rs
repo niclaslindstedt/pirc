@@ -379,7 +379,7 @@ impl KeyStore {
     pub fn open(encrypted: &EncryptedKeyStore, passphrase: &[u8]) -> Result<Self> {
         let storage_key = StorageKey::derive(passphrase, &encrypted.salt)?;
 
-        let plaintext = aead::decrypt(
+        let mut plaintext = aead::decrypt(
             storage_key.as_bytes(),
             &encrypted.nonce,
             &encrypted.ciphertext,
@@ -387,9 +387,12 @@ impl KeyStore {
         )
         .map_err(|_| CryptoError::Aead("wrong passphrase or corrupted data".into()))?;
 
-        let bundle = KeyBundle::deserialize(&plaintext)?;
+        let bundle = KeyBundle::deserialize(&plaintext);
 
-        Ok(Self { bundle })
+        // Zeroize decrypted plaintext containing secret key material
+        plaintext.zeroize();
+
+        Ok(Self { bundle: bundle? })
     }
 
     /// Encrypt the key store and return the encrypted container.
@@ -515,20 +518,35 @@ impl KeyStore {
         kem_pre_key: &KemPreKey,
         one_time_pre_keys: &[OneTimePreKey],
     ) -> Result<Self> {
-        // Round-trip the identity key through bytes to get an owned copy
-        let identity_bytes = identity.to_bytes();
-        let identity = IdentityKeyPair::from_bytes(&identity_bytes)?;
+        // Round-trip the identity key through bytes to get an owned copy.
+        // Zeroize intermediate buffer since it contains secret key material.
+        let mut identity_bytes = identity.to_bytes();
+        let identity = IdentityKeyPair::from_bytes(&identity_bytes);
+        identity_bytes.zeroize();
+        let identity = identity?;
 
-        // Clone signed pre-key via serialization roundtrip
-        let spk = SignedPreKey::from_bytes(&signed_pre_key.to_bytes())?;
+        // Clone signed pre-key via serialization roundtrip.
+        // Zeroize intermediate buffer since it contains the X25519 secret key.
+        let mut spk_bytes = signed_pre_key.to_bytes();
+        let spk = SignedPreKey::from_bytes(&spk_bytes);
+        spk_bytes.zeroize();
+        let spk = spk?;
 
-        // Clone KEM pre-key via serialization roundtrip
-        let kpk = KemPreKey::from_bytes(&kem_pre_key.to_bytes())?;
+        // Clone KEM pre-key via serialization roundtrip.
+        // Zeroize intermediate buffer since it contains the KEM decapsulation key.
+        let mut kpk_bytes = kem_pre_key.to_bytes();
+        let kpk = KemPreKey::from_bytes(&kpk_bytes);
+        kpk_bytes.zeroize();
+        let kpk = kpk?;
 
-        // Clone one-time pre-keys via serialization roundtrip
+        // Clone one-time pre-keys via serialization roundtrip.
+        // Zeroize each intermediate buffer.
         let mut otpks = Vec::with_capacity(one_time_pre_keys.len());
         for otpk in one_time_pre_keys {
-            otpks.push(OneTimePreKey::from_bytes(&otpk.to_bytes())?);
+            let mut otpk_bytes = otpk.to_bytes();
+            let parsed = OneTimePreKey::from_bytes(&otpk_bytes);
+            otpk_bytes.zeroize();
+            otpks.push(parsed?);
         }
 
         // Determine the next pre-key ID from existing keys
@@ -851,7 +869,7 @@ mod tests {
 
     #[test]
     fn from_parts_into_parts_roundtrip() {
-        let store = KeyStore::create().expect("create failed");
+        let _store = KeyStore::create().expect("create failed");
         let mut store_with_otpks = KeyStore::create().expect("create failed");
         store_with_otpks.generate_one_time_pre_keys(5);
 
