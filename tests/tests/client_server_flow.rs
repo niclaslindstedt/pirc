@@ -7,7 +7,7 @@
 
 use pirc_integration_tests::common::{
     assert_command, assert_numeric, assert_param_contains, join_msg, nick_msg, ping_msg, pong_msg,
-    privmsg, quit_msg, user_msg, whois_msg, TestClient, TestServer,
+    privmsg, quit_msg, user_msg, whois_msg, TestClient, TestServer, JOIN_BURST_LEN,
 };
 use pirc_protocol::numeric::{
     ERR_ALREADYREGISTERED, ERR_NICKNAMEINUSE, ERR_NOMOTD, ERR_NONICKNAMEGIVEN, ERR_NOSUCHNICK,
@@ -218,12 +218,12 @@ async fn join_second_client_receives_notification() {
     let mut alice = TestClient::connect(server.addr).await;
     alice.register("JAlice", "jalice").await;
     alice.send(join_msg("#flow-join")).await;
-    alice.drain(4).await; // JOIN echo + topic + names + endnames
+    alice.drain(JOIN_BURST_LEN).await; // JOIN echo + topic + names + endnames
 
     let mut bob = TestClient::connect(server.addr).await;
     bob.register("JBob", "jbob").await;
     bob.send(join_msg("#flow-join")).await;
-    bob.drain(4).await;
+    bob.drain(JOIN_BURST_LEN).await;
 
     // Alice should receive Bob's JOIN notification
     let bob_join = alice.recv_msg().await;
@@ -269,12 +269,12 @@ async fn privmsg_to_channel_roundtrip() {
     let mut alice = TestClient::connect(server.addr).await;
     alice.register("CAlice", "calice").await;
     alice.send(join_msg("#flow-msg")).await;
-    alice.drain(4).await;
+    alice.drain(JOIN_BURST_LEN).await;
 
     let mut bob = TestClient::connect(server.addr).await;
     bob.register("CBob", "cbob").await;
     bob.send(join_msg("#flow-msg")).await;
-    bob.drain(4).await;
+    bob.drain(JOIN_BURST_LEN).await;
     alice.recv_msg().await; // Drain Bob's JOIN notification
 
     alice.send(privmsg("#flow-msg", "channel message")).await;
@@ -387,12 +387,12 @@ async fn quit_notifies_channel_members() {
     let mut alice = TestClient::connect(server.addr).await;
     alice.register("QAlice", "qalice").await;
     alice.send(join_msg("#quit-test")).await;
-    alice.drain(4).await;
+    alice.drain(JOIN_BURST_LEN).await;
 
     let mut bob = TestClient::connect(server.addr).await;
     bob.register("QBob", "qbob").await;
     bob.send(join_msg("#quit-test")).await;
-    bob.drain(4).await;
+    bob.drain(JOIN_BURST_LEN).await;
     alice.recv_msg().await; // Drain Bob's JOIN notification
 
     // Bob quits
@@ -431,9 +431,9 @@ async fn list_shows_existing_channels() {
     let mut creator = TestClient::connect(server.addr).await;
     creator.register("Creator", "creator").await;
     creator.send(join_msg("#list-alpha")).await;
-    creator.drain(4).await;
+    creator.drain(JOIN_BURST_LEN).await;
     creator.send(join_msg("#list-beta")).await;
-    creator.drain(4).await;
+    creator.drain(JOIN_BURST_LEN).await;
 
     let mut lister = TestClient::connect(server.addr).await;
     lister.register("Lister", "lister").await;
@@ -654,7 +654,7 @@ async fn full_session_lifecycle() {
     let mut bob = TestClient::connect(server.addr).await;
     bob.register("FlowBob", "flowbob").await;
     bob.send(join_msg("#lifecycle")).await;
-    bob.drain(4).await;
+    bob.drain(JOIN_BURST_LEN).await;
     alice.recv_msg().await; // Alice sees Bob JOIN
 
     // 4. Exchange messages
@@ -725,11 +725,11 @@ async fn list_after_multiple_joins_and_parts() {
 
     // Create channels
     alice.send(join_msg("#list-chan1")).await;
-    alice.drain(4).await;
+    alice.drain(JOIN_BURST_LEN).await;
     alice.send(join_msg("#list-chan2")).await;
-    alice.drain(4).await;
+    alice.drain(JOIN_BURST_LEN).await;
     alice.send(join_msg("#list-chan3")).await;
-    alice.drain(4).await;
+    alice.drain(JOIN_BURST_LEN).await;
 
     // Part from one
     alice
@@ -774,9 +774,9 @@ async fn privmsg_after_nick_change_and_rejoin() {
 
     // Both join a channel
     alice.send(join_msg("#rename-flow")).await;
-    alice.drain(4).await;
+    alice.drain(JOIN_BURST_LEN).await;
     bob.send(join_msg("#rename-flow")).await;
-    bob.drain(4).await;
+    bob.drain(JOIN_BURST_LEN).await;
     alice.recv_msg().await; // Drain Bob's join notification
 
     // Alice changes nick

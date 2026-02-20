@@ -22,6 +22,35 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
 // ---------------------------------------------------------------------------
+// Shared constants
+// ---------------------------------------------------------------------------
+
+/// Number of messages in a JOIN burst: JOIN echo, RPL_NOTOPIC, RPL_NAMREPLY,
+/// RPL_ENDOFNAMES.
+pub const JOIN_BURST_LEN: usize = 4;
+
+// ---------------------------------------------------------------------------
+// Network helpers
+// ---------------------------------------------------------------------------
+
+/// Bind a listener on a random loopback port.
+pub async fn loopback_listener() -> Listener {
+    let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    Listener::bind(addr).await.unwrap()
+}
+
+/// Create a connected pair of [`Connection`] endpoints via TCP loopback.
+pub async fn connection_pair() -> (Connection, Connection) {
+    let listener = loopback_listener().await;
+    let addr = listener.local_addr().unwrap();
+    let (client_result, server_result) =
+        tokio::join!(TcpStream::connect(addr), listener.accept());
+    let client = Connection::new(client_result.unwrap()).unwrap();
+    let server = server_result.unwrap().0;
+    (client, server)
+}
+
+// ---------------------------------------------------------------------------
 // TestServer
 // ---------------------------------------------------------------------------
 

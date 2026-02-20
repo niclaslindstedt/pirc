@@ -9,6 +9,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pirc_common::ServerId;
+use pirc_integration_tests::common::{
+    connection_pair, loopback_listener, ping_msg, pong_msg, quit_msg,
+};
 use pirc_network::connection::AsyncTransport;
 use pirc_network::{
     BackpressureController, BoundedChannel, Connection, ConnectionPool, Connector, Listener,
@@ -16,39 +19,6 @@ use pirc_network::{
 };
 use pirc_protocol::{Command, Message};
 use tokio::net::TcpStream;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Bind a listener on a random loopback port.
-async fn loopback_listener() -> Listener {
-    let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    Listener::bind(addr).await.unwrap()
-}
-
-/// Create a connected pair of [`Connection`] endpoints via TCP loopback.
-async fn connection_pair() -> (Connection, Connection) {
-    let listener = loopback_listener().await;
-    let addr = listener.local_addr().unwrap();
-    let (client_result, server_result) =
-        tokio::join!(TcpStream::connect(addr), listener.accept());
-    let client = Connection::new(client_result.unwrap()).unwrap();
-    let server = server_result.unwrap().0;
-    (client, server)
-}
-
-fn ping_msg(token: &str) -> Message {
-    Message::new(Command::Ping, vec![token.to_owned()])
-}
-
-fn pong_msg(token: &str) -> Message {
-    Message::new(Command::Pong, vec![token.to_owned()])
-}
-
-fn quit_msg(reason: &str) -> Message {
-    Message::new(Command::Quit, vec![reason.to_owned()])
-}
 
 // ---------------------------------------------------------------------------
 // 1. Connection lifecycle
