@@ -77,6 +77,19 @@ impl PluginManager {
             (n, v, caps)
         };
 
+        // Validate the plugin-reported name to prevent injection attacks.
+        // Plugin names must be non-empty, reasonably short, and only contain
+        // safe characters (alphanumeric, hyphen, underscore).
+        if !is_valid_plugin_name(&name) {
+            return Err(ManagerError::PluginCallFailed {
+                name: name.clone(),
+                action: "init",
+                reason: format!(
+                    "invalid plugin name `{name}`: must be 1-64 ASCII alphanumeric, hyphen, or underscore characters"
+                ),
+            });
+        }
+
         if self.plugins.contains_key(&name) {
             return Err(ManagerError::DuplicateName(name));
         }
@@ -269,14 +282,54 @@ impl PluginManager {
             }
         };
 
+        // Canonicalize the plugins directory to detect path traversal via
+        // symlinks or `..` components in discovered entries.
+        let canonical_dir = match dir.canonicalize() {
+            Ok(d) => d,
+            Err(e) => {
+                error!(path = %dir.display(), error = %e, "failed to canonicalize plugins directory");
+                return Vec::new();
+            }
+        };
+
         let mut paths: Vec<_> = entries
             .filter_map(|entry| {
                 let entry = entry.ok()?;
                 let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some(ext) {
-                    Some(path)
-                } else {
-                    None
+                if path.extension().and_then(|e| e.to_str()) != Some(ext) {
+                    return None;
+                }
+                // Reject symlinks to prevent loading libraries from outside
+                // the plugins directory.
+                if path.is_symlink() {
+                    warn!(
+                        path = %path.display(),
+                        "skipping symlink in plugins directory"
+                    );
+                    return None;
+                }
+                // Verify the canonical path resides within the plugins
+                // directory to prevent path-traversal attacks.
+                match path.canonicalize() {
+                    Ok(canonical) if canonical.starts_with(&canonical_dir) => {
+                        Some(canonical)
+                    }
+                    Ok(canonical) => {
+                        warn!(
+                            path = %path.display(),
+                            resolved = %canonical.display(),
+                            "plugin path escapes plugins directory, skipping"
+                        );
+                        None
+                    }
+                    Err(e) => {
+                        warn!(
+                            path = %path.display(),
+                            error = %e,
+                            "failed to canonicalize plugin path, skipping"
+                        );
+                        None
+                    }
                 }
             })
             .collect();
@@ -317,5 +370,148 @@ impl PluginManager {
         );
 
         loaded_names
+    }
+}
+
+/// Validates that a plugin name contains only safe characters.
+///
+/// A valid plugin name must be 1-64 characters long and consist only of
+/// ASCII alphanumeric characters, hyphens, or underscores. This prevents
+/// path traversal, log injection, and registry key confusion attacks from
+/// a malicious plugin library reporting a crafted name.
+fn is_valid_plugin_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- Plugin name validation tests -----------------------------------------
+
+    #[test]
+    fn valid_plugin_names() {
+        assert!(is_valid_plugin_name("hello-plugin"));
+        assert!(is_valid_plugin_name("my_plugin"));
+        assert!(is_valid_plugin_name("Plugin123"));
+        assert!(is_valid_plugin_name("a"));
+        assert!(is_valid_plugin_name("test-plugin_v2"));
+    }
+
+    #[test]
+    fn empty_name_is_invalid() {
+        assert!(!is_valid_plugin_name(""));
+    }
+
+    #[test]
+    fn name_with_path_separator_is_invalid() {
+        assert!(!is_valid_plugin_name("../evil-plugin"));
+        assert!(!is_valid_plugin_name("path/traversal"));
+        assert!(!is_valid_plugin_name("back\\slash"));
+    }
+
+    #[test]
+    fn name_with_spaces_is_invalid() {
+        assert!(!is_valid_plugin_name("plugin name"));
+        assert!(!is_valid_plugin_name(" leading"));
+        assert!(!is_valid_plugin_name("trailing "));
+    }
+
+    #[test]
+    fn name_with_control_chars_is_invalid() {
+        assert!(!is_valid_plugin_name("plugin\0null"));
+        assert!(!is_valid_plugin_name("plugin\nnewline"));
+        assert!(!is_valid_plugin_name("plugin\ttab"));
+    }
+
+    #[test]
+    fn name_with_special_chars_is_invalid() {
+        assert!(!is_valid_plugin_name("plugin@name"));
+        assert!(!is_valid_plugin_name("plugin.name"));
+        assert!(!is_valid_plugin_name("plugin:name"));
+        assert!(!is_valid_plugin_name("plugin;name"));
+    }
+
+    #[test]
+    fn name_too_long_is_invalid() {
+        let long_name = "a".repeat(65);
+        assert!(!is_valid_plugin_name(&long_name));
+    }
+
+    #[test]
+    fn name_at_max_length_is_valid() {
+        let max_name = "a".repeat(64);
+        assert!(is_valid_plugin_name(&max_name));
+    }
+
+    // -- Symlink rejection in directory scanning -------------------------------
+
+    #[test]
+    fn load_plugins_dir_rejects_symlinks() {
+        use crate::ffi::{FfiString, PluginEventType, PluginHostApi, PluginResult};
+        use std::path::Path;
+
+        extern "C" fn noop_register(
+            _name: FfiString,
+            _cb: extern "C" fn(FfiString) -> PluginResult,
+        ) -> PluginResult {
+            PluginResult::ok()
+        }
+        extern "C" fn noop_unregister(_name: FfiString) -> PluginResult {
+            PluginResult::ok()
+        }
+        extern "C" fn noop_hook(_et: PluginEventType) -> PluginResult {
+            PluginResult::ok()
+        }
+        extern "C" fn noop_unhook(_et: PluginEventType) -> PluginResult {
+            PluginResult::ok()
+        }
+        extern "C" fn noop_echo(_msg: FfiString) {}
+        extern "C" fn noop_log(_level: u32, _msg: FfiString) {}
+        extern "C" fn noop_get_config(_key: FfiString) -> FfiString {
+            FfiString::empty()
+        }
+
+        let host_api = PluginHostApi {
+            register_command: noop_register,
+            unregister_command: noop_unregister,
+            hook_event: noop_hook,
+            unhook_event: noop_unhook,
+            echo: noop_echo,
+            log: noop_log,
+            get_config_value: noop_get_config,
+        };
+
+        let dir = std::env::temp_dir().join("pirc_test_symlink_dir_scan");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let ext = PluginLoader::library_extension();
+
+        // Create a fake target file outside the plugins directory.
+        let outside_dir = std::env::temp_dir().join("pirc_test_outside");
+        let _ = std::fs::create_dir_all(&outside_dir);
+        let target_file = outside_dir.join(format!("evil.{ext}"));
+        std::fs::write(&target_file, b"not a real library").unwrap();
+
+        // Create a symlink inside the plugins directory pointing outside.
+        let link = dir.join(format!("evil_link.{ext}"));
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target_file, &link).unwrap();
+
+        let mut manager = super::super::PluginManager::new();
+        let loaded = manager.load_plugins_dir(&dir, &host_api);
+        // The symlink should be skipped, so no plugins loaded.
+        assert!(
+            loaded.is_empty(),
+            "symlinked plugin should not be loaded"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside_dir);
     }
 }

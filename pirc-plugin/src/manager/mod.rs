@@ -218,12 +218,23 @@ impl PluginManager {
 
     /// Looks up a config setting for a specific plugin.
     ///
-    /// Returns `None` if the plugin doesn't exist or the key is not set.
+    /// Returns `None` if the plugin doesn't exist, the key is not set,
+    /// or the plugin lacks the [`ReadConfig`](PluginCapability::ReadConfig)
+    /// capability.
     #[must_use]
     pub fn get_plugin_config_value(&self, plugin_name: &str, key: &str) -> Option<String> {
-        self.plugins
-            .get(plugin_name)
-            .and_then(|p| p.get_config_value(key))
+        let managed = self.plugins.get(plugin_name)?;
+        // Enforce ReadConfig capability: plugins must declare this capability
+        // to access their own configuration values.
+        if managed.capabilities.require(PluginCapability::ReadConfig).is_err() {
+            warn!(
+                plugin = %plugin_name,
+                key = %key,
+                "config access denied: plugin lacks ReadConfig capability"
+            );
+            return None;
+        }
+        managed.get_config_value(key)
     }
 
     /// Returns the [`PluginConfig`] for a given plugin, or `None` if not found.

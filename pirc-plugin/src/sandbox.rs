@@ -212,4 +212,88 @@ mod tests {
         assert!(debug.contains("CapabilityChecker"));
         assert!(debug.contains("dbg"));
     }
+
+    // -- Security-focused tests: capability isolation -------------------------
+
+    #[test]
+    fn read_config_denied_without_capability() {
+        // A plugin that only declares RegisterCommands should not be able
+        // to read config values.
+        let checker = CapabilityChecker::new(
+            "cmd-only-plugin",
+            &[PluginCapability::RegisterCommands],
+        );
+        let err = checker
+            .require(PluginCapability::ReadConfig)
+            .unwrap_err();
+        match &err {
+            PluginError::PermissionDenied { plugin, action } => {
+                assert_eq!(plugin, "cmd-only-plugin");
+                assert_eq!(action, "read configuration");
+            }
+            other => panic!("expected PermissionDenied, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn send_messages_denied_without_capability() {
+        // A plugin with only HookEvents should not be able to send messages.
+        let checker = CapabilityChecker::new(
+            "listener-plugin",
+            &[PluginCapability::HookEvents],
+        );
+        assert!(!checker.check(PluginCapability::SendMessages));
+        assert!(checker.require(PluginCapability::SendMessages).is_err());
+    }
+
+    #[test]
+    fn network_access_denied_without_capability() {
+        // Even a plugin with all other capabilities should not have network
+        // access unless explicitly declared.
+        let checker = CapabilityChecker::new(
+            "no-network",
+            &[
+                PluginCapability::ReadConfig,
+                PluginCapability::RegisterCommands,
+                PluginCapability::HookEvents,
+                PluginCapability::SendMessages,
+            ],
+        );
+        assert!(!checker.check(PluginCapability::AccessNetwork));
+        assert!(checker.require(PluginCapability::AccessNetwork).is_err());
+    }
+
+    #[test]
+    fn no_capability_escalation_from_subset() {
+        // Verify that declaring a subset of capabilities does not grant
+        // access to any undeclared capability.
+        let declared = [PluginCapability::ReadConfig, PluginCapability::HookEvents];
+        let checker = CapabilityChecker::new("subset-plugin", &declared);
+
+        let all_caps = [
+            PluginCapability::ReadConfig,
+            PluginCapability::RegisterCommands,
+            PluginCapability::HookEvents,
+            PluginCapability::SendMessages,
+            PluginCapability::AccessNetwork,
+        ];
+
+        for cap in &all_caps {
+            if declared.contains(cap) {
+                assert!(
+                    checker.check(*cap),
+                    "declared capability {cap:?} should be allowed"
+                );
+            } else {
+                assert!(
+                    !checker.check(*cap),
+                    "undeclared capability {cap:?} should be denied"
+                );
+                assert!(
+                    checker.require(*cap).is_err(),
+                    "require() for undeclared {cap:?} should return error"
+                );
+            }
+        }
+    }
 }

@@ -171,17 +171,18 @@ impl PluginLoader {
     /// Loads a plugin from the given library path.
     ///
     /// This function:
-    /// 1. Opens the dynamic library at `path`
-    /// 2. Looks up the `pirc_plugin_init` symbol
-    /// 3. Calls the entry point to obtain a [`PluginApi`] pointer
-    /// 4. Validates the returned vtable (non-null pointer, non-null
+    /// 1. Validates the path is not a symlink (prevents symlink-based attacks)
+    /// 2. Opens the dynamic library at `path`
+    /// 3. Looks up the `pirc_plugin_init` symbol
+    /// 4. Calls the entry point to obtain a [`PluginApi`] pointer
+    /// 5. Validates the returned vtable (non-null pointer, non-null
     ///    function pointer fields)
-    /// 5. Returns a [`LoadedPlugin`] that keeps the library alive
+    /// 6. Returns a [`LoadedPlugin`] that keeps the library alive
     ///
     /// # Errors
     ///
-    /// Returns [`LoadError`] if the library cannot be loaded, the symbol
-    /// is missing, or the plugin API is invalid.
+    /// Returns [`LoadError`] if the path is a symlink, the library cannot
+    /// be loaded, the symbol is missing, or the plugin API is invalid.
     ///
     /// # Safety
     ///
@@ -191,6 +192,15 @@ impl PluginLoader {
     #[allow(unsafe_code)]
     pub fn load<P: AsRef<Path>>(&self, path: P) -> Result<LoadedPlugin, LoadError> {
         let path = path.as_ref().to_path_buf();
+
+        // Reject symlinks to prevent loading libraries outside the plugins
+        // directory via symlink indirection.
+        if path.is_symlink() {
+            return Err(LoadError::InvalidPlugin {
+                path,
+                reason: "symlinks are not allowed for plugin libraries".into(),
+            });
+        }
 
         // 1. Load the dynamic library.
         let library = unsafe { Library::new(&path) }.map_err(|e| LoadError::LibraryLoadError {
@@ -350,5 +360,33 @@ mod tests {
         let loader = PluginLoader;
         // Just verify it can be constructed via Default
         let _ = format!("{loader:?}");
+    }
+
+    #[test]
+    fn load_symlink_is_rejected() {
+        let dir = std::env::temp_dir().join("pirc_test_symlink_loader");
+        let _ = std::fs::create_dir_all(&dir);
+
+        let target = dir.join("target.dylib");
+        std::fs::write(&target, b"not a real library").unwrap();
+
+        let link = dir.join("link.dylib");
+        let _ = std::fs::remove_file(&link);
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+
+            let loader = PluginLoader::new();
+            let result = loader.load(&link);
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(
+                matches!(err, LoadError::InvalidPlugin { ref reason, .. } if reason.contains("symlink")),
+                "expected InvalidPlugin with symlink reason, got: {err}"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

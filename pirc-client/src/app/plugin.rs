@@ -37,15 +37,25 @@ fn drain_echo_messages() -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 extern "C" fn host_register_command(
-    _name: FfiString,
+    name: FfiString,
     _cb: extern "C" fn(FfiString) -> PluginResult,
 ) -> PluginResult {
     // Command registration is handled by the PluginManager itself
     // during init; the host callback is a no-op at this layer.
+    // Free the FfiString to prevent memory leaks.
+    #[allow(unsafe_code)]
+    unsafe {
+        name.free();
+    }
     PluginResult::ok()
 }
 
-extern "C" fn host_unregister_command(_name: FfiString) -> PluginResult {
+extern "C" fn host_unregister_command(name: FfiString) -> PluginResult {
+    // Free the FfiString to prevent memory leaks.
+    #[allow(unsafe_code)]
+    unsafe {
+        name.free();
+    }
     PluginResult::ok()
 }
 
@@ -82,9 +92,14 @@ extern "C" fn host_log(level: u32, msg: FfiString) {
     }
 }
 
-extern "C" fn host_get_config_value(_key: FfiString) -> FfiString {
+extern "C" fn host_get_config_value(key: FfiString) -> FfiString {
     // Config values are resolved by the PluginManager; the host
     // callback returns empty for now.
+    // Free the input FfiString to prevent memory leaks.
+    #[allow(unsafe_code)]
+    unsafe {
+        key.free();
+    }
     FfiString::empty()
 }
 

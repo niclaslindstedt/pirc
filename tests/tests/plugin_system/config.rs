@@ -159,7 +159,41 @@ greeting = "Custom Hello"
 // ── Manager config lookup ───────────────────────────────────────────────────
 
 #[test]
-fn manager_get_plugin_config_value() {
+fn manager_get_plugin_config_value_with_read_config_capability() {
+    // The auto-respond plugin declares ReadConfig, so it should be allowed
+    // to access its config values through the manager.
+    if !example_plugin_exists("auto_respond_plugin") {
+        return;
+    }
+
+    let host_api = config_host_api();
+    let config = parse_plugin_config("[settings]\nfoo = \"bar\"").unwrap();
+
+    let mut manager = PluginManager::new();
+    let name = manager
+        .load_plugin_with_config(
+            &example_plugin_path("auto_respond_plugin"),
+            &host_api,
+            config,
+        )
+        .unwrap();
+
+    assert_eq!(
+        manager.get_plugin_config_value(&name, "foo").unwrap(),
+        "bar"
+    );
+    assert!(manager.get_plugin_config_value(&name, "missing").is_none());
+    assert!(
+        manager
+            .get_plugin_config_value("nonexistent", "foo")
+            .is_none()
+    );
+}
+
+#[test]
+fn manager_get_plugin_config_value_denied_without_capability() {
+    // The hello-plugin does NOT declare ReadConfig, so config access
+    // through the manager should be denied.
     if !example_plugin_exists("hello_plugin") {
         return;
     }
@@ -176,16 +210,15 @@ fn manager_get_plugin_config_value() {
         )
         .unwrap();
 
-    assert_eq!(
-        manager.get_plugin_config_value(&name, "foo").unwrap(),
-        "bar"
-    );
-    assert!(manager.get_plugin_config_value(&name, "missing").is_none());
+    // Config access should return None due to missing ReadConfig capability.
     assert!(
-        manager
-            .get_plugin_config_value("nonexistent", "foo")
-            .is_none()
+        manager.get_plugin_config_value(&name, "foo").is_none(),
+        "plugin without ReadConfig capability should not access config"
     );
+
+    // But the config is still accessible directly for internal use.
+    let plugin = manager.get_plugin(&name).unwrap();
+    assert_eq!(plugin.config().get_setting("foo").unwrap(), "bar");
 }
 
 // ── Directory scan with config files ────────────────────────────────────────
