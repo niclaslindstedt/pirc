@@ -979,6 +979,7 @@ name = "pirc-protocol"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "memchr",
  "pirc-common",
  "thiserror",
 ]

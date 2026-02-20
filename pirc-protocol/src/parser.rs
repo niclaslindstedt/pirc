@@ -8,6 +8,12 @@ use crate::prefix::Prefix;
 /// Maximum message length in bytes (IRC standard).
 pub const MAX_MESSAGE_LEN: usize = 512;
 
+/// Find the position of a byte in a string slice using byte-level scanning.
+#[inline]
+fn find_byte(s: &str, needle: u8) -> Option<usize> {
+    memchr::memchr(needle, s.as_bytes())
+}
+
 /// Parse a raw protocol line into a [`Message`].
 ///
 /// The input may or may not include the trailing `\r\n` delimiter — it is
@@ -22,32 +28,39 @@ pub const MAX_MESSAGE_LEN: usize = 512;
 /// Returns a [`ProtocolError`] if the input is empty, too long, contains an
 /// unknown command, has a malformed prefix, or exceeds the parameter limit.
 pub fn parse(input: &str) -> Result<Message, ProtocolError> {
-    // Strip trailing \r\n or \n
-    let line = input
-        .strip_suffix("\r\n")
-        .or_else(|| input.strip_suffix('\n'))
-        .unwrap_or(input);
+    let bytes = input.as_bytes();
+    let len = bytes.len();
 
-    // Reject empty / whitespace-only
-    if line.trim().is_empty() {
-        return Err(ProtocolError::EmptyMessage);
-    }
-
-    // Check length (against the original input including any CRLF)
-    if input.len() > MAX_MESSAGE_LEN {
+    // Check length upfront before any work
+    if len > MAX_MESSAGE_LEN {
         return Err(ProtocolError::MessageTooLong {
-            length: input.len(),
+            length: len,
             max: MAX_MESSAGE_LEN,
         });
+    }
+
+    // Strip trailing \r\n or \n using byte operations
+    let line_end = if len >= 2 && bytes[len - 2] == b'\r' && bytes[len - 1] == b'\n' {
+        len - 2
+    } else if len >= 1 && bytes[len - 1] == b'\n' {
+        len - 1
+    } else {
+        len
+    };
+
+    // Reject empty / whitespace-only (check bytes directly)
+    let line = &input[..line_end];
+    if line.bytes().all(|b| b == b' ' || b == b'\t') {
+        return Err(ProtocolError::EmptyMessage);
     }
 
     let mut rest = line;
 
     // Parse optional prefix (starts with ':')
-    let prefix = if rest.starts_with(':') {
+    let prefix = if rest.as_bytes().first() == Some(&b':') {
         // Skip the leading ':'
         rest = &rest[1..];
-        let end = rest.find(' ').ok_or(ProtocolError::MissingCommand)?;
+        let end = find_byte(rest, b' ').ok_or(ProtocolError::MissingCommand)?;
         let prefix_str = &rest[..end];
         rest = &rest[end + 1..];
         Some(parse_prefix(prefix_str)?)
@@ -55,22 +68,22 @@ pub fn parse(input: &str) -> Result<Message, ProtocolError> {
         None
     };
 
-    // Skip any extra spaces between prefix and command
-    rest = rest.trim_start();
+    // Skip leading spaces between prefix and command (byte-level)
+    rest = skip_spaces(rest);
 
     if rest.is_empty() {
         return Err(ProtocolError::MissingCommand);
     }
 
     // Extract command token
-    let (cmd_str, remainder) = match rest.find(' ') {
+    let (cmd_str, remainder) = match find_byte(rest, b' ') {
         Some(pos) => (&rest[..pos], &rest[pos + 1..]),
         None => (rest, ""),
     };
 
     // Handle PIRC extension commands specially: the subcommand keyword
     // is the first token after PIRC (e.g., "PIRC VERSION 1.0").
-    if cmd_str == "PIRC" {
+    if cmd_str.len() == 4 && cmd_str == "PIRC" {
         return parse_pirc_command(prefix, remainder);
     }
 
@@ -86,6 +99,17 @@ pub fn parse(input: &str) -> Result<Message, ProtocolError> {
     })
 }
 
+/// Skip leading ASCII space characters.
+#[inline]
+fn skip_spaces(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && bytes[i] == b' ' {
+        i += 1;
+    }
+    &s[i..]
+}
+
 /// Parse a `PIRC` extension command.
 ///
 /// The subcommand keyword (e.g., `VERSION`, `CAP`) is extracted from the first
@@ -93,7 +117,7 @@ pub fn parse(input: &str) -> Result<Message, ProtocolError> {
 /// next token is also consumed as the inner keyword. Everything after the
 /// subcommand keyword(s) is parsed as normal parameters of the resulting message.
 fn parse_pirc_command(prefix: Option<Prefix>, remainder: &str) -> Result<Message, ProtocolError> {
-    let remainder = remainder.trim_start();
+    let remainder = skip_spaces(remainder);
 
     if remainder.is_empty() {
         return Err(ProtocolError::UnknownCommand(
@@ -101,26 +125,21 @@ fn parse_pirc_command(prefix: Option<Prefix>, remainder: &str) -> Result<Message
         ));
     }
 
-    let (sub_str, after_sub) = match remainder.find(' ') {
+    let (sub_str, after_sub) = match find_byte(remainder, b' ') {
         Some(pos) => (&remainder[..pos], &remainder[pos + 1..]),
         None => (remainder, ""),
     };
 
-    // Check for namespaced subcommands (CLUSTER, INVITE-KEY, NETWORK, P2P) first
-    if sub_str == "CLUSTER"
-        || sub_str == "P2P"
-        || sub_str == "INVITE-KEY"
-        || sub_str == "NETWORK"
-        || sub_str == "GROUP"
-    {
-        let after_sub = after_sub.trim_start();
+    // Check for namespaced subcommands (CLUSTER, INVITE-KEY, NETWORK, P2P, GROUP)
+    if is_pirc_namespace(sub_str) {
+        let after_sub = skip_spaces(after_sub);
         if after_sub.is_empty() {
             return Err(ProtocolError::UnknownCommand(format!(
                 "PIRC {sub_str} (missing subcommand)"
             )));
         }
 
-        let (inner_str, params_str) = match after_sub.find(' ') {
+        let (inner_str, params_str) = match find_byte(after_sub, b' ') {
             Some(pos) => (&after_sub[..pos], &after_sub[pos + 1..]),
             None => (after_sub, ""),
         };
@@ -150,6 +169,12 @@ fn parse_pirc_command(prefix: Option<Prefix>, remainder: &str) -> Result<Message
     })
 }
 
+/// Check if a string is a PIRC namespace prefix.
+#[inline]
+fn is_pirc_namespace(s: &str) -> bool {
+    matches!(s, "CLUSTER" | "P2P" | "INVITE-KEY" | "NETWORK" | "GROUP")
+}
+
 /// Parse the prefix string (without the leading `:`).
 ///
 /// If it contains `!` and `@`, it's a user prefix (`nick!user@host`).
@@ -160,11 +185,11 @@ fn parse_prefix(s: &str) -> Result<Prefix, ProtocolError> {
     }
 
     // Check for user prefix pattern: nick!user@host
-    if let Some(bang_pos) = s.find('!') {
+    if let Some(bang_pos) = find_byte(s, b'!') {
         let nick_str = &s[..bang_pos];
         let after_bang = &s[bang_pos + 1..];
 
-        let at_pos = after_bang.find('@').ok_or_else(|| {
+        let at_pos = find_byte(after_bang, b'@').ok_or_else(|| {
             ProtocolError::InvalidPrefix(format!("missing '@' in user prefix: {s}"))
         })?;
 
@@ -205,17 +230,19 @@ fn parse_params(input: &str) -> Result<Vec<String>, ProtocolError> {
         return Ok(Vec::new());
     }
 
-    let mut params = Vec::new();
+    // Pre-allocate with a reasonable estimate. Most IRC messages have 1-4
+    // params; this avoids reallocations for the common case.
+    let mut params = Vec::with_capacity(4);
     let mut rest = input;
 
     while !rest.is_empty() {
-        if let Some(trailing) = rest.strip_prefix(':') {
+        if rest.as_bytes()[0] == b':' {
             // Trailing parameter — everything after the ':' is one param
-            params.push(trailing.to_owned());
+            params.push(rest[1..].to_owned());
             break;
         }
 
-        let (param, remainder) = match rest.find(' ') {
+        let (param, remainder) = match find_byte(rest, b' ') {
             Some(pos) => (&rest[..pos], &rest[pos + 1..]),
             None => (rest, ""),
         };

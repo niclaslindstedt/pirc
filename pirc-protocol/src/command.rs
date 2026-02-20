@@ -326,39 +326,54 @@ pub enum Command {
 }
 
 impl Command {
+    /// Returns the wire-format keyword for named commands, or `None` for numerics.
+    ///
+    /// This is the zero-allocation variant. For named commands, returns a
+    /// static string reference. For numeric replies, returns `None`.
+    fn keyword(&self) -> Option<&'static str> {
+        match self {
+            Self::Privmsg => Some("PRIVMSG"),
+            Self::Ping => Some("PING"),
+            Self::Pong => Some("PONG"),
+            Self::Notice => Some("NOTICE"),
+            Self::Nick => Some("NICK"),
+            Self::Join => Some("JOIN"),
+            Self::Part => Some("PART"),
+            Self::Quit => Some("QUIT"),
+            Self::Mode => Some("MODE"),
+            Self::User => Some("USER"),
+            Self::Topic => Some("TOPIC"),
+            Self::Kick => Some("KICK"),
+            Self::Ban => Some("BAN"),
+            Self::Whois => Some("WHOIS"),
+            Self::List => Some("LIST"),
+            Self::Names => Some("NAMES"),
+            Self::Invite => Some("INVITE"),
+            Self::Away => Some("AWAY"),
+            Self::Oper => Some("OPER"),
+            Self::Kill => Some("KILL"),
+            Self::Die => Some("DIE"),
+            Self::Restart => Some("RESTART"),
+            Self::Wallops => Some("WALLOPS"),
+            Self::Motd => Some("MOTD"),
+            Self::Error => Some("ERROR"),
+            Self::Pirc(_) => Some("PIRC"),
+            Self::Numeric(_) => None,
+        }
+    }
+
     /// Returns the wire-format string for this command.
     ///
     /// For named commands, returns the uppercase keyword. For numeric
     /// replies, returns the zero-padded three-digit code.
     pub fn as_str(&self) -> String {
-        match self {
-            Self::Nick => "NICK".to_owned(),
-            Self::User => "USER".to_owned(),
-            Self::Join => "JOIN".to_owned(),
-            Self::Part => "PART".to_owned(),
-            Self::Privmsg => "PRIVMSG".to_owned(),
-            Self::Notice => "NOTICE".to_owned(),
-            Self::Quit => "QUIT".to_owned(),
-            Self::Kick => "KICK".to_owned(),
-            Self::Ban => "BAN".to_owned(),
-            Self::Mode => "MODE".to_owned(),
-            Self::Topic => "TOPIC".to_owned(),
-            Self::Whois => "WHOIS".to_owned(),
-            Self::List => "LIST".to_owned(),
-            Self::Names => "NAMES".to_owned(),
-            Self::Invite => "INVITE".to_owned(),
-            Self::Away => "AWAY".to_owned(),
-            Self::Oper => "OPER".to_owned(),
-            Self::Kill => "KILL".to_owned(),
-            Self::Die => "DIE".to_owned(),
-            Self::Restart => "RESTART".to_owned(),
-            Self::Wallops => "WALLOPS".to_owned(),
-            Self::Motd => "MOTD".to_owned(),
-            Self::Ping => "PING".to_owned(),
-            Self::Pong => "PONG".to_owned(),
-            Self::Error => "ERROR".to_owned(),
-            Self::Numeric(code) => format!("{code:03}"),
-            Self::Pirc(_) => "PIRC".to_owned(),
+        if let Some(kw) = self.keyword() {
+            kw.to_owned()
+        } else {
+            let Self::Numeric(code) = self else {
+                unreachable!()
+            };
+            format!("{code:03}")
         }
     }
 }
@@ -368,48 +383,83 @@ impl Command {
     ///
     /// Returns `None` if the string is not a recognized command keyword and is
     /// not a valid 3-digit numeric code.
+    ///
+    /// Match arms are ordered by expected frequency for common IRC traffic
+    /// (PRIVMSG, PING/PONG, NOTICE first) to improve branch prediction.
     pub fn from_keyword(s: &str) -> Option<Self> {
-        match s {
-            "NICK" => Some(Self::Nick),
-            "USER" => Some(Self::User),
-            "JOIN" => Some(Self::Join),
-            "PART" => Some(Self::Part),
-            "PRIVMSG" => Some(Self::Privmsg),
-            "NOTICE" => Some(Self::Notice),
-            "QUIT" => Some(Self::Quit),
-            "KICK" => Some(Self::Kick),
-            "BAN" => Some(Self::Ban),
-            "MODE" => Some(Self::Mode),
-            "TOPIC" => Some(Self::Topic),
-            "WHOIS" => Some(Self::Whois),
-            "LIST" => Some(Self::List),
-            "NAMES" => Some(Self::Names),
-            "INVITE" => Some(Self::Invite),
-            "AWAY" => Some(Self::Away),
-            "OPER" => Some(Self::Oper),
-            "KILL" => Some(Self::Kill),
-            "DIE" => Some(Self::Die),
-            "RESTART" => Some(Self::Restart),
-            "WALLOPS" => Some(Self::Wallops),
-            "MOTD" => Some(Self::Motd),
-            "PING" => Some(Self::Ping),
-            "PONG" => Some(Self::Pong),
-            "ERROR" => Some(Self::Error),
-            _ => {
-                // Try parsing as a 3-digit numeric code
-                if s.len() == 3 && s.bytes().all(|b| b.is_ascii_digit()) {
-                    s.parse::<u16>().ok().map(Self::Numeric)
-                } else {
-                    None
+        // Length-based dispatch reduces the number of string comparisons.
+        // Most IRC command keywords are 3-7 characters.
+        match s.len() {
+            3 => match s {
+                "BAN" => Some(Self::Ban),
+                "DIE" => Some(Self::Die),
+                _ => {
+                    // Try parsing as a 3-digit numeric code
+                    let bytes = s.as_bytes();
+                    if bytes[0].is_ascii_digit()
+                        && bytes[1].is_ascii_digit()
+                        && bytes[2].is_ascii_digit()
+                    {
+                        // Manual parse avoids the overhead of str::parse
+                        let code = u16::from(bytes[0] - b'0') * 100
+                            + u16::from(bytes[1] - b'0') * 10
+                            + u16::from(bytes[2] - b'0');
+                        Some(Self::Numeric(code))
+                    } else {
+                        None
+                    }
                 }
-            }
+            },
+            4 => match s {
+                "PING" => Some(Self::Ping),
+                "PONG" => Some(Self::Pong),
+                "NICK" => Some(Self::Nick),
+                "JOIN" => Some(Self::Join),
+                "PART" => Some(Self::Part),
+                "QUIT" => Some(Self::Quit),
+                "MODE" => Some(Self::Mode),
+                "USER" => Some(Self::User),
+                "KICK" => Some(Self::Kick),
+                "KILL" => Some(Self::Kill),
+                "LIST" => Some(Self::List),
+                "OPER" => Some(Self::Oper),
+                "AWAY" => Some(Self::Away),
+                "MOTD" => Some(Self::Motd),
+                _ => None,
+            },
+            5 => match s {
+                "TOPIC" => Some(Self::Topic),
+                "WHOIS" => Some(Self::Whois),
+                "NAMES" => Some(Self::Names),
+                "ERROR" => Some(Self::Error),
+                _ => None,
+            },
+            6 => match s {
+                "NOTICE" => Some(Self::Notice),
+                "INVITE" => Some(Self::Invite),
+                _ => None,
+            },
+            7 => match s {
+                "PRIVMSG" => Some(Self::Privmsg),
+                "WALLOPS" => Some(Self::Wallops),
+                "RESTART" => Some(Self::Restart),
+                _ => None,
+            },
+            _ => None,
         }
     }
 }
 
 impl fmt::Display for Command {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.as_str())
+        if let Some(kw) = self.keyword() {
+            f.write_str(kw)
+        } else {
+            let Self::Numeric(code) = self else {
+                unreachable!()
+            };
+            write!(f, "{code:03}")
+        }
     }
 }
 

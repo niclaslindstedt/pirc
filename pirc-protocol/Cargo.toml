@@ -10,6 +10,7 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+memchr = "2"
 pirc-common = { path = "../pirc-common" }
 thiserror = "2"
 
