@@ -147,7 +147,8 @@ impl TripleRatchetSession {
         //   [0] = sender's initial sending HK
         //   [1] = sender's initial receiving HK
         //   [2] = initial next receiving HK (shared between both sides)
-        let header_key_material = kdf::derive_key(shared_secret, b"", HEADER_KEY_INFO, 96)?;
+        let mut header_key_material = [0u8; 96];
+        kdf::derive_key_into(shared_secret, b"", HEADER_KEY_INFO, &mut header_key_material)?;
         let sending_hk = HeaderKey::from_bytes(extract_key(&header_key_material, 0));
         let receiving_hk = HeaderKey::from_bytes(extract_key(&header_key_material, 1));
         let next_receiving_hk = HeaderKey::from_bytes(extract_key(&header_key_material, 2));
@@ -211,7 +212,8 @@ impl TripleRatchetSession {
         //   sender's [0]=send → receiver's recv
         //   sender's [1]=recv → receiver's send
         //   [2] = shared next header key (same for both sides)
-        let header_key_material = kdf::derive_key(shared_secret, b"", HEADER_KEY_INFO, 96)?;
+        let mut header_key_material = [0u8; 96];
+        kdf::derive_key_into(shared_secret, b"", HEADER_KEY_INFO, &mut header_key_material)?;
         let sending_hk = HeaderKey::from_bytes(extract_key(&header_key_material, 1));
         let receiving_hk = HeaderKey::from_bytes(extract_key(&header_key_material, 0));
         // The receiver's initial next_sending_header_key is key[2].
@@ -422,26 +424,38 @@ impl TripleRatchetSession {
             return Ok(None);
         }
 
-        // Try all known header keys: current, next, previous, and
-        // any retained from older epochs.
-        let mut candidates = vec![
-            self.receiving_header_key.clone(),
-            self.next_receiving_header_key.clone(),
-        ];
-        if let Some(ref prev_hk) = self.previous_receiving_header_key {
-            candidates.push(prev_hk.clone());
-        }
-        candidates.extend(self.retained_header_keys.iter().cloned());
+        // Try each header key individually to avoid allocating a Vec of clones.
+        // Order: current, next, previous, then retained keys.
+        let encrypted = &message.encrypted_header;
+        let nonce = &message.header_nonce;
+        let header = Self::try_decrypt_header_with_key(
+            &self.receiving_header_key,
+            encrypted,
+            nonce,
+        )
+        .or_else(|| {
+            Self::try_decrypt_header_with_key(
+                &self.next_receiving_header_key,
+                encrypted,
+                nonce,
+            )
+        })
+        .or_else(|| {
+            self.previous_receiving_header_key
+                .as_ref()
+                .and_then(|hk| Self::try_decrypt_header_with_key(hk, encrypted, nonce))
+        })
+        .or_else(|| {
+            self.retained_header_keys
+                .iter()
+                .find_map(|hk| Self::try_decrypt_header_with_key(hk, encrypted, nonce))
+        });
 
-        let Ok((header, _)) = header::try_decrypt_header(
-            &candidates,
-            &message.encrypted_header,
-            &message.header_nonce,
-        ) else {
+        let Some(hdr) = header else {
             return Ok(None);
         };
 
-        let lookup = (header.dh_public.to_bytes(), header.message_number);
+        let lookup = (hdr.dh_public.to_bytes(), hdr.message_number);
         if let Some(skipped) = self.skipped_keys.remove(&lookup) {
             let plaintext = aead::decrypt(
                 skipped.key.as_bytes(),
@@ -455,6 +469,15 @@ impl TripleRatchetSession {
         } else {
             Ok(None)
         }
+    }
+
+    /// Try to decrypt a header with a single key, returning None on failure.
+    fn try_decrypt_header_with_key(
+        key: &HeaderKey,
+        encrypted: &[u8],
+        nonce: &[u8; aead::NONCE_SIZE],
+    ) -> Option<MessageHeader> {
+        header::decrypt_header(key, encrypted, nonce).ok()
     }
 
     /// Try to decrypt the header and determine whether a DH ratchet
@@ -563,9 +586,8 @@ impl TripleRatchetSession {
 
 /// Derive a 32-byte key from a shared secret with domain separation.
 fn derive_initial_key(shared_secret: &[u8; 32], info: &[u8]) -> Result<[u8; kdf::KEY_SIZE]> {
-    let output = kdf::derive_key(shared_secret, b"", info, kdf::KEY_SIZE)?;
     let mut key = [0u8; kdf::KEY_SIZE];
-    key.copy_from_slice(&output);
+    kdf::derive_key_into(shared_secret, b"", info, &mut key)?;
     Ok(key)
 }
 

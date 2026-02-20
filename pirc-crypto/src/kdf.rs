@@ -72,6 +72,44 @@ pub fn hkdf_expand(prk: &[u8; KEY_SIZE], info: &[u8], length: usize) -> Result<V
     Ok(okm)
 }
 
+/// HKDF-Expand into a caller-provided buffer, avoiding heap allocation.
+///
+/// This is the zero-allocation variant of [`hkdf_expand`] for callers
+/// that know the output size at compile time or can provide a stack buffer.
+///
+/// # Errors
+///
+/// Returns [`CryptoError::KeyDerivation`] if the PRK is invalid or
+/// the output buffer exceeds [`MAX_OUTPUT_LEN`].
+pub fn hkdf_expand_into(prk: &[u8; KEY_SIZE], info: &[u8], out: &mut [u8]) -> Result<()> {
+    if out.is_empty() {
+        return Err(CryptoError::KeyDerivation(
+            "output length must be at least 1".into(),
+        ));
+    }
+    let hk = Hkdf::<Sha256>::from_prk(prk).map_err(|e| {
+        CryptoError::KeyDerivation(format!("invalid PRK: {e}"))
+    })?;
+    hk.expand(info, out).map_err(|e| {
+        CryptoError::KeyDerivation(format!("expand failed: {e}"))
+    })?;
+    Ok(())
+}
+
+/// Derive key material into a caller-provided buffer (zero-allocation).
+///
+/// Combined Extract-then-Expand that writes directly into `out`,
+/// avoiding the heap allocation of [`derive_key`].
+///
+/// # Errors
+///
+/// Returns [`CryptoError::KeyDerivation`] if the output buffer is empty
+/// or exceeds [`MAX_OUTPUT_LEN`].
+pub fn derive_key_into(salt: &[u8], ikm: &[u8], info: &[u8], out: &mut [u8]) -> Result<()> {
+    let prk = hkdf_extract(salt, ikm);
+    hkdf_expand_into(&prk, info, out)
+}
+
 /// Derive key material using the combined HKDF Extract-then-Expand flow.
 ///
 /// This is a convenience function that chains [`hkdf_extract`] and

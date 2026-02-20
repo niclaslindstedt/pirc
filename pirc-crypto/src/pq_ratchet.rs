@@ -86,14 +86,15 @@ impl PqRatchetState {
         // Encapsulate a fresh shared secret under the remote's public key
         let (ciphertext, shared_secret) = remote_pk.encapsulate()?;
 
-        // Mix shared secret into PQ chain key via HKDF
-        let output = kdf::derive_key(
+        // Mix shared secret into PQ chain key via HKDF (zero-allocation)
+        let mut new_key = [0u8; kdf::KEY_SIZE];
+        kdf::derive_key_into(
             &self.pq_chain_key,
             shared_secret.as_bytes(),
             PQ_CHAIN_KEY_INFO,
-            kdf::KEY_SIZE,
+            &mut new_key,
         )?;
-        self.pq_chain_key.copy_from_slice(&output);
+        self.pq_chain_key = new_key;
 
         // Generate new KEM key pair for forward secrecy
         self.kem_pair = KemKeyPair::generate();
@@ -121,14 +122,15 @@ impl PqRatchetState {
         // Decapsulate using our current KEM secret key
         let shared_secret = self.kem_pair.decapsulate(ciphertext)?;
 
-        // Mix shared secret into PQ chain key via HKDF
-        let output = kdf::derive_key(
+        // Mix shared secret into PQ chain key via HKDF (zero-allocation)
+        let mut new_key = [0u8; kdf::KEY_SIZE];
+        kdf::derive_key_into(
             &self.pq_chain_key,
             shared_secret.as_bytes(),
             PQ_CHAIN_KEY_INFO,
-            kdf::KEY_SIZE,
+            &mut new_key,
         )?;
-        self.pq_chain_key.copy_from_slice(&output);
+        self.pq_chain_key = new_key;
 
         // Store new remote KEM public key
         self.remote_kem_public = Some(new_remote_public.clone());

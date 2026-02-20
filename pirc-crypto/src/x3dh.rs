@@ -174,7 +174,9 @@ impl X3DHInitMessage {
         let identity_bytes = self.sender_identity.to_bytes();
         let kem_ct_bytes = self.kem_ciphertext.to_bytes();
 
-        let mut bytes = Vec::new();
+        // Pre-allocate: identity + ephemeral(32) + ct_len(4) + ct + flag(1) + otpk(0|4) + spk(4) + kem_pk(4)
+        let capacity = identity_bytes.len() + 32 + 4 + kem_ct_bytes.len() + 1 + 4 + 4 + 4;
+        let mut bytes = Vec::with_capacity(capacity);
         bytes.extend_from_slice(&identity_bytes);
         bytes.extend_from_slice(self.ephemeral_public.as_bytes());
 
@@ -348,20 +350,27 @@ pub fn x3dh_sender(
     let (kem_ciphertext, kem_ss) =
         kem::encapsulate(&receiver_bundle.kem_pre_key().public_key())?;
 
-    // Build IKM = DH1 || DH2 || DH3 || [DH4] || KEM_SS
-    let mut ikm = Vec::with_capacity(32 * 4 + kem::SHARED_SECRET_LEN);
-    ikm.extend_from_slice(dh1.as_bytes());
-    ikm.extend_from_slice(dh2.as_bytes());
-    ikm.extend_from_slice(dh3.as_bytes());
+    // Build IKM = DH1 || DH2 || DH3 || [DH4] || KEM_SS on the stack
+    // Max size: 4 DH secrets (32 each) + 1 KEM secret (32) = 160 bytes
+    let mut ikm = [0u8; 160];
+    let mut offset = 0;
+    ikm[offset..offset + 32].copy_from_slice(dh1.as_bytes());
+    offset += 32;
+    ikm[offset..offset + 32].copy_from_slice(dh2.as_bytes());
+    offset += 32;
+    ikm[offset..offset + 32].copy_from_slice(dh3.as_bytes());
+    offset += 32;
     if let Some(ref dh4_ss) = dh4 {
-        ikm.extend_from_slice(dh4_ss.as_bytes());
+        ikm[offset..offset + 32].copy_from_slice(dh4_ss.as_bytes());
+        offset += 32;
     }
-    ikm.extend_from_slice(kem_ss.as_bytes());
+    ikm[offset..offset + kem::SHARED_SECRET_LEN].copy_from_slice(kem_ss.as_bytes());
+    offset += kem::SHARED_SECRET_LEN;
+    let ikm_slice = &ikm[..offset];
 
-    // Derive shared secret
-    let derived = kdf::derive_key(&HKDF_SALT, &ikm, HKDF_INFO, 32)?;
+    // Derive shared secret (zero-allocation)
     let mut shared_secret = [0u8; 32];
-    shared_secret.copy_from_slice(&derived);
+    kdf::derive_key_into(&HKDF_SALT, ikm_slice, HKDF_INFO, &mut shared_secret)?;
 
     // Zeroize IKM
     ikm.zeroize();
@@ -444,20 +453,26 @@ pub fn x3dh_receiver(
     // KEM decapsulation
     let kem_ss = kem::decapsulate(kem_pre_key.kem_pair(), &init_message.kem_ciphertext)?;
 
-    // Build IKM = DH1 || DH2 || DH3 || [DH4] || KEM_SS
-    let mut ikm = Vec::with_capacity(32 * 4 + kem::SHARED_SECRET_LEN);
-    ikm.extend_from_slice(dh1.as_bytes());
-    ikm.extend_from_slice(dh2.as_bytes());
-    ikm.extend_from_slice(dh3.as_bytes());
+    // Build IKM = DH1 || DH2 || DH3 || [DH4] || KEM_SS on the stack
+    let mut ikm = [0u8; 160];
+    let mut offset = 0;
+    ikm[offset..offset + 32].copy_from_slice(dh1.as_bytes());
+    offset += 32;
+    ikm[offset..offset + 32].copy_from_slice(dh2.as_bytes());
+    offset += 32;
+    ikm[offset..offset + 32].copy_from_slice(dh3.as_bytes());
+    offset += 32;
     if let Some(ref dh4_ss) = dh4 {
-        ikm.extend_from_slice(dh4_ss.as_bytes());
+        ikm[offset..offset + 32].copy_from_slice(dh4_ss.as_bytes());
+        offset += 32;
     }
-    ikm.extend_from_slice(kem_ss.as_bytes());
+    ikm[offset..offset + kem::SHARED_SECRET_LEN].copy_from_slice(kem_ss.as_bytes());
+    offset += kem::SHARED_SECRET_LEN;
+    let ikm_slice = &ikm[..offset];
 
-    // Derive shared secret
-    let derived = kdf::derive_key(&HKDF_SALT, &ikm, HKDF_INFO, 32)?;
+    // Derive shared secret (zero-allocation)
     let mut shared_secret = [0u8; 32];
-    shared_secret.copy_from_slice(&derived);
+    kdf::derive_key_into(&HKDF_SALT, ikm_slice, HKDF_INFO, &mut shared_secret)?;
 
     // Zeroize IKM
     ikm.zeroize();

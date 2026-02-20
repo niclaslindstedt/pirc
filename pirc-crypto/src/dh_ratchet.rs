@@ -43,7 +43,8 @@ impl RootKey {
         &self,
         dh_output: &x25519::SharedSecret,
     ) -> Result<(RootKey, ChainKey, [u8; kdf::KEY_SIZE])> {
-        let output = kdf::derive_key(self.as_bytes(), dh_output.as_bytes(), ROOT_KEY_INFO, 96)?;
+        let mut output = [0u8; 96];
+        kdf::derive_key_into(self.as_bytes(), dh_output.as_bytes(), ROOT_KEY_INFO, &mut output)?;
         let mut new_root = [0u8; kdf::KEY_SIZE];
         let mut chain = [0u8; kdf::KEY_SIZE];
         let mut header = [0u8; kdf::KEY_SIZE];
