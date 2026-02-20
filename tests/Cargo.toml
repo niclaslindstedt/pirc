@@ -18,6 +18,8 @@ pirc-common = { path = "../pirc-common" }
 pirc-crypto = { path = "../pirc-crypto" }
 pirc-p2p = { path = "../pirc-p2p" }
 pirc-scripting = { path = "../pirc-scripting" }
+pirc-plugin = { path = "../pirc-plugin" }
+libloading = "0.8"
 serde = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["full"] }

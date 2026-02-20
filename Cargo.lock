@@ -725,10 +725,12 @@ dependencies = [
 name = "pirc-integration-tests"
 version = "0.1.0"
 dependencies = [
+ "libloading",
  "pirc-common",
  "pirc-crypto",
  "pirc-network",
  "pirc-p2p",
+ "pirc-plugin",
  "pirc-protocol",
  "pirc-scripting",
  "pirc-server",

@@ -152,7 +152,19 @@ macro_rules! declare_plugin {
 
             extern "C" fn plugin_info() -> PluginInfo {
                 let guard = PLUGIN.lock().unwrap_or_else(|e| e.into_inner());
-                let plugin = guard.as_ref().expect("plugin not initialised");
+                // If the plugin hasn't been initialised yet (info called
+                // before init, e.g. by the loader to read metadata), create
+                // a temporary Default instance.  Metadata methods like
+                // name()/version()/capabilities() are pure and don't depend
+                // on init state.
+                let tmp;
+                let plugin: &dyn Plugin = match guard.as_ref() {
+                    Some(p) => p,
+                    None => {
+                        tmp = <$plugin_ty>::default();
+                        &tmp
+                    }
+                };
 
                 let caps = plugin.capabilities();
                 PluginInfo {
