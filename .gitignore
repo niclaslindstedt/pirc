@@ -11,3 +11,4 @@
 .env
 
 .swarm/session.json
+.swarm/run.pid

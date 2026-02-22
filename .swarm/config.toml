@@ -27,7 +27,7 @@ instance_id = "e63b3e3e"
 # Active workflow - determines which definitions, roles, skills, actions,
 # and process rules to use. Available built-in workflows: software, softwarev2,
 # legal, story. Can be overridden per-run with --workflow flag.
-workflow = "softwarev2"
+workflow_name = "software"
 
 # ---------------------------------------------------------------------------
 # [agent] - AI Agent Configuration (Claude Code)
