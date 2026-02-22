@@ -514,9 +514,10 @@ async fn init_bootstrap(
     });
     handles.push(driver_handle);
 
-    // Create the invite key store and cluster service.
+    // Create the invite key store (load persisted keys if available) and cluster service.
     let self_addr = cluster_self_addr(config);
-    let invite_keys = Arc::new(Mutex::new(InviteKeyStore::new()));
+    let invite_store = InviteKeyStore::load(&data_dir).unwrap_or_default();
+    let invite_keys = Arc::new(Mutex::new(invite_store));
     let next_node_id_start = node_id.as_u64() + 1000;
     let cluster_service = Arc::new(ClusterService::new(
         Arc::clone(&invite_keys),
@@ -681,7 +682,8 @@ async fn init_join(
     handles.push(driver_handle);
 
     let self_addr = cluster_self_addr(config);
-    let invite_keys = Arc::new(Mutex::new(InviteKeyStore::new()));
+    let invite_store = InviteKeyStore::load(&data_dir).unwrap_or_default();
+    let invite_keys = Arc::new(Mutex::new(invite_store));
     let next_node_id_start = assigned_id.as_u64() + 1000;
     let cluster_service = Arc::new(ClusterService::new(
         Arc::clone(&invite_keys),

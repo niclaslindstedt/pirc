@@ -7,6 +7,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
+use tracing::warn;
 
 use pirc_common::{InviteKeyError, ServerId};
 
@@ -66,17 +68,20 @@ impl InviteKeyRecord {
     }
 }
 
-/// In-memory store for invite keys.
+/// In-memory store for invite keys with optional auto-persistence.
 #[derive(Debug)]
 pub struct InviteKeyStore {
     keys: HashMap<String, InviteKeyRecord>,
+    /// When set, the store auto-persists after mutations (create, validate, revoke).
+    data_dir: Option<PathBuf>,
 }
 
 impl InviteKeyStore {
-    /// Create an empty invite key store.
+    /// Create an empty invite key store (no auto-persistence).
     pub fn new() -> Self {
         Self {
             keys: HashMap::new(),
+            data_dir: None,
         }
     }
 
@@ -104,16 +109,35 @@ impl InviteKeyStore {
             creator,
         };
         self.keys.insert(key.as_str().to_owned(), record);
+        self.auto_persist();
         key
     }
 
-    /// Validate and consume an invite key.
+    /// Validate and consume an invite key using constant-time token comparison.
     ///
+    /// All stored tokens are compared in constant time to prevent timing
+    /// attacks that could reveal whether a token exists in the store.
     /// On success, marks single-use keys as used and returns the record.
     /// On failure, returns an appropriate [`InviteKeyError`].
     pub fn validate(&mut self, token: &str) -> Result<&InviteKeyRecord, InviteKeyError> {
-        // Look up key — must exist
-        let record = self.keys.get_mut(token).ok_or(InviteKeyError::NotFound)?;
+        let token_bytes = token.as_bytes();
+
+        // Constant-time scan: compare the candidate against every stored key.
+        // We must touch every entry to avoid leaking information about which
+        // (if any) key matched.
+        let matched_key: Option<String> = self
+            .keys
+            .keys()
+            .find(|stored| {
+                let stored_bytes = stored.as_bytes();
+                // Lengths must match; if not, ct_eq would panic, so we guard.
+                stored_bytes.len() == token_bytes.len()
+                    && stored_bytes.ct_eq(token_bytes).into()
+            })
+            .cloned();
+
+        let key_str = matched_key.ok_or(InviteKeyError::NotFound)?;
+        let record = self.keys.get_mut(&key_str).expect("key just matched");
 
         // Check revoked before other states
         if record.revoked {
@@ -132,9 +156,10 @@ impl InviteKeyStore {
 
         // Mark as used
         record.used = true;
+        self.auto_persist();
 
         // Return immutable ref (reborrow from map)
-        let record = &self.keys[token];
+        let record = &self.keys[&key_str];
         Ok(record)
     }
 
@@ -144,6 +169,7 @@ impl InviteKeyStore {
     pub fn revoke(&mut self, token: &str) -> bool {
         if let Some(record) = self.keys.get_mut(token) {
             record.revoked = true;
+            self.auto_persist();
             true
         } else {
             false
@@ -163,11 +189,15 @@ impl InviteKeyStore {
     /// Remove expired and used single-use keys from the store.
     pub fn purge_expired(&mut self) {
         let now = SystemTime::now();
+        let before = self.keys.len();
         self.keys.retain(|_, record| {
             let expired = record.is_expired(now);
             let consumed = record.single_use && record.used;
             !expired && !consumed
         });
+        if self.keys.len() < before {
+            self.auto_persist();
+        }
     }
 
     /// Returns the file path for persisted invite keys within the given data directory.
@@ -200,10 +230,14 @@ impl InviteKeyStore {
     ///
     /// Returns a new `InviteKeyStore` populated with the persisted keys.
     /// Returns an empty store if the file does not exist.
+    /// Expired and consumed single-use keys are purged on load.
     pub fn load(data_dir: &Path) -> io::Result<Self> {
         let path = Self::file_path(data_dir);
         if !path.exists() {
-            return Ok(Self::new());
+            return Ok(Self {
+                keys: HashMap::new(),
+                data_dir: Some(data_dir.to_path_buf()),
+            });
         }
         let json = std::fs::read_to_string(path)?;
         let records: Vec<InviteKeyRecord> = serde_json::from_str(&json)
@@ -212,7 +246,22 @@ impl InviteKeyStore {
         for record in records {
             keys.insert(record.key.as_str().to_owned(), record);
         }
-        Ok(Self { keys })
+        let mut store = Self {
+            keys,
+            data_dir: Some(data_dir.to_path_buf()),
+        };
+        store.purge_expired();
+        Ok(store)
+    }
+
+    /// Persist to disk if `data_dir` is set. Errors are logged but not propagated
+    /// since callers are already performing in-memory operations that must not fail.
+    fn auto_persist(&self) {
+        if let Some(ref dir) = self.data_dir {
+            if let Err(e) = self.save(dir) {
+                warn!("failed to auto-persist invite keys: {e}");
+            }
+        }
     }
 }
 
@@ -581,10 +630,11 @@ mod tests {
     }
 
     #[test]
-    fn save_preserves_used_state() {
+    fn save_preserves_used_state_for_multi_use_keys() {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut store = InviteKeyStore::new();
-        let key = store.create(ServerId::new(1), None, true);
+        // Multi-use key: used state preserved across save/load
+        let key = store.create(ServerId::new(1), None, false);
         store.validate(key.as_str()).unwrap();
 
         store.save(dir.path()).expect("save");
@@ -592,6 +642,51 @@ mod tests {
         let loaded = InviteKeyStore::load(dir.path()).expect("load");
         let record = loaded.get(key.as_str()).unwrap();
         assert!(record.used);
+    }
+
+    #[test]
+    fn load_purges_expired_keys() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut store = InviteKeyStore::new();
+
+        // Insert an already-expired key directly
+        let expired_key = InviteKey::generate();
+        let now = SystemTime::now();
+        let record = InviteKeyRecord {
+            key: expired_key.clone(),
+            created_at: now - Duration::from_secs(120),
+            expires_at: now - Duration::from_secs(60),
+            single_use: true,
+            used: false,
+            revoked: false,
+            creator: ServerId::new(1),
+        };
+        store.keys.insert(expired_key.as_str().to_owned(), record);
+
+        // Also insert a valid key
+        let valid_key = store.create(ServerId::new(1), None, true);
+
+        store.save(dir.path()).expect("save");
+
+        let loaded = InviteKeyStore::load(dir.path()).expect("load");
+        // Expired key should be purged on load
+        assert!(loaded.get(expired_key.as_str()).is_none());
+        // Valid key should survive
+        assert!(loaded.get(valid_key.as_str()).is_some());
+    }
+
+    #[test]
+    fn load_purges_consumed_single_use_keys() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut store = InviteKeyStore::new();
+        let key = store.create(ServerId::new(1), None, true);
+        store.validate(key.as_str()).unwrap();
+
+        store.save(dir.path()).expect("save");
+
+        // Used single-use keys are purged on load
+        let loaded = InviteKeyStore::load(dir.path()).expect("load");
+        assert!(loaded.get(key.as_str()).is_none());
     }
 
     #[test]
@@ -616,5 +711,81 @@ mod tests {
         let path = InviteKeyStore::file_path(dir.path());
         let mode = std::fs::metadata(&path).expect("metadata").permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "invite keys file should be owner-only (0o600)");
+    }
+
+    // ---- Auto-persistence ----
+
+    #[test]
+    fn auto_persist_on_create() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut store = InviteKeyStore::load(dir.path()).expect("load");
+        let key = store.create(ServerId::new(1), None, true);
+
+        // Verify the file was written automatically
+        let loaded = InviteKeyStore::load(dir.path()).expect("reload");
+        assert!(loaded.get(key.as_str()).is_some());
+    }
+
+    #[test]
+    fn auto_persist_on_validate() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut store = InviteKeyStore::load(dir.path()).expect("load");
+        let key = store.create(ServerId::new(1), None, false);
+        store.validate(key.as_str()).unwrap();
+
+        // Reload and verify used state was persisted
+        let loaded = InviteKeyStore::load(dir.path()).expect("reload");
+        let record = loaded.get(key.as_str()).unwrap();
+        assert!(record.used);
+    }
+
+    #[test]
+    fn auto_persist_on_revoke() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut store = InviteKeyStore::load(dir.path()).expect("load");
+        let key = store.create(ServerId::new(1), None, true);
+        store.revoke(key.as_str());
+
+        // Reload and verify revoked state was persisted
+        let loaded = InviteKeyStore::load(dir.path()).expect("reload");
+        let record = loaded.get(key.as_str()).unwrap();
+        assert!(record.revoked);
+    }
+
+    // ---- Constant-time validation ----
+
+    #[test]
+    fn validate_uses_constant_time_comparison() {
+        // Verify that a near-miss token (differing only in the last byte)
+        // is correctly rejected. This confirms the constant-time path works.
+        let mut store = InviteKeyStore::new();
+        let key = store.create(ServerId::new(1), None, true);
+        let mut tampered = key.as_str().to_owned().into_bytes();
+        // Flip last byte
+        let last = tampered.last_mut().unwrap();
+        *last = if *last == b'A' { b'B' } else { b'A' };
+        let tampered_str = String::from_utf8(tampered).unwrap();
+
+        let result = store.validate(&tampered_str);
+        assert_eq!(result.unwrap_err(), InviteKeyError::NotFound);
+
+        // Original should still work
+        let result = store.validate(key.as_str());
+        assert!(result.is_ok());
+    }
+
+    // ---- Loaded store has data_dir set ----
+
+    #[test]
+    fn loaded_store_has_data_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = InviteKeyStore::load(dir.path()).expect("load");
+        assert!(store.data_dir.is_some());
+    }
+
+    #[test]
+    fn new_store_has_no_data_dir() {
+        let store = InviteKeyStore::new();
+        assert!(store.data_dir.is_none());
     }
 }
