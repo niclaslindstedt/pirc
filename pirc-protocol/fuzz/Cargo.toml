@@ -38,3 +38,8 @@ path = "fuzz_targets/fuzz_structured.rs"
 test = false
 doc = false
 bench = false
+
+# Unit tests for fuzz helper functions
+[[test]]
+name = "fuzz_helpers"
+path = "tests/fuzz_helpers.rs"

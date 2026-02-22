@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "swarm_permissions": {
+      "args": [
+        "permission-server"
+      ],
+      "command": "/Users/niclas/.cargo/bin/swarm",
+      "env": {
+        "SWARM_API_PORT": "23727"
+      }
+    }
+  }
+}

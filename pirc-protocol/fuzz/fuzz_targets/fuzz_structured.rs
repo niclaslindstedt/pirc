@@ -200,11 +200,17 @@ fn safe_str(data: &[u8]) -> Option<&str> {
     std::str::from_utf8(data).ok()
 }
 
-/// Clamp string to max IRC message length (512 bytes)
+/// Clamp string to max IRC message length (512 bytes).
+/// Uses char-boundary-aware slicing to avoid panicking on multi-byte UTF-8.
 fn clamp_len(s: &str) -> String {
     if s.len() <= 512 {
         s.to_string()
     } else {
-        s[..512].to_string()
+        // Walk backwards from byte 512 to find a valid char boundary.
+        let mut end = 512;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        s[..end].to_string()
     }
 }
