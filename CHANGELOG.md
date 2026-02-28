@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Crate-level rustdoc comments for `pirc-server` and `pirc-client`
+- `make doc` target for generating workspace documentation via `cargo doc`
 - Architecture overview and module documentation in `docs/`:
   - `docs/architecture.md` — system overview, crate graph, Raft consensus, encryption layers
   - `docs/protocol.md` — wire protocol specification, command reference, PIRC extensions, handshake sequences

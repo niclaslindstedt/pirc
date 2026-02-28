@@ -1,3 +1,18 @@
+//! IRC server implementation for pirc.
+//!
+//! This crate contains the core server logic including:
+//!
+//! - **Channels** — [`channel`] and [`channel_registry`] for IRC channel management
+//! - **Users** — [`user`] and [`registry`] for connected user tracking
+//! - **Groups** — [`group_registry`] for encrypted group management
+//! - **Command handlers** — [`handler`], [`handler_channel`], [`handler_cluster`],
+//!   [`handler_group`], [`handler_oper`], [`handler_p2p`], [`handler_relay`]
+//! - **Clustering** — [`cluster`] server linking with [`raft`] consensus
+//! - **Reliability** — [`degraded_mode`], [`failover_queue`], [`graceful_shutdown`]
+//! - **Storage** — [`offline_store`], [`prekey_store`] for offline message and key storage
+//! - **Migration** — [`migration`] and [`commit_consumer`] for Raft log application
+//! - **Configuration** — [`config`] server configuration
+
 pub mod channel;
 pub mod channel_registry;
 pub mod cluster;

@@ -1,3 +1,14 @@
+//! pirc — a modern IRC client with end-to-end encryption.
+//!
+//! This binary provides a terminal-based IRC client with:
+//!
+//! - TUI interface built with ratatui
+//! - End-to-end encrypted messaging via the triple ratchet protocol
+//! - P2P direct connections with NAT traversal
+//! - Encrypted group chat support
+//! - mIRC-compatible scripting engine
+//! - Native plugin system
+
 mod app;
 pub mod client_command;
 pub mod command_parser;
