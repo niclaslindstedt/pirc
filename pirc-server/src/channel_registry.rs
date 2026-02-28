@@ -1,7 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use dashmap::DashMap;
-use pirc_common::ChannelName;
+use pirc_common::{ChannelName, Nickname};
 
 use crate::channel::Channel;
 
@@ -86,6 +86,17 @@ impl ChannelRegistry {
     /// Returns the number of channels in the registry.
     pub fn channel_count(&self) -> usize {
         self.by_name.len()
+    }
+
+    /// Returns the number of channels a given nickname is a member of.
+    pub fn channels_for_nick(&self, nick: &Nickname) -> usize {
+        self.by_name
+            .iter()
+            .filter(|entry| {
+                let ch = entry.value().read().expect("channel lock poisoned");
+                ch.members.contains_key(nick)
+            })
+            .count()
     }
 }
 
@@ -298,6 +309,32 @@ mod tests {
         // Duplicate should not increment.
         registry.get_or_create(channel_name("#a"));
         assert_eq!(registry.channel_count(), 2);
+    }
+
+    #[test]
+    fn channels_for_nick_counts_memberships() {
+        let registry = ChannelRegistry::new();
+        let alice = nick("Alice");
+
+        assert_eq!(registry.channels_for_nick(&alice), 0);
+
+        // Add Alice to two channels.
+        let ch1 = registry.get_or_create(channel_name("#general"));
+        {
+            let mut ch = ch1.write().unwrap();
+            ch.members.insert(alice.clone(), MemberStatus::Operator);
+        }
+        let ch2 = registry.get_or_create(channel_name("#random"));
+        {
+            let mut ch = ch2.write().unwrap();
+            ch.members.insert(alice.clone(), MemberStatus::Normal);
+        }
+
+        assert_eq!(registry.channels_for_nick(&alice), 2);
+
+        // Bob should be in 0 channels.
+        let bob = nick("Bob");
+        assert_eq!(registry.channels_for_nick(&bob), 0);
     }
 
     #[test]

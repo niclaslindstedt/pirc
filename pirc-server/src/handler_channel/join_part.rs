@@ -3,8 +3,8 @@ use std::sync::Arc;
 use pirc_common::ChannelName;
 use pirc_protocol::numeric::{
     ERR_BADCHANNELKEY, ERR_BANNEDCHANNEL, ERR_CHANNELISFULL, ERR_INVITEONLYCHAN,
-    ERR_NEEDMOREPARAMS, ERR_NOSUCHCHANNEL, ERR_NOTONCHANNEL, RPL_NOTOPIC, RPL_TOPIC,
-    RPL_TOPICWHOTIME,
+    ERR_NEEDMOREPARAMS, ERR_NOSUCHCHANNEL, ERR_NOTONCHANNEL, ERR_TOOMANYCHANNELS, RPL_NOTOPIC,
+    RPL_TOPIC, RPL_TOPICWHOTIME,
 };
 use pirc_protocol::{Command, Message, Prefix};
 use tokio::sync::mpsc;
@@ -28,6 +28,7 @@ pub fn handle_join(
     registry: &Arc<UserRegistry>,
     channels: &Arc<ChannelRegistry>,
     sender: &mpsc::UnboundedSender<Message>,
+    max_channels_per_user: u32,
 ) {
     let Some(session_arc) = registry.get_by_connection(connection_id) else {
         return;
@@ -60,9 +61,23 @@ pub fn handle_join(
         Vec::new()
     };
 
+    // Track how many channels this user is already in for limit enforcement.
+    let mut user_channel_count = channels.channels_for_nick(&nick) as u32;
+
     for (i, chan_str) in channel_names.iter().enumerate() {
         let chan_str = chan_str.trim();
         if chan_str.is_empty() {
+            continue;
+        }
+
+        // Enforce per-user channel limit.
+        if user_channel_count >= max_channels_per_user {
+            send_numeric(
+                sender,
+                ERR_TOOMANYCHANNELS,
+                &[&nick_str, chan_str],
+                "You have joined too many channels",
+            );
             continue;
         }
 
@@ -163,6 +178,8 @@ pub fn handle_join(
             // Remove from invite list if present (invite consumed).
             channel.invite_list.remove(&nick);
         }
+
+        user_channel_count += 1;
 
         // Build the JOIN message with user prefix.
         let join_msg = Message::builder(Command::Join)

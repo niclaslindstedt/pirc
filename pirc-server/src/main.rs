@@ -235,12 +235,19 @@ async fn main() {
     // Keep cluster_state alive for the lifetime of the server.
     let _cluster_state = cluster_state;
 
+    let max_connections = config.network.max_connections as usize;
     let config = Arc::new(config);
 
     // Accept loop
     loop {
         match listener.accept_with_shutdown(&mut shutdown_signal).await {
             Ok(Some((connection, peer_addr))) => {
+                // Enforce max_connections to prevent resource exhaustion.
+                if registry.connection_count() >= max_connections {
+                    warn!(%peer_addr, max_connections, "rejecting connection: max connections reached");
+                    drop(connection);
+                    continue;
+                }
                 let conn_shutdown = shutdown_signal.clone();
                 let conn_registry = Arc::clone(&registry);
                 let conn_channels = Arc::clone(&channels);

@@ -1,7 +1,8 @@
 use pirc_common::{ChannelMode, ChannelName};
 use pirc_protocol::numeric::{
     ERR_BADCHANNELKEY, ERR_BANNEDCHANNEL, ERR_CHANNELISFULL, ERR_INVITEONLYCHAN, ERR_NOSUCHCHANNEL,
-    ERR_NOTONCHANNEL, RPL_ENDOFNAMES, RPL_NAMREPLY, RPL_NOTOPIC, RPL_TOPIC, RPL_TOPICWHOTIME,
+    ERR_NOTONCHANNEL, ERR_TOOMANYCHANNELS, RPL_ENDOFNAMES, RPL_NAMREPLY, RPL_NOTOPIC, RPL_TOPIC,
+    RPL_TOPICWHOTIME,
 };
 
 use super::*;
@@ -1293,4 +1294,75 @@ fn glob_match_question() {
 fn ban_mask_case_insensitive() {
     assert!(matches_ban_mask("ALICE!*@*", "alice!user@host"));
     assert!(matches_ban_mask("*!*@HOST.COM", "nick!user@host.com"));
+}
+
+// ---- JOIN: max channels per user ----
+
+#[tokio::test]
+async fn join_rejects_when_max_channels_reached() {
+    let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
+    let mut config = make_config();
+    config.limits.max_channels_per_user = 2;
+
+    let (tx, mut rx, mut state) = register_user(
+        "Alice",
+        "alice",
+        1,
+        "127.0.0.1",
+        &registry,
+        &channels,
+        &config,
+    );
+
+    // Join first channel (should succeed).
+    handle_message(
+        &join_msg("#chan1"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+        None,
+        &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
+        &Arc::new(GroupRegistry::new()),
+    );
+    while rx.try_recv().is_ok() {}
+
+    // Join second channel (should succeed).
+    handle_message(
+        &join_msg("#chan2"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+        None,
+        &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
+        &Arc::new(GroupRegistry::new()),
+    );
+    while rx.try_recv().is_ok() {}
+
+    // Join third channel (should be rejected with ERR_TOOMANYCHANNELS).
+    handle_message(
+        &join_msg("#chan3"),
+        1,
+        &registry,
+        &channels,
+        &tx,
+        &mut state,
+        &config,
+        None,
+        &Arc::new(PreKeyBundleStore::new()),
+        &Arc::new(OfflineMessageStore::default()),
+        &Arc::new(GroupRegistry::new()),
+    );
+
+    let reply = rx.recv().await.unwrap();
+    assert_eq!(reply.numeric_code(), Some(ERR_TOOMANYCHANNELS));
+    assert!(reply.to_string().contains("#chan3"));
 }

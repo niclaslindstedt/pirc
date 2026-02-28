@@ -6,6 +6,7 @@ use pirc_protocol::numeric::{
     RPL_YOUREOPER,
 };
 use pirc_protocol::{Command, Message, Prefix};
+use subtle::ConstantTimeEq;
 use tokio::sync::mpsc;
 use tracing::info;
 
@@ -66,8 +67,8 @@ pub(crate) fn handle_oper(
         return;
     };
 
-    // Verify password.
-    if oper_config.password != *oper_password {
+    // Verify password using constant-time comparison to prevent timing attacks.
+    if oper_config.password.as_bytes().ct_eq(oper_password.as_bytes()).unwrap_u8() != 1 {
         send_numeric(sender, ERR_PASSWDMISMATCH, &[&nick], "Password incorrect");
         return;
     }

@@ -131,7 +131,7 @@ pub fn handle_message(
                     handle_user_mode(msg, connection_id, registry, sender)
                 }
             }
-            Command::Join => handle_join(msg, connection_id, registry, channels, sender),
+            Command::Join => handle_join(msg, connection_id, registry, channels, sender, config.limits.max_channels_per_user),
             Command::Part => handle_part(msg, connection_id, registry, channels, sender),
             Command::Topic => handle_topic(msg, connection_id, registry, channels, sender),
             Command::Kick => handle_kick(msg, connection_id, registry, channels, sender),
