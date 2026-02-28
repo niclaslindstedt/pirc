@@ -1,4 +1,4 @@
-.PHONY: all build test lint fmt fmt-check clean check bench
+.PHONY: all build test lint fmt fmt-check clean check bench perf-test
 
 build:
 	cargo build --workspace
@@ -17,6 +17,9 @@ fmt-check:
 
 bench:
 	cargo bench -p pirc-protocol -p pirc-server -p pirc-crypto -p pirc-network
+
+perf-test:
+	RUST_MIN_STACK=16777216 cargo test -p pirc-integration-tests --test perf_validation -- --ignored --nocapture
 
 clean:
 	cargo clean
