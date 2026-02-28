@@ -56,7 +56,7 @@ pirc-common          Shared types, errors, configuration paths
 
 Foundation crate providing validated IRC types used across the entire workspace.
 
-- **Validated types:** `Nickname` (case-insensitive equality/hashing), `ChannelName` (must start with `#` or `&`), `ServerId`, `UserId`, `GroupId`
+- **Validated types:** `Nickname` (case-insensitive equality/hashing), `ChannelName` (must start with `#`, 2–50 characters), `ServerId`, `UserId`, `GroupId`
 - **Mode types:** `ChannelMode` (InviteOnly, Moderated, Secret, Topic, NoExternal, Private), `UserMode` (Away, Invisible, Wallops, Operator)
 - **Error hierarchy:** `PircError` as the top-level error with domain-specific variants (`ChannelError`, `UserError`, `RaftError`, `InviteKeyError`)
 - **Configuration paths:** XDG-compatible directory resolution (`config_dir()`, `keys_dir()`, `plugins_dir()`, `scripts_dir()`)
@@ -144,8 +144,8 @@ mIRC-inspired domain-specific language for client automation.
 
 Native plugin system with C FFI.
 
-- **Plugin trait:** `init()`, `shutdown()`, `handle_event()`, `handle_command()`
-- **Capability sandbox:** Plugins declare required permissions (`ReadConfig`, `WriteConfig`, `AccessChat`, `RegisterCommand`, etc.)
+- **Plugin trait:** `name()`, `version()`, `init()`, `shutdown()`, `on_enable()`, `on_disable()`, `on_event()`, `on_command()`
+- **Capability sandbox:** Plugins declare required permissions (`ReadConfig`, `RegisterCommands`, `HookEvents`, `SendMessages`, `AccessNetwork`)
 - **Dynamic loading:** `libloading`-based `.dylib`/`.so` loader with C ABI vtable
 - **`declare_plugin!` macro:** Generates FFI bridge automatically
 - **Plugin manager:** Lifecycle coordination, event forwarding, command routing
@@ -200,7 +200,7 @@ Follower ──────────────────────► C
 - **Transport-agnostic core:** `RaftNode` produces outbound messages via an `mpsc::UnboundedSender`, decoupling consensus logic from networking.
 - **Deterministic election timeout:** Lower node IDs get shorter timeouts, creating a stable succession order that reduces election contention.
 - **Snapshot compaction:** Log entries are compacted into snapshots (default threshold: 1000 entries) and transferred in 64KB chunks.
-- **Health monitoring:** `NodeHealthMonitor` tracks peer responsiveness with Healthy/Degraded/Unreachable states.
+- **Health monitoring:** `NodeHealthMonitor` tracks peer responsiveness with Online/Suspected/Down states.
 - **Storage trait:** Async `RaftStorage<T>` trait allows pluggable backends (production uses `FileStorage`, tests use in-memory `MemStorage`).
 
 ### RPC Messages
