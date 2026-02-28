@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Architecture overview and module documentation in `docs/`:
+  - `docs/architecture.md` — system overview, crate graph, Raft consensus, encryption layers
+  - `docs/protocol.md` — wire protocol specification, command reference, PIRC extensions, handshake sequences
+  - `docs/scripting.md` — scripting DSL language reference with syntax, events, variables, and examples
+  - `docs/plugins.md` — plugin development guide with C FFI interface, lifecycle, and examples
 - GitHub Actions CI workflow for build, test, lint (clippy), and format check
   - Matrix strategy for Linux (ubuntu-latest) and macOS (macos-latest)
   - Rust 1.85 (MSRV) with cargo caching for faster builds
