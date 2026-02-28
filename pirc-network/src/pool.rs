@@ -120,8 +120,9 @@ impl ConnectionPool {
     pub async fn broadcast(&self, msg: &Message) -> Vec<(ServerId, Result<(), NetworkError>)> {
         let mut conns = self.connections.write().await;
         let mut results = Vec::with_capacity(conns.len());
+        let batch = [msg.clone()];
         for (&id, conn) in conns.iter_mut() {
-            let result = conn.send(msg.clone()).await;
+            let result = conn.send_batch(&batch).await;
             if let Err(ref e) = result {
                 warn!(%id, error = %e, "broadcast send failed");
             }

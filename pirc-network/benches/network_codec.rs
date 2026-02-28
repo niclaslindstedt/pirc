@@ -99,6 +99,56 @@ fn bench_encode_quit_no_params(c: &mut Criterion) {
     });
 }
 
+fn bench_encode_batch_100(c: &mut Criterion) {
+    let msgs: Vec<Message> = (0..100)
+        .map(|i| {
+            Message::with_prefix(
+                Prefix::Server("irc.example.com".to_owned()),
+                Command::Privmsg,
+                vec!["#channel".to_owned(), format!("message number {i}")],
+            )
+        })
+        .collect();
+
+    c.bench_function("codec_encode_batch_100", |b| {
+        b.iter(|| {
+            let mut codec = PircCodec::new();
+            let mut buf = BytesMut::with_capacity(8192);
+            for msg in &msgs {
+                codec.encode(black_box(msg.clone()), &mut buf).unwrap();
+            }
+            buf.len()
+        });
+    });
+}
+
+fn bench_decode_batch_100(c: &mut Criterion) {
+    // Pre-encode 100 messages into a buffer
+    let mut template_buf = BytesMut::with_capacity(8192);
+    let mut codec = PircCodec::new();
+    for i in 0..100 {
+        let msg = Message::with_prefix(
+            Prefix::Server("irc.example.com".to_owned()),
+            Command::Privmsg,
+            vec!["#channel".to_owned(), format!("message number {i}")],
+        );
+        codec.encode(msg, &mut template_buf).unwrap();
+    }
+    let template = template_buf.freeze();
+
+    c.bench_function("codec_decode_batch_100", |b| {
+        b.iter(|| {
+            let mut codec = PircCodec::new();
+            let mut buf = BytesMut::from(template.as_ref());
+            let mut count = 0;
+            while let Ok(Some(_)) = codec.decode(black_box(&mut buf)) {
+                count += 1;
+            }
+            count
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_decode_simple,
@@ -108,5 +158,7 @@ criterion_group!(
     bench_roundtrip,
     bench_decode_multiple_messages,
     bench_encode_quit_no_params,
+    bench_encode_batch_100,
+    bench_decode_batch_100,
 );
 criterion_main!(benches);

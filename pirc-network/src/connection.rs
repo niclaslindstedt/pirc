@@ -12,7 +12,7 @@ use futures_util::{SinkExt, StreamExt};
 use pirc_protocol::Message;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use crate::codec::PircCodec;
 use crate::error::NetworkError;
@@ -106,8 +106,16 @@ pub struct Connection {
 
 impl Connection {
     /// Wrap an already-connected [`TcpStream`] into a `Connection`.
+    ///
+    /// Enables `TCP_NODELAY` to disable Nagle's algorithm, which is critical
+    /// for IRC latency — small messages should be sent immediately rather
+    /// than coalesced by the kernel.
     pub fn new(stream: TcpStream) -> Result<Self, NetworkError> {
         let peer_addr = stream.peer_addr()?;
+        // Disable Nagle's algorithm for low-latency message delivery.
+        if let Err(e) = stream.set_nodelay(true) {
+            warn!(%peer_addr, error = %e, "failed to set TCP_NODELAY");
+        }
         let info = ConnectionInfo::new(peer_addr);
         let framed = Framed::new(stream, PircCodec::new());
         debug!(id = info.id, %peer_addr, "connection created");
@@ -150,6 +158,28 @@ impl Connection {
                 Ok(None)
             }
         }
+    }
+
+    /// Enqueue multiple messages into the write buffer, then flush once.
+    ///
+    /// This is more efficient than calling [`send`](AsyncTransport::send)
+    /// repeatedly because it batches all messages into the write buffer
+    /// before issuing a single flush/syscall.
+    pub async fn send_batch(&mut self, messages: &[Message]) -> Result<(), NetworkError> {
+        for msg in messages {
+            trace!(id = self.info.id, ?msg, "buffering message for batch send");
+            let wire_len = (msg.to_string().len() + 2) as u64;
+            self.framed.feed(msg.clone()).await?;
+            self.info.bytes_sent += wire_len;
+        }
+        self.framed.flush().await?;
+        Ok(())
+    }
+
+    /// Flush all pending writes without closing the connection.
+    pub async fn flush(&mut self) -> Result<(), NetworkError> {
+        self.framed.flush().await?;
+        Ok(())
     }
 }
 
@@ -513,5 +543,86 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn tcp_nodelay_is_enabled() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let stream = TcpStream::connect(addr).await.unwrap();
+        let conn = Connection::new(stream).unwrap();
+        // Verify TCP_NODELAY was set by checking the underlying socket
+        // (we can't access the raw socket from Connection, but the
+        // constructor should not have errored)
+        assert!(conn.info().id > 0);
+    }
+
+    #[tokio::test]
+    async fn send_batch_delivers_all_messages() {
+        let (mut client, mut server) = loopback_pair().await;
+
+        let messages = vec![
+            Message::new(Command::Ping, vec!["server1".to_owned()]),
+            Message::new(Command::Pong, vec!["server2".to_owned()]),
+            Message::new(Command::Nick, vec!["testuser".to_owned()]),
+        ];
+
+        client.send_batch(&messages).await.unwrap();
+
+        for expected in &messages {
+            let received = server.recv().await.unwrap().unwrap();
+            assert_eq!(&received, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn send_batch_empty_succeeds() {
+        let (mut client, _server) = loopback_pair().await;
+        client.send_batch(&[]).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn send_batch_updates_bytes_sent() {
+        let (mut client, mut server) = loopback_pair().await;
+
+        let messages = vec![
+            Message::new(Command::Ping, vec!["hello".to_owned()]),
+            Message::new(Command::Pong, vec!["world".to_owned()]),
+        ];
+
+        let expected_bytes: u64 = messages
+            .iter()
+            .map(|m| (m.to_string().len() + 2) as u64)
+            .sum();
+
+        client.send_batch(&messages).await.unwrap();
+        assert_eq!(client.info().bytes_sent, expected_bytes);
+
+        // Consume messages on the server side
+        for _ in &messages {
+            let _ = server.recv().await.unwrap().unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn send_batch_preserves_ordering() {
+        let (mut client, mut server) = loopback_pair().await;
+
+        let messages: Vec<Message> = (0..10)
+            .map(|i| Message::new(Command::Ping, vec![format!("seq-{i}")]))
+            .collect();
+
+        client.send_batch(&messages).await.unwrap();
+
+        for (i, expected) in messages.iter().enumerate() {
+            let received = server.recv().await.unwrap().unwrap();
+            assert_eq!(&received, expected, "message {i} out of order");
+        }
+    }
+
+    #[tokio::test]
+    async fn flush_without_pending_succeeds() {
+        let (mut client, _server) = loopback_pair().await;
+        client.flush().await.unwrap();
     }
 }

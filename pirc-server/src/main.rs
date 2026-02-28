@@ -347,10 +347,16 @@ async fn handle_connection(
                             &group_registry,
                         );
 
-                        // Drain all queued outbound messages after handling
+                        // Drain all queued outbound messages and send as a batch.
+                        // Batching reduces syscalls by buffering all messages
+                        // before a single flush.
+                        let mut outbound_batch: Vec<Message> = Vec::new();
                         while let Ok(out_msg) = rx.try_recv() {
-                            if let Err(e) = connection.send(out_msg).await {
-                                warn!(conn_id, %peer_addr, "failed to send response: {e}");
+                            outbound_batch.push(out_msg);
+                        }
+                        if !outbound_batch.is_empty() {
+                            if let Err(e) = connection.send_batch(&outbound_batch).await {
+                                warn!(conn_id, %peer_addr, "failed to send response batch: {e}");
                                 // Clean up on send failure
                                 if state.registered {
                                     if let Some(session_arc) = registry.get_by_connection(conn_id) {

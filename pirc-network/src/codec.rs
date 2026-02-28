@@ -77,6 +77,21 @@ impl Decoder for PircCodec {
         let msg = pirc_protocol::parse(line)?;
         Ok(Some(msg))
     }
+
+    fn decode_eof(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        // On EOF, try to decode any remaining complete message first.
+        match self.decode(buf)? {
+            Some(msg) => Ok(Some(msg)),
+            None => {
+                // Discard any remaining incomplete data — a partial message
+                // at EOF is not recoverable.
+                if !buf.is_empty() {
+                    buf.clear();
+                }
+                Ok(None)
+            }
+        }
+    }
 }
 
 impl Encoder<Message> for PircCodec {
@@ -244,5 +259,36 @@ mod tests {
         let mut buf = BytesMut::new();
         codec.encode(msg, &mut buf).unwrap();
         assert_eq!(&buf[..], b"QUIT\r\n");
+    }
+
+    #[test]
+    fn decode_eof_with_complete_message() {
+        let mut codec = PircCodec::new();
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(b"PING server1\r\n");
+
+        let msg = codec.decode_eof(&mut buf).unwrap().unwrap();
+        assert_eq!(msg.command, Command::Ping);
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn decode_eof_discards_partial_message() {
+        let mut codec = PircCodec::new();
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(b"PING server1"); // no \r\n
+
+        let result = codec.decode_eof(&mut buf).unwrap();
+        assert!(result.is_none());
+        assert!(buf.is_empty()); // partial data discarded
+    }
+
+    #[test]
+    fn decode_eof_empty_buffer() {
+        let mut codec = PircCodec::new();
+        let mut buf = BytesMut::new();
+
+        let result = codec.decode_eof(&mut buf).unwrap();
+        assert!(result.is_none());
     }
 }
