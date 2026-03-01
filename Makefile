@@ -1,4 +1,4 @@
-.PHONY: all build test lint fmt fmt-check clean check bench perf-test doc
+.PHONY: all build test lint fmt fmt-check clean check bench perf-test doc release
 
 build:
 	cargo build --workspace
@@ -26,6 +26,9 @@ doc:
 
 clean:
 	cargo clean
+
+release:
+	@bash scripts/release.sh $(BUMP)
 
 all: fmt-check lint build test
 

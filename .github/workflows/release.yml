@@ -1,0 +1,221 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Build Linux (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            arch: x86_64
+          - target: aarch64-unknown-linux-gnu
+            arch: aarch64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cross-compilation toolchain (aarch64)
+        if: matrix.arch == 'aarch64'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Build binaries
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: |
+          cargo build --release --bin pirc  --target ${{ matrix.target }}
+          cargo build --release --bin pircd --target ${{ matrix.target }}
+
+      - name: Strip and package binaries
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          TARGET="${{ matrix.target }}"
+
+          strip_tool="strip"
+          if [[ "${{ matrix.arch }}" == "aarch64" ]]; then
+            strip_tool="aarch64-linux-gnu-strip"
+          fi
+
+          for BIN in pirc pircd; do
+            ARCHIVE="${BIN}-v${VERSION}-${TARGET}.tar.gz"
+            "$strip_tool" "target/${TARGET}/release/${BIN}"
+            tar -czf "$ARCHIVE" \
+              -C "target/${TARGET}/release" "$BIN" \
+              LICENSE README.md
+            echo "Created $ARCHIVE"
+          done
+
+      - name: Upload pirc artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pirc-linux-${{ matrix.arch }}
+          path: pirc-v*-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+      - name: Upload pircd artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pircd-linux-${{ matrix.arch }}
+          path: pircd-v*-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: macos-13
+            arch: x86_64
+            target: x86_64-apple-darwin
+          - runner: macos-latest
+            arch: aarch64
+            target: aarch64-apple-darwin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Build binaries
+        run: |
+          cargo build --release --bin pirc  --target ${{ matrix.target }}
+          cargo build --release --bin pircd --target ${{ matrix.target }}
+
+      - name: Strip and package binaries
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          TARGET="${{ matrix.target }}"
+
+          for BIN in pirc pircd; do
+            ARCHIVE="${BIN}-v${VERSION}-${TARGET}.tar.gz"
+            strip "target/${TARGET}/release/${BIN}"
+            tar -czf "$ARCHIVE" \
+              -C "target/${TARGET}/release" "$BIN" \
+              LICENSE README.md
+            echo "Created $ARCHIVE"
+          done
+
+      - name: Upload pirc artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pirc-macos-${{ matrix.arch }}
+          path: pirc-v*-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+      - name: Upload pircd artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pircd-macos-${{ matrix.arch }}
+          path: pircd-v*-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Releases
+    needs: [build-linux, build-macos]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifact directory
+        run: |
+          mkdir -p release-files
+          find artifacts -name '*.tar.gz' -exec mv {} release-files/ \;
+          ls -la release-files/
+
+      - name: Extract changelog notes for this version
+        id: changelog
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          python3 - "$VERSION" <<'EOF'
+          import sys, re, pathlib, os
+
+          version = sys.argv[1]
+          text = pathlib.Path("CHANGELOG.md").read_text()
+
+          # Match the section for this version
+          pattern = re.compile(
+              rf'## \[{re.escape(version)}\] - \d{{4}}-\d{{2}}-\d{{2}}\n(.*?)(?=\n## \[|\Z)',
+              re.DOTALL
+          )
+          m = pattern.search(text)
+          notes = m.group(1).strip() if m else f"Release v{version}"
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("notes<<CHANGELOG_EOF\n")
+              f.write(notes + "\n")
+              f.write("CHANGELOG_EOF\n")
+          EOF
+
+      - name: Create pirc GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="${GITHUB_REF_NAME}"
+
+          gh release create "$TAG" \
+            --title "pirc v${VERSION}" \
+            --notes "${{ steps.changelog.outputs.notes }}" \
+            release-files/pirc-v*.tar.gz
+
+      - name: Create pircd GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          COMMIT_SHA="${{ github.sha }}"
+
+          # Create a lightweight tag for pircd pointing to the same commit
+          git tag "pircd-v${VERSION}" "$COMMIT_SHA" || true
+          git push origin "pircd-v${VERSION}" || true
+
+          gh release create "pircd-v${VERSION}" \
+            --title "pircd v${VERSION}" \
+            --notes "${{ steps.changelog.outputs.notes }}
+
+---
+*This release corresponds to [pirc v${VERSION}](https://github.com/${{ github.repository }}/releases/tag/v${VERSION}).*" \
+            release-files/pircd-v*.tar.gz
