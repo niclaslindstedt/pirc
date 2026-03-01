@@ -95,11 +95,18 @@ impl FailoverMessageQueue {
     }
 
     /// Rename a user's queue (e.g., on nick change).
+    ///
+    /// If the new nick already has buffered messages, the old nick's messages
+    /// are appended after them (preserving arrival order within each queue).
     pub fn rename(&mut self, old_nick: &str, new_nick: &str) {
         let old_key = old_nick.to_ascii_lowercase();
         let new_key = new_nick.to_ascii_lowercase();
-        if let Some(queue) = self.queues.remove(&old_key) {
-            self.queues.insert(new_key, queue);
+        if old_key == new_key {
+            return;
+        }
+        if let Some(old_queue) = self.queues.remove(&old_key) {
+            let entry = self.queues.entry(new_key).or_default();
+            entry.extend(old_queue);
         }
     }
 
@@ -151,6 +158,10 @@ pub fn spawn_failover_expiry_task(
         }
     })
 }
+
+#[cfg(test)]
+#[path = "failover_queue_tests.rs"]
+mod failover_queue_tests;
 
 #[cfg(test)]
 mod tests {
