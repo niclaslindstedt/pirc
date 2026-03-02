@@ -63,9 +63,9 @@ jobs:
           for BIN in pirc pircd; do
             ARCHIVE="${BIN}-v${VERSION}-${TARGET}.tar.gz"
             "$strip_tool" "target/${TARGET}/release/${BIN}"
+            cp LICENSE README.md "target/${TARGET}/release/"
             tar -czf "$ARCHIVE" \
-              -C "target/${TARGET}/release" "$BIN" \
-              LICENSE README.md
+              -C "target/${TARGET}/release" "$BIN" LICENSE README.md
             echo "Created $ARCHIVE"
           done
 
@@ -126,9 +126,9 @@ jobs:
           for BIN in pirc pircd; do
             ARCHIVE="${BIN}-v${VERSION}-${TARGET}.tar.gz"
             strip "target/${TARGET}/release/${BIN}"
+            cp LICENSE README.md "target/${TARGET}/release/"
             tar -czf "$ARCHIVE" \
-              -C "target/${TARGET}/release" "$BIN" \
-              LICENSE README.md
+              -C "target/${TARGET}/release" "$BIN" LICENSE README.md
             echo "Created $ARCHIVE"
           done
 
