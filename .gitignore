@@ -12,3 +12,5 @@
 
 .swarm/session.json
 .swarm/run.pid
+
+/dist/
