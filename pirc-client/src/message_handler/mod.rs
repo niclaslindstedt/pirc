@@ -17,6 +17,8 @@ pub enum HandlerAction {
     PushLine { target: BufferId, line: BufferLine },
     /// Ensure a channel buffer exists (open it) before pushing lines.
     OpenChannel(String),
+    /// Switch the active view to this channel (used when we ourselves join).
+    SwitchToChannel(String),
     /// Update our nick in the connection manager and view.
     UpdateNick(String),
 }
@@ -33,7 +35,7 @@ pub fn route_message(msg: &Message, our_nick: &str, ts: &str) -> Vec<HandlerActi
     match &msg.command {
         Command::Privmsg => route_privmsg(msg, our_nick, ts),
         Command::Notice => route_notice(msg, our_nick, ts),
-        Command::Join => route_join(msg, ts),
+        Command::Join => route_join(msg, our_nick, ts),
         Command::Part => route_part(msg, ts),
         Command::Quit => route_quit(msg, ts),
         Command::Kick => route_kick(msg, our_nick, ts),
@@ -137,25 +139,31 @@ fn route_notice(msg: &Message, _our_nick: &str, ts: &str) -> Vec<HandlerAction> 
     }
 }
 
-fn route_join(msg: &Message, ts: &str) -> Vec<HandlerAction> {
+fn route_join(msg: &Message, our_nick: &str, ts: &str) -> Vec<HandlerAction> {
     let channel = match msg.params.first() {
         Some(c) => c,
         None => return vec![],
     };
     let nick = sender_nick(msg).unwrap_or_default();
 
-    vec![
-        HandlerAction::OpenChannel(channel.clone()),
-        HandlerAction::PushLine {
-            target: BufferId::Channel(channel.clone()),
-            line: BufferLine {
-                timestamp: ts.to_string(),
-                sender: None,
-                content: format!("{nick} has joined {channel}"),
-                line_type: LineType::Join,
-            },
+    let mut actions = vec![HandlerAction::OpenChannel(channel.clone())];
+
+    // When we ourselves join, switch the active view to the channel.
+    if nick.eq_ignore_ascii_case(our_nick) {
+        actions.push(HandlerAction::SwitchToChannel(channel.clone()));
+    }
+
+    actions.push(HandlerAction::PushLine {
+        target: BufferId::Channel(channel.clone()),
+        line: BufferLine {
+            timestamp: ts.to_string(),
+            sender: None,
+            content: format!("{nick} has joined {channel}"),
+            line_type: LineType::Join,
         },
-    ]
+    });
+
+    actions
 }
 
 fn route_part(msg: &Message, ts: &str) -> Vec<HandlerAction> {

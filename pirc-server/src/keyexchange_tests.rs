@@ -442,3 +442,49 @@ async fn keyexchange_no_params_sends_need_more_params() {
     let reply = rx.recv().await.unwrap();
     assert_eq!(reply.numeric_code(), Some(pirc_protocol::numeric::ERR_NEEDMOREPARAMS));
 }
+
+// ---- Chunked bundle upload (PIRC KEYEXCHANGE * <n>/<total> <chunk>) ----
+
+#[tokio::test]
+async fn chunked_bundle_upload_assembles_and_stores() {
+    let registry = Arc::new(UserRegistry::new());
+    let channels = make_channels();
+    let config = make_config();
+    let prekey_store = Arc::new(PreKeyBundleStore::new());
+    let offline_store = Arc::new(OfflineMessageStore::default());
+    let group_registry = Arc::new(GroupRegistry::new());
+
+    let (tx, mut rx, mut state) = register_user(
+        "Alice", "alice", 1, "127.0.0.1", &registry, &channels, &config, &prekey_store, &offline_store,
+    );
+
+    // Build a small bundle and encode it, then split into 2 chunks.
+    let bundle_data = vec![1u8, 2, 3, 4, 5, 6];
+    let encoded = pirc_crypto::protocol::encode_for_wire(&bundle_data);
+    let mid = encoded.len() / 2;
+    let chunk1 = &encoded[..mid];
+    let chunk2 = &encoded[mid..];
+
+    // Send first chunk — no acknowledgment yet.
+    let msg1 = Message::new(
+        Command::Pirc(PircSubcommand::KeyExchange),
+        vec!["*".to_owned(), "1/2".to_owned(), chunk1.to_owned()],
+    );
+    handle_message(&msg1, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &group_registry);
+    assert!(rx.try_recv().is_err(), "no reply after first chunk");
+
+    // Send second chunk — should trigger storage and acknowledgment.
+    let msg2 = Message::new(
+        Command::Pirc(PircSubcommand::KeyExchange),
+        vec!["*".to_owned(), "2/2".to_owned(), chunk2.to_owned()],
+    );
+    handle_message(&msg2, 1, &registry, &channels, &tx, &mut state, &config, None, &prekey_store, &offline_store, &group_registry);
+
+    let reply = rx.recv().await.unwrap();
+    assert_eq!(reply.command, Command::Notice);
+    assert!(reply.trailing().unwrap().contains("Pre-key bundle registered"));
+
+    let nick = Nickname::new("Alice").unwrap();
+    let stored = prekey_store.get_bundle(&nick).unwrap();
+    assert_eq!(stored, bundle_data);
+}

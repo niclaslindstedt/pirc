@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
+
 use dashmap::DashMap;
 use pirc_common::Nickname;
 
@@ -9,6 +12,9 @@ use pirc_common::Nickname;
 /// implementations use ASCII-lowercased comparison.
 pub struct PreKeyBundleStore {
     bundles: DashMap<Nickname, Vec<u8>>,
+    /// Buffer for in-progress chunked bundle uploads. Keyed by nick.
+    /// Value is (chunks_by_index, total_chunks).
+    chunk_buffer: Mutex<HashMap<Nickname, (Vec<Option<String>>, usize)>>,
 }
 
 impl PreKeyBundleStore {
@@ -16,6 +22,36 @@ impl PreKeyBundleStore {
     pub fn new() -> Self {
         Self {
             bundles: DashMap::new(),
+            chunk_buffer: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Accumulate one chunk of a chunked bundle upload.
+    ///
+    /// `n` is 1-based; `total` is the declared total chunk count.
+    /// Returns the assembled base64 string once all `total` chunks have
+    /// arrived, or `None` if more chunks are still expected.
+    pub fn add_bundle_chunk(&self, nick: &Nickname, chunk: &str, n: usize, total: usize) -> Option<String> {
+        let mut guard = self.chunk_buffer.lock().expect("chunk buffer lock poisoned");
+        let entry = guard
+            .entry(nick.clone())
+            .or_insert_with(|| (vec![None; total], total));
+
+        // Reset buffer if the total changed (new upload attempt).
+        if entry.1 != total {
+            *entry = (vec![None; total], total);
+        }
+
+        if n >= 1 && n <= total {
+            entry.0[n - 1] = Some(chunk.to_string());
+        }
+
+        if entry.0.iter().all(|c| c.is_some()) {
+            let assembled: String = entry.0.iter().map(|c| c.as_deref().unwrap_or("")).collect();
+            guard.remove(nick);
+            Some(assembled)
+        } else {
+            None
         }
     }
 
@@ -125,5 +161,55 @@ mod tests {
         let store = PreKeyBundleStore::default();
         let alice = nick("Alice");
         assert!(store.get_bundle(&alice).is_none());
+    }
+
+    // ── add_bundle_chunk ──────────────────────────────────────────
+
+    #[test]
+    fn chunk_single_returns_immediately() {
+        let store = PreKeyBundleStore::new();
+        let alice = nick("Alice");
+        let result = store.add_bundle_chunk(&alice, "abc", 1, 1);
+        assert_eq!(result, Some("abc".to_string()));
+    }
+
+    #[test]
+    fn chunk_two_parts_assembled_in_order() {
+        let store = PreKeyBundleStore::new();
+        let alice = nick("Alice");
+        assert!(store.add_bundle_chunk(&alice, "foo", 1, 2).is_none());
+        let result = store.add_bundle_chunk(&alice, "bar", 2, 2);
+        assert_eq!(result, Some("foobar".to_string()));
+    }
+
+    #[test]
+    fn chunk_out_of_order_assembly() {
+        let store = PreKeyBundleStore::new();
+        let alice = nick("Alice");
+        assert!(store.add_bundle_chunk(&alice, "bar", 2, 2).is_none());
+        let result = store.add_bundle_chunk(&alice, "foo", 1, 2);
+        assert_eq!(result, Some("foobar".to_string()));
+    }
+
+    #[test]
+    fn chunk_buffer_cleared_after_assembly() {
+        let store = PreKeyBundleStore::new();
+        let alice = nick("Alice");
+        store.add_bundle_chunk(&alice, "x", 1, 1);
+        // A second upload should start fresh.
+        let result = store.add_bundle_chunk(&alice, "y", 1, 1);
+        assert_eq!(result, Some("y".to_string()));
+    }
+
+    #[test]
+    fn chunk_total_change_resets_buffer() {
+        let store = PreKeyBundleStore::new();
+        let alice = nick("Alice");
+        // Start a 3-chunk upload.
+        assert!(store.add_bundle_chunk(&alice, "a", 1, 3).is_none());
+        // New upload with total=2 should reset.
+        assert!(store.add_bundle_chunk(&alice, "x", 1, 2).is_none());
+        let result = store.add_bundle_chunk(&alice, "y", 2, 2);
+        assert_eq!(result, Some("xy".to_string()));
     }
 }

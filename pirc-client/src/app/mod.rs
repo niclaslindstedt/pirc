@@ -85,6 +85,9 @@ pub struct App {
     plugin_manager: PluginManager,
     /// Timestamp when the process started (for startup timing metrics).
     startup_start: std::time::Instant,
+    /// Reassembly buffers for incoming chunked `PIRC KEYEXCHANGE` messages.
+    /// Keyed by sender nick; value is (chunks_by_index, total_chunks).
+    chunk_bufs: std::collections::HashMap<String, (Vec<Option<String>>, usize)>,
 }
 
 impl App {
@@ -147,6 +150,7 @@ impl App {
             group_chat: GroupChatManager::new(),
             plugin_manager: PluginManager::new(),
             startup_start,
+            chunk_bufs: std::collections::HashMap::new(),
         }
     }
 
@@ -806,6 +810,9 @@ impl App {
                 HandlerAction::OpenChannel(name) => {
                     // Ensure the channel buffer exists (don't switch to it)
                     self.view.buffers_mut().ensure_open(BufferId::Channel(name));
+                }
+                HandlerAction::SwitchToChannel(name) => {
+                    self.view.buffers_mut().switch_to(&BufferId::Channel(name));
                 }
                 HandlerAction::UpdateNick(new_nick) => {
                     self.connection_mgr.set_nick(new_nick.clone());

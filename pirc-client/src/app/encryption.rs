@@ -16,29 +16,84 @@ use crate::encryption::EncryptionStatus;
 use crate::tui::buffer_manager::BufferId;
 use crate::tui::message_buffer::{BufferLine, LineType};
 
+/// Maximum base64 characters per PIRC KEYEXCHANGE chunk.
+///
+/// 400 bytes is conservative; the worst-case server prefix and IRC overhead
+/// consume up to ~60 bytes of the 512-byte line limit, leaving ~452 bytes.
+const KEY_EXCHANGE_CHUNK_SIZE: usize = 400;
+
+/// Parse a chunk header of the form `"<n>/<total>"`.
+///
+/// Returns `Some((n, total))` where both are 1-based and `n <= total`, or
+/// `None` if the string is not a valid header.
+fn parse_chunk_header(s: &str) -> Option<(usize, usize)> {
+    let (n_str, total_str) = s.split_once('/')?;
+    let n = n_str.parse::<usize>().ok()?;
+    let total = total_str.parse::<usize>().ok()?;
+    if n >= 1 && total >= 1 && n <= total {
+        Some((n, total))
+    } else {
+        None
+    }
+}
+
 impl App {
+    /// Send a `PIRC KEYEXCHANGE <target> <data>` message, splitting into
+    /// multiple chunks if `data` exceeds [`KEY_EXCHANGE_CHUNK_SIZE`].
+    ///
+    /// Returns `true` if all sends succeeded.
+    async fn send_chunked_key_exchange(&mut self, target: &str, data: &str) -> bool {
+        let raw = data.as_bytes();
+        if raw.len() <= KEY_EXCHANGE_CHUNK_SIZE {
+            let msg = Message::new(
+                Command::Pirc(PircSubcommand::KeyExchange),
+                vec![target.to_string(), data.to_string()],
+            );
+            if let Some(ref mut conn) = self.connection {
+                if let Err(e) = conn.send(msg).await {
+                    warn!("Failed to send key exchange to {target}: {e}");
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        let chunks: Vec<&str> = raw
+            .chunks(KEY_EXCHANGE_CHUNK_SIZE)
+            .map(|c| std::str::from_utf8(c).expect("base64 is valid UTF-8"))
+            .collect();
+        let total = chunks.len();
+        for (i, chunk) in chunks.iter().enumerate() {
+            let n = i + 1;
+            let msg = Message::new(
+                Command::Pirc(PircSubcommand::KeyExchange),
+                vec![target.to_string(), format!("{n}/{total}"), chunk.to_string()],
+            );
+            if let Some(ref mut conn) = self.connection {
+                if let Err(e) = conn.send(msg).await {
+                    warn!("Failed to send key exchange chunk {n}/{total} to {target}: {e}");
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
     /// Generate and upload our pre-key bundle to the server.
     ///
     /// Sends `PIRC KEYEXCHANGE * <base64-bundle>` where `*` as target
-    /// signals "store my bundle" to the server.
+    /// signals "store my bundle" to the server. Large bundles are split
+    /// into multiple chunks automatically.
     pub(super) async fn upload_pre_key_bundle(&mut self) {
         let bundle = self.encryption.create_pre_key_bundle();
         let bundle_msg = KeyExchangeMessage::Bundle(Box::new(bundle));
         let encoded = encode_for_wire(&bundle_msg.to_bytes());
 
-        let msg = Message::new(
-            Command::Pirc(PircSubcommand::KeyExchange),
-            vec!["*".to_string(), encoded],
-        );
-
-        if let Some(ref mut conn) = self.connection {
-            if let Err(e) = conn.send(msg).await {
-                warn!("Failed to upload pre-key bundle: {e}");
-                self.push_status(&format!("Failed to upload encryption keys: {e}"));
-                return;
-            }
-            info!("Pre-key bundle uploaded");
+        if !self.send_chunked_key_exchange("*", &encoded).await {
+            self.push_status("Failed to upload encryption keys");
+            return;
         }
+        info!("Pre-key bundle uploaded");
     }
 
     /// Handle PIRC subcommand messages related to encryption.
@@ -53,8 +108,40 @@ impl App {
 
         match &msg.command {
             Command::Pirc(PircSubcommand::KeyExchange) => {
-                if let Some(data) = msg.params.get(1) {
-                    self.handle_key_exchange_message(&sender, data).await;
+                // Detect chunked form: params = [target, "n/total", chunk_data]
+                let assembled: Option<String> = if msg.params.len() >= 3 {
+                    if let Some((n, total)) = parse_chunk_header(msg.params[1].as_str()) {
+                        let chunk = msg.params[2].clone();
+                        let entry = self
+                            .chunk_bufs
+                            .entry(sender.clone())
+                            .or_insert_with(|| (vec![None; total], total));
+                        if entry.1 != total {
+                            *entry = (vec![None; total], total);
+                        }
+                        if n >= 1 && n <= total {
+                            entry.0[n - 1] = Some(chunk);
+                        }
+                        if entry.0.iter().all(|c| c.is_some()) {
+                            let joined: String = entry
+                                .0
+                                .iter()
+                                .map(|c| c.as_deref().unwrap_or(""))
+                                .collect();
+                            self.chunk_bufs.remove(&sender);
+                            Some(joined)
+                        } else {
+                            None
+                        }
+                    } else {
+                        msg.params.get(1).cloned()
+                    }
+                } else {
+                    msg.params.get(1).cloned()
+                };
+
+                if let Some(data) = assembled {
+                    self.handle_key_exchange_message(&sender, &data).await;
                 }
                 true
             }
@@ -111,21 +198,14 @@ impl App {
 
     /// Handle a `RequestBundle` — someone wants our pre-key bundle.
     ///
-    /// Generates our bundle and sends it back to the requester.
+    /// Generates our bundle and sends it back to the requester, chunked if necessary.
     async fn handle_request_bundle(&mut self, requester: &str) {
         let bundle = self.encryption.create_pre_key_bundle();
         let bundle_msg = KeyExchangeMessage::Bundle(Box::new(bundle));
         let encoded = encode_for_wire(&bundle_msg.to_bytes());
 
-        let msg = Message::new(
-            Command::Pirc(PircSubcommand::KeyExchange),
-            vec![requester.to_string(), encoded],
-        );
-
-        if let Some(ref mut conn) = self.connection {
-            if let Err(e) = conn.send(msg).await {
-                warn!("Failed to send bundle to {requester}: {e}");
-            }
+        if !self.send_chunked_key_exchange(requester, &encoded).await {
+            warn!("Failed to send bundle to {requester}");
         }
     }
 
@@ -148,21 +228,13 @@ impl App {
             }
         };
 
-        // Send the X3DH init message to the peer
+        // Send the X3DH init message to the peer, chunked if necessary.
         let init_ke = KeyExchangeMessage::InitMessage(Box::new(init_msg));
         let encoded = encode_for_wire(&init_ke.to_bytes());
 
-        let msg = Message::new(
-            Command::Pirc(PircSubcommand::KeyExchange),
-            vec![peer.to_string(), encoded],
-        );
-
-        if let Some(ref mut conn) = self.connection {
-            if let Err(e) = conn.send(msg).await {
-                warn!("Failed to send init message to {peer}: {e}");
-                self.push_status(&format!("Failed to send key exchange to {peer}: {e}"));
-                return;
-            }
+        if !self.send_chunked_key_exchange(peer, &encoded).await {
+            self.push_status(&format!("Failed to send key exchange to {peer}"));
+            return;
         }
 
         // Send any queued encrypted messages

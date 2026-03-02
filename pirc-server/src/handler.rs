@@ -1081,18 +1081,40 @@ fn handle_key_exchange(
         }
     };
 
+    // Maximum base64 chars per chunk when delivering a stored bundle.
+    const BUNDLE_CHUNK_SIZE: usize = 400;
+
     if is_request_bundle {
         // Look up the target's pre-key bundle in the store.
         if let Some(bundle_data) = prekey_store.get_bundle(&target_nick) {
-            // Send the bundle back to the requester as:
-            // :server PIRC KEYEXCHANGE <sender_nick> <base64-bundle-data>
+            // Send the bundle back to the requester.
+            // If it is too large for a single IRC message, split into chunks.
             let encoded = pirc_crypto::protocol::encode_for_wire(&bundle_data);
-            let reply = Message::builder(Command::Pirc(PircSubcommand::KeyExchange))
-                .prefix(Prefix::server(SERVER_NAME))
-                .param(sender_nick.as_ref())
-                .param(&encoded)
-                .build();
-            let _ = sender.send(reply);
+            if encoded.len() > BUNDLE_CHUNK_SIZE {
+                let raw = encoded.as_bytes();
+                let chunks: Vec<&str> = raw
+                    .chunks(BUNDLE_CHUNK_SIZE)
+                    .map(|c| std::str::from_utf8(c).expect("base64 is valid UTF-8"))
+                    .collect();
+                let total = chunks.len();
+                for (i, chunk) in chunks.iter().enumerate() {
+                    let n = i + 1;
+                    let reply = Message::builder(Command::Pirc(PircSubcommand::KeyExchange))
+                        .prefix(Prefix::server(SERVER_NAME))
+                        .param(sender_nick.as_ref())
+                        .param(&format!("{n}/{total}"))
+                        .param(chunk)
+                        .build();
+                    let _ = sender.send(reply);
+                }
+            } else {
+                let reply = Message::builder(Command::Pirc(PircSubcommand::KeyExchange))
+                    .prefix(Prefix::server(SERVER_NAME))
+                    .param(sender_nick.as_ref())
+                    .param(&encoded)
+                    .build();
+                let _ = sender.send(reply);
+            }
         } else {
             // Target has no bundle stored.
             let notice = Message::builder(Command::Notice)
@@ -1106,6 +1128,8 @@ fn handle_key_exchange(
         }
     } else {
         // Relay the key exchange message to the target user.
+        // Forward all params after the target (supports both single-param and
+        // chunked n/total + chunk_data forms).
         let sender_session = registry
             .get_by_connection(connection_id)
             .expect("sender session must exist");
@@ -1113,15 +1137,17 @@ fn handle_key_exchange(
             let s = sender_session.read().expect("session lock poisoned");
             (s.username.clone(), s.hostname.clone())
         };
-        let relay = Message::builder(Command::Pirc(PircSubcommand::KeyExchange))
+        let mut relay_builder = Message::builder(Command::Pirc(PircSubcommand::KeyExchange))
             .prefix(Prefix::User {
                 nick: sender_nick.clone(),
                 user: username,
                 host: hostname,
             })
-            .param(target_nick.as_ref())
-            .param(&msg.params[1])
-            .build();
+            .param(target_nick.as_ref());
+        for param in msg.params.iter().skip(1) {
+            relay_builder = relay_builder.param(param);
+        }
+        let relay = relay_builder.build();
 
         if let Some(session_arc) = registry.get_by_nick(&target_nick) {
             let session = session_arc.read().expect("session lock poisoned");
@@ -1141,11 +1167,28 @@ fn handle_key_exchange(
     }
 }
 
+/// Parse a chunk header of the form `"<n>/<total>"`.
+///
+/// Returns `Some((n, total))` where both are 1-based and `n <= total`, or
+/// `None` if the string is not a valid header.
+fn parse_chunk_header(s: &str) -> Option<(usize, usize)> {
+    let (n_str, total_str) = s.split_once('/')?;
+    let n = n_str.parse::<usize>().ok()?;
+    let total = total_str.parse::<usize>().ok()?;
+    if n >= 1 && total >= 1 && n <= total {
+        Some((n, total))
+    } else {
+        None
+    }
+}
+
 /// Handle `PIRC KEYEXCHANGE` for bundle registration (storing a user's pre-key
 /// bundle on the server). Called when a user sends their own bundle to the
 /// server for storage.
 ///
-/// Wire format: `PIRC KEYEXCHANGE * <base64-bundle-data>`
+/// Wire formats:
+/// - Single message: `PIRC KEYEXCHANGE * <base64-bundle-data>`
+/// - Chunked:        `PIRC KEYEXCHANGE * <n>/<total> <base64-chunk>`
 ///
 /// When target is `*` (self), the server stores the bundle data in the
 /// [`PreKeyBundleStore`] keyed by the sender's nickname.
@@ -1173,8 +1216,23 @@ pub(crate) fn maybe_store_prekey_bundle(
         None => return,
     };
 
+    // Determine the full base64-encoded payload, handling chunked uploads.
+    let encoded: String = if msg.params.len() >= 3 {
+        if let Some((n, total)) = parse_chunk_header(&msg.params[1]) {
+            // Chunked form: accumulate and wait for completion.
+            match prekey_store.add_bundle_chunk(&sender_nick, &msg.params[2], n, total) {
+                Some(assembled) => assembled,
+                None => return, // more chunks expected
+            }
+        } else {
+            msg.params[1].clone()
+        }
+    } else {
+        msg.params[1].clone()
+    };
+
     // Decode and validate that this is a Bundle message.
-    let Ok(data) = pirc_crypto::protocol::decode_from_wire(&msg.params[1]) else {
+    let Ok(data) = pirc_crypto::protocol::decode_from_wire(&encoded) else {
         let notice = Message::builder(Command::Notice)
             .prefix(Prefix::server(SERVER_NAME))
             .param(sender_nick.as_ref())

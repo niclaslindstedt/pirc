@@ -191,6 +191,24 @@ fn join_missing_channel() {
     assert!(actions.is_empty());
 }
 
+#[test]
+fn join_self_emits_switch_to_channel() {
+    let msg = Message::with_prefix(user_prefix("mynick"), Command::Join, vec!["#rust".into()]);
+    let actions = route_message(&msg, "mynick", TS);
+    assert!(actions
+        .iter()
+        .any(|a| matches!(a, HandlerAction::SwitchToChannel(c) if c == "#rust")));
+}
+
+#[test]
+fn join_other_user_does_not_switch() {
+    let msg = Message::with_prefix(user_prefix("alice"), Command::Join, vec!["#rust".into()]);
+    let actions = route_message(&msg, "mynick", TS);
+    assert!(!actions
+        .iter()
+        .any(|a| matches!(a, HandlerAction::SwitchToChannel(_))));
+}
+
 // ── PART ────────────────────────────────────────────────────────
 
 #[test]
