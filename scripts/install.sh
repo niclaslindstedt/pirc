@@ -67,21 +67,33 @@ resolve_install_dir() {
 
 # ── fetch latest version from GitHub ────────────────────────────────────────
 
+_parse_version() {
+  # Parse JSON from stdin; pick first tag_name matching v{semver}.
+  # Use python3 for reliable JSON parsing; fall back to awk.
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c '
+import sys, json
+try:
+    releases = json.load(sys.stdin)
+    for r in releases:
+        tag = r.get("tag_name", "")
+        if len(tag) > 1 and tag[0] == "v" and tag[1].isdigit():
+            print(tag[1:])
+            break
+except Exception:
+    pass
+'
+  else
+    # awk: split on " and look for tag_name field whose value starts with v+digit
+    awk -F'"' '/"tag_name"/ { for (i=1;i<=NF;i++) if ($i=="tag_name" && $(i+2)~/^v[0-9]/) { print substr($(i+2),2); exit } }'
+  fi
+}
+
 fetch_latest_version() {
-  # List all releases and pick the first tag that looks like v{semver},
-  # skipping per-binary tags like pircd-v0.1.1.
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "https://api.github.com/repos/${REPO}/releases" \
-      | grep '"tag_name"' \
-      | grep '"v[0-9]' \
-      | head -1 \
-      | sed 's/.*"tag_name": *"v\([^"]*\)".*/\1/'
+    curl -fsSL "https://api.github.com/repos/${REPO}/releases" | _parse_version
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO- "https://api.github.com/repos/${REPO}/releases" \
-      | grep '"tag_name"' \
-      | grep '"v[0-9]' \
-      | head -1 \
-      | sed 's/.*"tag_name": *"v\([^"]*\)".*/\1/'
+    wget -qO- "https://api.github.com/repos/${REPO}/releases" | _parse_version
   else
     err "curl or wget is required"
   fi
