@@ -15,10 +15,36 @@ A modern, terminal-based IRC client and distributed server written in Rust. Insp
 - **Native plugin system** — compiled Rust dynamic libraries (`.so`/`.dylib`) with a C FFI API
 - **Zero-config startup** — connect with just a server address and nickname
 
-## Prerequisites
+## Installation
 
-- **Rust** stable toolchain (minimum supported version: 1.85)
-- **Make** (for build commands)
+### Download pre-built binaries (recommended)
+
+Install both `pirc` and `pircd` with a single command — platform is auto-detected:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/niclaslindstedt/pirc/main/scripts/install.sh | sh
+```
+
+Binaries are installed to `/usr/local/bin` (or `~/.local/bin` if that isn't writable). Supported platforms: **macOS** (Apple Silicon and Intel) and **Linux** (x86_64 and aarch64).
+
+**Options** (pass via environment variables):
+
+```bash
+# Install a specific version
+PIRC_VERSION=0.1.1 curl -fsSL ... | sh
+
+# Install only the server daemon
+BINARIES=pircd curl -fsSL ... | sh
+
+# Install to a custom directory
+INSTALL_DIR=~/.local/bin curl -fsSL ... | sh
+```
+
+Or download a specific release archive manually from the [releases page](https://github.com/niclaslindstedt/pirc/releases).
+
+### Build from source
+
+Requires a **Rust** stable toolchain (minimum supported version: 1.85) and **Make**.
 
 Install Rust via [rustup](https://rustup.rs/):
 
@@ -26,12 +52,10 @@ Install Rust via [rustup](https://rustup.rs/):
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-## Installation
-
-Clone the repository and build:
+Then clone and build:
 
 ```bash
-git clone https://github.com/your-org/pirc.git
+git clone https://github.com/niclaslindstedt/pirc.git
 cd pirc
 make build
 ```
