@@ -1,4 +1,6 @@
-.PHONY: all build test lint fmt fmt-check clean check bench perf-test doc release
+.PHONY: all build test lint fmt fmt-check clean check bench perf-test doc release install
+
+INSTALL_DIR ?= $(shell if [ -w /usr/local/bin ]; then echo /usr/local/bin; elif [ -d $(HOME)/.local/bin ]; then echo $(HOME)/.local/bin; else echo $(HOME)/.local/bin; fi)
 
 build:
 	cargo build --workspace
@@ -26,6 +28,15 @@ doc:
 
 clean:
 	cargo clean
+
+install: release-build
+	@mkdir -p $(INSTALL_DIR)
+	install -m 755 target/release/pirc $(INSTALL_DIR)/pirc
+	install -m 755 target/release/pircd $(INSTALL_DIR)/pircd
+	@echo "Installed pirc and pircd to $(INSTALL_DIR)"
+
+release-build:
+	cargo build --release --workspace
 
 release:
 	@bash scripts/release.sh $(BUMP)

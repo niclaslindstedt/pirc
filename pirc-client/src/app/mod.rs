@@ -330,21 +330,21 @@ impl App {
     async fn initiate_connection(&mut self) {
         let addr_str = self.connection_mgr.server_addr().to_string();
 
-        // Resolve the address
-        let addr = match addr_str.to_socket_addrs() {
-            Ok(mut addrs) => {
-                if let Some(a) = addrs.next() {
-                    a
-                } else {
-                    self.push_status(&format!("Could not resolve {addr_str}"));
-                    return;
-                }
-            }
+        // Collect ALL resolved addresses (not just the first) so we can try
+        // each in order. On macOS, `localhost` resolves to ::1 (IPv6) before
+        // 127.0.0.1 (IPv4), but the server may only listen on IPv4.
+        let addrs: Vec<std::net::SocketAddr> = match addr_str.to_socket_addrs() {
+            Ok(addrs) => addrs.collect(),
             Err(e) => {
                 self.push_status(&format!("Could not resolve {addr_str}: {e}"));
                 return;
             }
         };
+
+        if addrs.is_empty() {
+            self.push_status(&format!("Could not resolve {addr_str}"));
+            return;
+        }
 
         // Transition to Connecting
         if self
@@ -356,46 +356,56 @@ impl App {
         }
 
         let connector = Connector::new();
-        match connector.connect(addr).await {
-            Ok(conn) => {
-                self.connection = Some(conn);
+        let mut last_err: Option<pirc_network::NetworkError> = None;
 
-                // Transition to Registering
-                if self
-                    .connection_mgr
-                    .transition(ConnectionState::Registering)
-                    .is_err()
-                {
+        for addr in &addrs {
+            match connector.connect(*addr).await {
+                Ok(conn) => {
+                    self.connection = Some(conn);
+
+                    // Transition to Registering
+                    if self
+                        .connection_mgr
+                        .transition(ConnectionState::Registering)
+                        .is_err()
+                    {
+                        return;
+                    }
+
+                    // Build registration state from config
+                    let nick = self.connection_mgr.nick().to_string();
+                    let username = nick.clone();
+                    let realname = self
+                        .config
+                        .identity
+                        .realname
+                        .clone()
+                        .unwrap_or_else(|| nick.clone());
+                    let alt_nicks = self.config.identity.alt_nicks.clone();
+
+                    let reg = RegistrationState::new(nick, alt_nicks, username, realname);
+
+                    // Send NICK and USER via the registration state
+                    self.send_registration_messages(&reg).await;
+
+                    self.registration = Some(reg);
+                    self.registration_deadline = Some(Instant::now() + REGISTRATION_TIMEOUT);
+
+                    self.push_status(&format!("Connected to {addr_str}, registering..."));
                     return;
                 }
-
-                // Build registration state from config
-                let nick = self.connection_mgr.nick().to_string();
-                let username = nick.clone();
-                let realname = self
-                    .config
-                    .identity
-                    .realname
-                    .clone()
-                    .unwrap_or_else(|| nick.clone());
-                let alt_nicks = self.config.identity.alt_nicks.clone();
-
-                let reg = RegistrationState::new(nick, alt_nicks, username, realname);
-
-                // Send NICK and USER via the registration state
-                self.send_registration_messages(&reg).await;
-
-                self.registration = Some(reg);
-                self.registration_deadline = Some(Instant::now() + REGISTRATION_TIMEOUT);
-
-                self.push_status(&format!("Connected to {addr_str}, registering..."));
+                Err(e) => {
+                    last_err = Some(e);
+                }
             }
-            Err(e) => {
-                let _ = self
-                    .connection_mgr
-                    .transition(ConnectionState::Disconnected);
-                self.push_status(&format!("Connection failed: {e}"));
-            }
+        }
+
+        // All addresses failed
+        let _ = self
+            .connection_mgr
+            .transition(ConnectionState::Disconnected);
+        if let Some(e) = last_err {
+            self.push_status(&format!("Connection failed: {e}"));
         }
     }
 
