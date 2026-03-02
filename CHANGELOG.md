@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-03-02
+
 ### Added
 - Crate-level rustdoc comments for `pirc-server` and `pirc-client`
 - `make doc` target for generating workspace documentation via `cargo doc`
@@ -73,3 +75,6 @@ Initial release of pirc — a modern IRC client and server implementation in Rus
 - End-to-end integration test suite
 - Performance optimization and OWASP-style security audit
 - CI/CD pipeline and project documentation
+
+[Unreleased]: https://github.com/niclaslindstedt/pirc/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/niclaslindstedt/pirc/compare/v0.1.0...v0.1.1
