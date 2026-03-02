@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "auto-respond-plugin"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "pirc-plugin",
 ]
@@ -522,7 +522,7 @@ checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 
 [[package]]
 name = "hello-plugin"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "pirc-plugin",
 ]
@@ -710,7 +710,7 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "logger-plugin"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "pirc-plugin",
 ]
@@ -866,7 +866,7 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
 name = "pirc-client"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "hostname",
  "libc",
@@ -889,7 +889,7 @@ dependencies = [
 
 [[package]]
 name = "pirc-common"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "dirs",
  "serde",
@@ -900,7 +900,7 @@ dependencies = [
 
 [[package]]
 name = "pirc-crypto"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -922,7 +922,7 @@ dependencies = [
 
 [[package]]
 name = "pirc-integration-tests"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "libloading",
  "pirc-common",
@@ -940,7 +940,7 @@ dependencies = [
 
 [[package]]
 name = "pirc-network"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "bytes",
  "criterion",
@@ -955,7 +955,7 @@ dependencies = [
 
 [[package]]
 name = "pirc-p2p"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "hmac",
  "md5",
@@ -968,7 +968,7 @@ dependencies = [
 
 [[package]]
 name = "pirc-plugin"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "libloading",
  "pirc-common",
@@ -978,7 +978,7 @@ dependencies = [
 
 [[package]]
 name = "pirc-protocol"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "criterion",
  "memchr",
@@ -988,7 +988,7 @@ dependencies = [
 
 [[package]]
 name = "pirc-scripting"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "pirc-common",
  "regex",
@@ -997,7 +997,7 @@ dependencies = [
 
 [[package]]
 name = "pirc-server"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64",
  "criterion",
