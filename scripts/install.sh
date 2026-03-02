@@ -68,13 +68,19 @@ resolve_install_dir() {
 # ── fetch latest version from GitHub ────────────────────────────────────────
 
 fetch_latest_version() {
+  # List all releases and pick the first tag that looks like v{semver},
+  # skipping per-binary tags like pircd-v0.1.1.
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+    curl -fsSL "https://api.github.com/repos/${REPO}/releases" \
       | grep '"tag_name"' \
+      | grep '"v[0-9]' \
+      | head -1 \
       | sed 's/.*"tag_name": *"v\([^"]*\)".*/\1/'
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO- "https://api.github.com/repos/${REPO}/releases/latest" \
+    wget -qO- "https://api.github.com/repos/${REPO}/releases" \
       | grep '"tag_name"' \
+      | grep '"v[0-9]' \
+      | head -1 \
       | sed 's/.*"tag_name": *"v\([^"]*\)".*/\1/'
   else
     err "curl or wget is required"
