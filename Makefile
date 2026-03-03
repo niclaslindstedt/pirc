@@ -1,4 +1,4 @@
-.PHONY: all build test lint fmt fmt-check clean check bench perf-test doc release install
+.PHONY: all build test lint fmt fmt-check clean check bench perf-test doc release install dev dev-down dev-logs
 
 INSTALL_DIR ?= $(shell if [ -w /usr/local/bin ]; then echo /usr/local/bin; elif [ -d $(HOME)/.local/bin ]; then echo $(HOME)/.local/bin; else echo $(HOME)/.local/bin; fi)
 
@@ -44,3 +44,16 @@ release:
 all: fmt-check lint build test
 
 check: all
+
+dev:
+	docker build -f docker/pircd/Dockerfile.dev -t pirc-dev:latest .
+	docker compose -f docker-compose.dev.yml up -d
+	@echo "Waiting for dev cluster to bootstrap..."
+	@sleep 15
+	cargo run --bin pirc -- --config docker/dev-pirc.toml
+
+dev-down:
+	docker compose -f docker-compose.dev.yml down -v
+
+dev-logs:
+	docker compose -f docker-compose.dev.yml logs -f

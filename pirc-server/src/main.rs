@@ -78,10 +78,36 @@ async fn main() {
         process::exit(1);
     }
 
-    // Initialize tracing subscriber
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&config.log_level));
-    tracing_subscriber::fmt().with_env_filter(env_filter).init();
+    // Initialize tracing subscriber with dual stdout + file output.
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::EnvFilter;
+
+    let server_name = config.cluster.node_id.as_deref().unwrap_or("pircd");
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/tmp"));
+    let log_dir = home.join(".pirc").join("logs").join(server_name);
+    if let Err(e) = std::fs::create_dir_all(&log_dir) {
+        eprintln!("error: failed to create log directory {}: {e}", log_dir.display());
+        process::exit(1);
+    }
+    let log_filename = format!("{}.log", chrono::Local::now().format("%Y-%m-%d_%H-%M-%S"));
+    let file_appender = tracing_appender::rolling::never(&log_dir, &log_filename);
+    let (non_blocking_writer, _guard) = tracing_appender::non_blocking(file_appender);
+
+    let stdout_layer = tracing_subscriber::fmt::layer()
+        .with_filter(EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new(&config.log_level)));
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .with_writer(non_blocking_writer)
+        .with_filter(EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new(&config.log_level)));
+    tracing_subscriber::registry()
+        .with(stdout_layer)
+        .with(file_layer)
+        .init();
+    info!(log_file = %log_dir.join(&log_filename).display(), "log file opened");
 
     let addr: SocketAddr = format!("{}:{}", config.network.bind_address, config.network.port)
         .parse()

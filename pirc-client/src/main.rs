@@ -26,6 +26,7 @@ use app::App;
 use config::ClientConfig;
 use std::path::PathBuf;
 use std::process;
+use tracing_subscriber::prelude::*;
 
 fn parse_config_path() -> Option<PathBuf> {
     let args: Vec<String> = std::env::args().collect();
@@ -59,6 +60,24 @@ async fn main() {
         eprintln!("error: {e}");
         process::exit(1);
     }
+
+    // Initialize file-only logging (no stdout — TUI would corrupt terminal).
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/tmp"));
+    let log_dir = home.join(".pirc").join("logs").join("client");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_filename = format!("{}.log", chrono::Local::now().format("%Y-%m-%d_%H-%M-%S"));
+    let file_appender = tracing_appender::rolling::never(&log_dir, &log_filename);
+    let (non_blocking_writer, _guard) = tracing_appender::non_blocking(file_appender);
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .with_writer(non_blocking_writer)
+        .with_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        );
+    tracing_subscriber::registry().with(file_layer).init();
 
     let app = App::new(config);
 

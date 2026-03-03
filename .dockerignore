@@ -1,0 +1,10 @@
+target/
+.git/
+dist/
+docs/
+examples/
+.claude/
+.devcontainer/
+.github/
+.swarm/
+*.log

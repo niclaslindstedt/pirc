@@ -77,6 +77,11 @@ impl InputHandler {
         &mut self.line
     }
 
+    /// Update the scroll offset of the input line to keep the cursor visible.
+    pub fn update_scroll(&mut self, visible_width: usize) {
+        self.line.update_scroll(visible_width);
+    }
+
     /// Update the nick candidates used for tab completion.
     pub fn set_nick_candidates(&mut self, nicks: Vec<String>) {
         self.nick_candidates = nicks;

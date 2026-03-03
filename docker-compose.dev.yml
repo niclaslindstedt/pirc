@@ -1,0 +1,84 @@
+name: pirc-dev
+
+services:
+  pircd-1:
+    image: pirc-dev:latest
+    hostname: pircd-1
+    environment:
+      - NODE_ID=node-1
+      - CLUSTER_BOOTSTRAP=true
+      - RAFT_PORT=6668
+      - OPERATOR_NAME=admin
+      - OPERATOR_PASSWORD=devpassword
+      - LOG_LEVEL=debug
+    ports:
+      - "6667:6667"
+    volumes:
+      - pircd-dev-1:/data
+      - cluster-init-dev:/cluster-init
+      - ${HOME}/.pirc/logs/node-1:/root/.pirc/logs/node-1
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "6667"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  pircd-2:
+    image: pirc-dev:latest
+    hostname: pircd-2
+    environment:
+      - NODE_ID=node-2
+      - CLUSTER_JOIN_ADDRESS=pircd-1:6668
+      - RAFT_PORT=6669
+      - OPERATOR_NAME=admin
+      - OPERATOR_PASSWORD=devpassword
+      - LOG_LEVEL=debug
+    ports:
+      - "6668:6667"
+    volumes:
+      - pircd-dev-2:/data
+      - cluster-init-dev:/cluster-init:ro
+      - ${HOME}/.pirc/logs/node-2:/root/.pirc/logs/node-2
+    depends_on:
+      pircd-1: { condition: service_healthy }
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "6667"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  pircd-3:
+    image: pirc-dev:latest
+    hostname: pircd-3
+    environment:
+      - NODE_ID=node-3
+      - CLUSTER_JOIN_ADDRESS=pircd-1:6668
+      - RAFT_PORT=6670
+      - OPERATOR_NAME=admin
+      - OPERATOR_PASSWORD=devpassword
+      - LOG_LEVEL=debug
+    ports:
+      - "6669:6667"
+    volumes:
+      - pircd-dev-3:/data
+      - cluster-init-dev:/cluster-init:ro
+      - ${HOME}/.pirc/logs/node-3:/root/.pirc/logs/node-3
+    depends_on:
+      pircd-1: { condition: service_healthy }
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "6667"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  pircd-dev-1:
+  pircd-dev-2:
+  pircd-dev-3:
+  cluster-init-dev:

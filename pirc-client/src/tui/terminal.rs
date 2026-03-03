@@ -112,10 +112,9 @@ impl RawModeGuard {
             fd,
         };
 
-        // Enter alternate screen buffer and hide cursor
+        // Enter alternate screen buffer
         let mut stdout = io::stdout().lock();
         stdout.write_all(b"\x1b[?1049h")?; // alternate screen
-        stdout.write_all(b"\x1b[?25l")?; // hide cursor
         stdout.flush()?;
 
         Ok(guard)

@@ -1,0 +1,100 @@
+name: pirc
+
+services:
+  haproxy:
+    image: haproxy:3-alpine
+    ports:
+      - "${IRC_PORT:-6667}:6667"
+    volumes:
+      - ./docker/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      pircd-1: { condition: service_healthy }
+      pircd-2: { condition: service_healthy }
+      pircd-3: { condition: service_healthy }
+    restart: unless-stopped
+
+  pircd-1:
+    build: ./docker/pircd
+    hostname: pircd-1
+    environment:
+      - NODE_ID=node-1
+      - CLUSTER_BOOTSTRAP=true
+      - RAFT_PORT=6668
+      - OPERATOR_NAME=${OPERATOR_NAME:-admin}
+      - OPERATOR_PASSWORD=${OPERATOR_PASSWORD:?OPERATOR_PASSWORD is required}
+    volumes:
+      - pircd-1-data:/data
+      - cluster-init:/cluster-init
+    stop_grace_period: 2m
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "6667"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  pircd-2:
+    build: ./docker/pircd
+    hostname: pircd-2
+    environment:
+      - NODE_ID=node-2
+      - CLUSTER_JOIN_ADDRESS=pircd-1:6668
+      - RAFT_PORT=6669
+      - OPERATOR_NAME=${OPERATOR_NAME:-admin}
+      - OPERATOR_PASSWORD=${OPERATOR_PASSWORD:-}
+    volumes:
+      - pircd-2-data:/data
+      - cluster-init:/cluster-init:ro
+    depends_on:
+      pircd-1: { condition: service_healthy }
+    stop_grace_period: 2m
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "6667"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  pircd-3:
+    build: ./docker/pircd
+    hostname: pircd-3
+    environment:
+      - NODE_ID=node-3
+      - CLUSTER_JOIN_ADDRESS=pircd-1:6668
+      - RAFT_PORT=6670
+      - OPERATOR_NAME=${OPERATOR_NAME:-admin}
+      - OPERATOR_PASSWORD=${OPERATOR_PASSWORD:-}
+    volumes:
+      - pircd-3-data:/data
+      - cluster-init:/cluster-init:ro
+    depends_on:
+      pircd-1: { condition: service_healthy }
+    stop_grace_period: 2m
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "6667"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  updater:
+    build: ./docker/updater
+    environment:
+      - CHECK_INTERVAL=${UPDATE_CHECK_INTERVAL:-3600}
+      - GRACE_PERIOD=${ROLLING_GRACE_PERIOD:-90}
+      - INTER_NODE_PAUSE=${INTER_NODE_PAUSE:-60}
+      - COMPOSE_PROJECT_NAME=pirc
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      pircd-1: { condition: service_healthy }
+    restart: unless-stopped
+
+volumes:
+  pircd-1-data:
+  pircd-2-data:
+  pircd-3-data:
+  cluster-init:

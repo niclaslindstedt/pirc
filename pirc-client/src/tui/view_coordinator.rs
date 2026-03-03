@@ -110,6 +110,11 @@ impl ViewCoordinator {
         &mut self.input
     }
 
+    /// Update the input line scroll offset to keep the cursor visible.
+    pub fn update_input_scroll(&mut self, available: usize) {
+        self.input.update_scroll(available);
+    }
+
     /// Return true if search mode is active.
     pub fn is_search_active(&self) -> bool {
         self.search.is_active()

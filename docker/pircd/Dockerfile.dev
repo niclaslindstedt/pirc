@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+FROM rust:1.85-bookworm AS builder
+WORKDIR /workspace
+COPY . .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/workspace/target \
+    cargo build --bin pircd && \
+    cp target/debug/pircd /pircd
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y \
+    ca-certificates netcat-openbsd python3 \
+    && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /data /opt/pirc /cluster-init
+COPY --from=builder /pircd /opt/pirc/pircd
+COPY docker/pircd/entrypoint.dev.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh /opt/pirc/pircd
+EXPOSE 6667 6668
+ENTRYPOINT ["/entrypoint.sh"]

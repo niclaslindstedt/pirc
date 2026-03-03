@@ -16,6 +16,7 @@ pub struct Renderer<W: Write> {
     output: W,
     width: u16,
     height: u16,
+    cursor_pos: Option<(u16, u16)>,
 }
 
 impl<W: Write> Renderer<W> {
@@ -29,6 +30,7 @@ impl<W: Write> Renderer<W> {
             output,
             width,
             height,
+            cursor_pos: None,
         }
     }
 
@@ -47,12 +49,26 @@ impl<W: Write> Renderer<W> {
         self.height
     }
 
+    /// Set the desired cursor position for this frame (0-based col and row).
+    ///
+    /// After flushing the diff, the renderer will move the terminal cursor
+    /// to this position and make it visible.
+    pub fn set_cursor(&mut self, col: u16, row: u16) {
+        self.cursor_pos = Some((col, row));
+    }
+
     /// Compare front and back buffers, emit ANSI sequences for changed cells,
     /// then update the front buffer to match.
     #[allow(clippy::cast_possible_truncation)]
     pub fn flush(&mut self) -> io::Result<()> {
         if self.width == 0 || self.height == 0 {
             return Ok(());
+        }
+
+        // Hide cursor during diff output to prevent flickering (only when we
+        // will reposition it at the end — i.e., when cursor_pos is set).
+        if self.cursor_pos.is_some() {
+            ansi::hide_cursor(&mut self.output)?;
         }
 
         let mut current_style: Option<Style> = None;
@@ -108,6 +124,12 @@ impl<W: Write> Renderer<W> {
         // Reset style at end of frame
         if current_style.is_some() && current_style != Some(Style::new()) {
             Style::write_reset(&mut self.output)?;
+        }
+
+        // Reposition terminal cursor and show it if a position was set.
+        if let Some((col, row)) = self.cursor_pos {
+            ansi::move_to(&mut self.output, col + 1, row + 1)?;
+            ansi::show_cursor(&mut self.output)?;
         }
 
         self.output.flush()?;

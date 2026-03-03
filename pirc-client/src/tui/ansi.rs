@@ -79,6 +79,16 @@ pub fn reset_scroll_region(w: &mut impl Write) -> io::Result<()> {
     w.write_all(b"\x1b[r")
 }
 
+/// Hide the terminal cursor.
+pub fn hide_cursor(w: &mut impl Write) -> io::Result<()> {
+    w.write_all(b"\x1b[?25l")
+}
+
+/// Show the terminal cursor.
+pub fn show_cursor(w: &mut impl Write) -> io::Result<()> {
+    w.write_all(b"\x1b[?25h")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

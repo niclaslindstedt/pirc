@@ -1076,8 +1076,16 @@ impl App {
 
         self.view.render(renderer.back_buffer());
 
-        // Render input line at the bottom
-        self.render_input_line(renderer.back_buffer());
+        // Update scroll offset before rendering so the cursor stays in view.
+        let width = renderer.width() as usize;
+        let prompt_len = format!("[{}] ", self.connection_mgr.nick()).len();
+        let available = width.saturating_sub(prompt_len);
+        self.view.update_input_scroll(available);
+
+        // Render input line at the bottom and position the terminal cursor.
+        let cursor_col = self.render_input_line(renderer.back_buffer());
+        let input_row = renderer.height().saturating_sub(1);
+        renderer.set_cursor(cursor_col, input_row);
 
         renderer.flush()
     }
@@ -1105,11 +1113,13 @@ impl App {
     }
 
     /// Render the input line into the screen buffer.
-    fn render_input_line(&self, buf: &mut Buffer) {
+    ///
+    /// Returns the screen column where the terminal cursor should be placed (0-based).
+    fn render_input_line(&self, buf: &mut Buffer) -> u16 {
         let width = buf.width();
         let height = buf.height();
         if height == 0 || width == 0 {
-            return;
+            return 0;
         }
 
         let input_row = height - 1;
@@ -1135,6 +1145,21 @@ impl App {
         #[allow(clippy::cast_possible_truncation)]
         let prompt_col = prompt_len as u16; // prompt_len is at most width (u16), so truncation is safe
         buf.write_str(prompt_col, input_row, &visible_text, style);
+
+        // Clear remaining columns of the input row to erase stale characters
+        // left over from a longer previous frame (e.g. after backspace).
+        #[allow(clippy::cast_possible_truncation)]
+        let text_end_col = prompt_col + visible_text.chars().count() as u16;
+        let remaining = width.saturating_sub(text_end_col);
+        if remaining > 0 {
+            buf.clear_region(text_end_col, input_row, remaining, 1, style);
+        }
+
+        // Compute the screen column the cursor should occupy.
+        let cursor_offset = line.cursor_position().saturating_sub(line.scroll_offset());
+        #[allow(clippy::cast_possible_truncation)]
+        let cursor_col = (prompt_col + cursor_offset as u16).min(width.saturating_sub(1));
+        cursor_col
     }
 
     /// Get the current channel name for command context, if the active buffer
